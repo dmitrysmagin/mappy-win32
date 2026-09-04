@@ -17,6 +17,8 @@
 #include "compat.h"
 #include "mapdefs.h"
 
+int IMLoadImage24 (char * imname, unsigned char ** out, int * iw, int * ih);
+
 #define MAPVERH 1
 #define MAPVERL 0
 #define BKDTMEM (32768*32)
@@ -155,6 +157,7 @@ short int sheight, swidth, sdepth, merror, mapwidth, mapheight, strtstr, strtblk
 short int blockwidth, blockheight, blockdepth, blockstrsize, animspd, gridon, zoomon, maplayer;
 short int xmapoffset, ymapoffset, span, numblockstr, numblockgfx, numblockanim, numbrushes;
 short int curstr, curanim, oldxoff, oldyoff, oldblockx, oldblocky, curbrsh, revealanims, pastebrushnt;
+int brushhandle = 0;	/* paste origin corner: 0=TL 1=TR 2=BL 3=BR */
 long int bgcolour, fgcolour, curplacetile;
 /* new for V1.23 */
 int mapislsb, maptype;
@@ -2282,10 +2285,11 @@ int i, j, istrt, iend, iadd, jstrt, jend, jadd;
 */
 }
 
+static void RotRect24 (unsigned char * destpt, int xoff, int yoff, int linesize, int rot);
+
 void Onionto24 (int x, int y, unsigned char * destpt, int xoff, int yoff, int linesize, int olayer)
 {
-int i, isop;
-long int * templpt;
+int i, isop;long int * templpt;
 short int * mymappt;
 unsigned char * srcpt;
 BLKSTR * blkdatapt;
@@ -2361,6 +2365,8 @@ ANISTR * myanpt;
 		if (blkdatapt->fgoff3) {
 			OverBlock (srcpt+(blkdatapt->fgoff3), destpt, xoff, yoff, linesize, 0);
 		}
+		if (rotatedtiles && blkdatapt->user7>=1 && blkdatapt->user7<=3)
+			RotRect24 (destpt, xoff, yoff, linesize, blkdatapt->user7);
 		}
 	} else {
 		destpt += (xoff*3)+(yoff*linesize);
@@ -2387,7 +2393,7 @@ int l;
 
 void Overlayto24 (int x, int y, unsigned char * destpt, int xoff, int yoff, int linesize, int olayer)
 {
-int i, isop;
+int i, isop, rotu7;
 long int * templpt;
 short int * mymappt;
 unsigned char * srcpt;
@@ -2406,6 +2412,7 @@ ANISTR * myanpt;
 		else { myanpt = (ANISTR *) ((animstrpt+ANDTMEM)+(*mymappt));
 			templpt = (long int *) ((animstrpt+ANDTMEM)+(myanpt->anstartoff)); templpt--;
 			blkdatapt = (BLKSTR *) (blockstrpt + (*templpt)); }
+		rotu7 = (rotatedtiles && blkdatapt->user7>=1 && blkdatapt->user7<=3) ? blkdatapt->user7 : 0;
 
 		if (blkdatapt->bgoff) {
 			OverBlock (srcpt+(blkdatapt->bgoff), destpt, xoff, yoff, linesize, 0);
@@ -2452,6 +2459,7 @@ ANISTR * myanpt;
 				OverBlock (srcpt+(blkdatapt->fgoff3), destpt, xoff, yoff, linesize, isop);
 			}
 		}
+		if (rotu7 && !isopillars) RotRect24 (destpt, xoff, yoff, linesize, rotu7);
 	} else {
 		destpt += (xoff*3)+(yoff*linesize);
 		for (i=0;i<blockheight;i++) {
@@ -2459,6 +2467,57 @@ ANISTR * myanpt;
 			destpt += linesize;
 		}
 	}
+}
+
+/* RotRect24: USER7 rotation for rotatedtiles mode (1=90, 2=180, 3=270).
+ * Operates on the rendered 24-bit tile rect in place. 90/270 need square tiles. */
+static void RotRect24 (unsigned char * destpt, int xoff, int yoff, int linesize, int rot)
+{
+int w = blockwidth, h = blockheight, x, y;
+unsigned char * tmp, * sp, * dp;
+unsigned char t0, t1, t2;
+
+	if (rot==2) {
+		tmp = malloc (w*3);
+		if (tmp==NULL) return;
+		for (y=0;y<h/2;y++) {
+			unsigned char * ra = destpt+((yoff+y)*linesize)+(xoff*3);
+			unsigned char * rb = destpt+((yoff+h-1-y)*linesize)+(xoff*3);
+			memcpy (tmp, ra, w*3);
+			for (x=0;x<w;x++) {
+				ra[x*3] = rb[(w-1-x)*3]; ra[x*3+1] = rb[(w-1-x)*3+1]; ra[x*3+2] = rb[(w-1-x)*3+2];
+			}
+			for (x=0;x<w;x++) {
+				rb[x*3] = tmp[(w-1-x)*3]; rb[x*3+1] = tmp[(w-1-x)*3+1]; rb[x*3+2] = tmp[(w-1-x)*3+2];
+			}
+		}
+		if (h&1) {
+			unsigned char * rm = destpt+((yoff+h/2)*linesize)+(xoff*3);
+			for (x=0;x<w/2;x++) {
+				t0 = rm[x*3]; t1 = rm[x*3+1]; t2 = rm[x*3+2];
+				rm[x*3] = rm[(w-1-x)*3]; rm[x*3+1] = rm[(w-1-x)*3+1]; rm[x*3+2] = rm[(w-1-x)*3+2];
+				rm[(w-1-x)*3] = t0; rm[(w-1-x)*3+1] = t1; rm[(w-1-x)*3+2] = t2;
+			}
+		}
+		free (tmp);
+		return;
+	}
+	if (w!=h) return;
+	tmp = malloc (w*h*3);
+	if (tmp==NULL) return;
+	sp = destpt+(yoff*linesize)+(xoff*3);
+	for (y=0;y<h;y++) {
+		for (x=0;x<w;x++) {
+			if (rot==1) dp = tmp+((y*w+x)*3), sp = destpt+((yoff+h-1-x)*linesize)+((xoff+y)*3);
+			else dp = tmp+((y*w+x)*3), sp = destpt+((yoff+x)*linesize)+((xoff+w-1-y)*3);
+			dp[0] = sp[0]; dp[1] = sp[1]; dp[2] = sp[2];
+		}
+	}
+	sp = destpt+(yoff*linesize)+(xoff*3);
+	for (y=0;y<h;y++) {
+		memcpy (sp+y*linesize, tmp+y*w*3, w*3);
+	}
+	free (tmp);
 }
 
 void Blockto24 (int x, int y, unsigned char * destpt, int xoff, int yoff, int linesize)
@@ -2497,6 +2556,8 @@ ANISTR * myanpt;
 		if (blkdatapt->fgoff3) {
 			OverBlock (srcpt+(blkdatapt->fgoff3), destpt, xoff, yoff, linesize, isop);
 		}
+		if (rotatedtiles && blkdatapt->user7>=1 && blkdatapt->user7<=3)
+			RotRect24 (destpt, xoff, yoff, linesize, blkdatapt->user7);
 	} else {
 		destpt += (xoff*3)+(yoff*linesize);
 		for (i=0;i<blockheight;i++) {
@@ -2534,6 +2595,8 @@ BLKSTR * blkdatapt;
 				DrawBlock (srcpt+(blkdatapt->fgoff3), destpt, xoff, yoff, linesize, isop);
 				break;
 		}
+		if (rotatedtiles && blkdatapt->user7>=1 && blkdatapt->user7<=3)
+			RotRect24 (destpt, xoff, yoff, linesize, blkdatapt->user7);
 	}
 }
 
@@ -2679,17 +2742,29 @@ short int * mybrshpt;
 		if (brshpt[curbrsh-1]==NULL) return;
 		mybrshpt = brshpt[curbrsh-1];
 		k = (int) *mybrshpt; mybrshpt++; l = (int) *mybrshpt; mybrshpt++;
-		if ((xoff+k)<0 || (xoff+k)>mapwidth) return;
-		if ((yoff+l)<0 || (yoff+l)>mapheight) return;
-		while (l) {
-			mymap2pt = mymappt;
-			m = k; while (k) {
-				logit ("X=%d, Y=%d, val=%d\n", k, l, *mybrshpt);
-				if (*mybrshpt || pastebrushnt) *mymappt = *mybrshpt;
-				mymappt++; mybrshpt++; k--;
+		/* brush handle: paste origin corner */
+		{
+			int ox = xoff, oy = yoff, sx = 0, sy = 0, ex = k, ey = l, bw = k;
+			short int * srcpt;
+			if (brushhandle==1) ox = xoff-k+1;
+			else if (brushhandle==2) oy = yoff-l+1;
+			else if (brushhandle==3) { ox = xoff-k+1; oy = yoff-l+1; }
+			/* paste off edges: clip to map */
+			if (ox<0) { sx = -ox; ox = 0; }
+			if (oy<0) { sy = -oy; oy = 0; }
+			if (ox+k>mapwidth) ex = mapwidth-ox;
+			if (oy+l>mapheight) ey = mapheight-oy;
+			if (ex<=sx || ey<=sy) return;
+			mymappt = mappt+(ox+(oy*mapwidth));
+			srcpt = mybrshpt+(sy*bw)+sx;
+			for (;sy<ey;sy++) {
+				mymap2pt = mymappt;
+				for (m=sx;m<ex;m++) {
+					if (srcpt[m-sx] || pastebrushnt) mymappt[m-sx] = srcpt[m-sx];
+				}
+				mymappt = mymap2pt; mymappt += mapwidth;
+				srcpt += bw;
 			}
-			mymappt = mymap2pt; mymappt += mapwidth;
-			l--; k = m;
 		}
 	} else { if (curanim==-1) { *mymappt = curstr;
 	} }
@@ -2770,6 +2845,225 @@ int i;
 		if (brshpt[i]!=NULL) { free (brshpt[i]); brshpt[i] = NULL; }
 		strcpy (brshname[i], "Brush");
 	}
+}
+
+/* pixel channel helpers for resampling (all depths) */
+static void HV_pix2rgb (unsigned char * p, int * r, int * g, int * b)
+{
+	if (blockdepth==8) { *r = cmappt[(*p)*3]; *g = cmappt[(*p)*3+1]; *b = cmappt[(*p)*3+2]; }
+	else if (blockdepth==15) { *r = ((p[1]&0x1F)<<3); *g = ((((p[0]&0x3)<<3)|(p[1]>>5)))<<3; *b = (p[0]&0xFC)<<1; }
+	else if (blockdepth==16) { *r = ((p[1]&0x1F)<<3); *g = ((((p[0]&0x7)<<3)|(p[1]>>5)))<<2; *b = (p[0]&0xF8); }
+	else if (blockdepth==32) { *r = p[1]; *g = p[2]; *b = p[3]; }
+	else { *r = p[2]; *g = p[1]; *b = p[0]; }
+}
+
+static void HV_rgb2pix (unsigned char * p, int r, int g, int b)
+{
+	if (blockdepth==8) {
+		int bi, bd = 1<<30, bv = 0;
+		for (bi=0;bi<256;bi++) {
+			int dr = cmappt[bi*3]-r, dg = cmappt[bi*3+1]-g, db = cmappt[bi*3+2]-b;
+			int dd = dr*dr+dg*dg+db*db;
+			if (dd<bd) { bd = dd; bv = bi; }
+		}
+		*p = (unsigned char) bv;
+	}
+	else if (blockdepth==15) { p[0] = ((g>>3)&0x3)|((b)&0xFC); p[1] = ((r>>3)&0x1F)|(((g>>5)&0x7)<<5); }
+	else if (blockdepth==16) { p[0] = ((g>>5)&0x7)|((b)&0xF8); p[1] = ((r>>3)&0x1F)|(((g>>2)&0x7)<<5); }
+	else if (blockdepth==32) { p[0] = 0; p[1] = r; p[2] = g; p[3] = b; }
+	else { p[0] = b; p[1] = g; p[2] = r; }
+}
+
+/* Halve block dimensions (warn: destroys brushes). Averages 2x2 pixels. */
+int HalveBlockDims (void)
+{
+int g, x, y, bpp, nw, nh;
+unsigned char * ngfx, * sp;
+int r[4], gg[4], b[4];
+
+	if (blockgfxpt==NULL || numblockgfx<=0) return -1;
+	if ((blockwidth&1) || (blockheight&1) || blockwidth<2 || blockheight<2) return -1;
+	bpp = (blockdepth+1)/8;
+	nw = blockwidth/2; nh = blockheight/2;
+	ngfx = malloc (numblockgfx*nw*nh*bpp);
+	if (ngfx==NULL) return -1;
+	for (g=0;g<numblockgfx;g++) {
+		for (y=0;y<nh;y++) {
+			for (x=0;x<nw;x++) {
+				int k;
+				for (k=0;k<4;k++) {
+					sp = (unsigned char *) blockgfxpt+(g*blockwidth*blockheight*bpp)+
+						(((y*2)+(k/2))*blockwidth+(x*2)+(k%2))*bpp;
+					HV_pix2rgb (sp, &r[k], &gg[k], &b[k]);
+				}
+				HV_rgb2pix (ngfx+(g*nw*nh+y*nw+x)*bpp,
+					(r[0]+r[1]+r[2]+r[3]+2)/4, (gg[0]+gg[1]+gg[2]+gg[3]+2)/4, (b[0]+b[1]+b[2]+b[3]+2)/4);
+			}
+		}
+	}
+	free (blockgfxpt); blockgfxpt = (char *) ngfx;
+	blockwidth = nw; blockheight = nh;
+	if (!(blockgapx&1)) blockgapx /= 2;
+	if (!(blockgapy&1)) blockgapy /= 2;
+	if (!(blockstaggerx&1)) blockstaggerx /= 2;
+	if (!(blockstaggery&1)) blockstaggery /= 2;
+	DestroyAllBrushes ();
+	mapaltered = 1;
+	return 0;
+}
+
+/* Convert 16x16 map to 8x8 (GBA): each block becomes 4, map doubles. */
+int Convert16to8 (void)
+{
+int g, q, x, y, bpp;
+int nng, nns;
+unsigned char * ngfx;
+char * nstr;
+short int * nlay[MAXMAPLAYERS];
+BLKSTR * sb, * db;
+int qox[4] = { 0, 8, 0, 8 }, qoy[4] = { 0, 0, 8, 8 };
+
+	if (blockwidth!=16 || blockheight!=16) return -1;
+	if (blockgfxpt==NULL || blockstrpt==NULL || mappt==NULL) return -1;
+	if (animstrpt!=NULL) return -2; /* anims reference block offsets */
+	if (numblockgfx>1024 || numblockstr>7500) return -1;
+	bpp = (blockdepth+1)/8;
+	nng = numblockgfx*4; nns = numblockstr*4;
+	ngfx = malloc (nng*8*8*bpp);
+	nstr = malloc (nns*BLOCKSTRSIZE);
+	if (ngfx==NULL || nstr==NULL) { if (ngfx) free (ngfx); if (nstr) free (nstr); return -1; }
+	for (g=0;g<numblockgfx;g++) {
+		for (q=0;q<4;q++) {
+			for (y=0;y<8;y++) {
+				memcpy (ngfx+((g*4+q)*64+y*8)*bpp,
+					blockgfxpt+(g*256+(qoy[q]+y)*16+qox[q])*bpp, 8*bpp);
+			}
+		}
+	}
+	for (g=0;g<numblockstr;g++) {
+		sb = (BLKSTR *) (blockstrpt+g*BLOCKSTRSIZE);
+		for (q=0;q<4;q++) {
+			int gg;
+			db = (BLKSTR *) (nstr+(g*4+q)*BLOCKSTRSIZE);
+			memcpy (db, sb, BLOCKSTRSIZE);
+			gg = (int) sb->bgoff/(16*16*bpp);
+			db->bgoff = (gg*4+q)*64*bpp;
+			gg = (int) sb->fgoff/(16*16*bpp);
+			db->fgoff = (gg*4+q)*64*bpp;
+			gg = (int) sb->fgoff2/(16*16*bpp);
+			db->fgoff2 = (gg*4+q)*64*bpp;
+			gg = (int) sb->fgoff3/(16*16*bpp);
+			db->fgoff3 = (gg*4+q)*64*bpp;
+		}
+	}
+	for (g=0;g<MAXMAPLAYERS;g++) {
+		short int * ol = mapmappt[g];
+		short int * nl;
+		if (ol==NULL) { nlay[g] = NULL; continue; }
+		nl = malloc (mapwidth*2*mapheight*2*2);
+		if (nl==NULL) {
+			int h; for (h=0;h<g;h++) if (nlay[h]) free (nlay[h]);
+			free (ngfx); free (nstr); return -1;
+		}
+		for (y=0;y<mapheight;y++) {
+			for (x=0;x<mapwidth;x++) {
+				int s = ol[x+y*mapwidth];
+				if (s<0) {
+					nl[(x*2)+(y*2)*mapwidth*2] = s;
+					nl[(x*2+1)+(y*2)*mapwidth*2] = s;
+					nl[(x*2)+(y*2+1)*mapwidth*2] = s;
+					nl[(x*2+1)+(y*2+1)*mapwidth*2] = s;
+				} else {
+					nl[(x*2)+(y*2)*mapwidth*2] = s*4;
+					nl[(x*2+1)+(y*2)*mapwidth*2] = s*4+1;
+					nl[(x*2)+(y*2+1)*mapwidth*2] = s*4+2;
+					nl[(x*2+1)+(y*2+1)*mapwidth*2] = s*4+3;
+				}
+			}
+		}
+		nlay[g] = nl;
+	}
+	for (g=0;g<MAXMAPLAYERS;g++) {
+		if (mapmappt[g]) free (mapmappt[g]);
+		mapmappt[g] = nlay[g];
+	}
+	mappt = mapmappt[maplayer];
+	free (blockgfxpt); blockgfxpt = (char *) ngfx;
+	free (blockstrpt); blockstrpt = nstr;
+	numblockgfx = nng; numblockstr = nns;
+	mapwidth *= 2; mapheight *= 2;
+	blockwidth = 8; blockheight = 8; blockgapx = 8; blockgapy = 8;
+	if (curstr>=numblockstr) curstr = numblockstr-1;
+	DestroyAllBrushes ();
+	mapaltered = 1;
+	return 0;
+}
+
+/* Create map from big picture (append as new layer): best-match each
+ * map-sized cell of the image against block BG graphics. Image pixels
+ * must equal map pixels exactly. */
+int BigPictureToLayer (char * imgname)
+{
+unsigned char * img = NULL;
+int iw, ih, x, y, g, s;
+unsigned char * cache;
+int * g2s;
+int nl, best, bi;
+long bestd, dd;
+int mwpx = mapwidth*blockwidth, mhpx = mapheight*blockheight;
+
+	if (mappt==NULL || blockgfxpt==NULL || blockstrpt==NULL) return -1;
+	if (blockstaggerx || blockstaggery) return -1;
+	if (IMLoadImage24 (imgname, &img, &iw, &ih)) return -1;
+	if (iw!=mwpx || ih!=mhpx) { free (img); return -2; }
+	if (numblockgfx<=0 || numblockgfx>4096) { free (img); return -1; }
+	if ((long) numblockgfx*blockwidth*blockheight*3 > 64*1024*1024) { free (img); return -1; }
+	cache = malloc (numblockgfx*blockwidth*blockheight*3);
+	g2s = malloc (numblockgfx*sizeof (int));
+	if (cache==NULL || g2s==NULL) {
+		if (cache!=NULL) free (cache);
+		if (g2s!=NULL) free (g2s);
+		free (img); return -1;
+	}
+	for (g=0;g<numblockgfx;g++) {
+		BlockGfxto24 (g, cache+g*blockwidth*blockheight*3, 0, 0, blockwidth*3);
+		g2s[g] = -1;
+	}
+	for (s=0;s<numblockstr;s++) {
+		BLKSTR * bp = (BLKSTR *) (blockstrpt+s*BLOCKSTRSIZE);
+		g = (int) bp->bgoff/(blockwidth*blockheight*((blockdepth+1)/8));
+		if (g>=0 && g<numblockgfx && g2s[g]<0) g2s[g] = s;
+	}
+	nl = CreateMapLayer ();
+	if (nl<0) { free (cache); free (g2s); free (img); return -1; }
+	for (y=0;y<mapheight;y++) {
+		for (x=0;x<mapwidth;x++) {
+			bestd = (long) 1<<62; bi = 0; best = 0;
+			for (g=0;g<numblockgfx;g++) {
+				int px, py;
+				unsigned char * gp = cache+g*blockwidth*blockheight*3;
+				dd = 0;
+				for (py=0;py<blockheight;py++) {
+					/* loader is bottom-up: map row y=0 is image top */
+					unsigned char * ip = img+(((mhpx-1-(y*blockheight+py))*mwpx)+(x*blockwidth))*3;
+					for (px=0;px<blockwidth;px++) {
+						int dr = (int) ip[px*3+2]-gp[(py*blockwidth+px)*3+2];
+						int dg = (int) ip[px*3+1]-gp[(py*blockwidth+px)*3+1];
+						int db = (int) ip[px*3]-gp[(py*blockwidth+px)*3];
+						dd += dr*dr+dg*dg+db*db;
+						if (dd>=bestd) break;
+					}
+					if (dd>=bestd) break;
+				}
+				if (dd<bestd) { bestd = dd; best = g; }
+			}
+			bi = (best>=0 && g2s[best]>=0) ? g2s[best] : 0;
+			mapmappt[nl][x+y*mapwidth] = bi;
+		}
+	}
+	free (cache); free (g2s); free (img);
+	mapaltered = 1;
+	return nl;
 }
 
 void NewBlock (void)

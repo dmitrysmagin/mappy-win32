@@ -10,9 +10,355 @@ extern short int blockwidth, blockheight, blockdepth, numblockgfx, numblockstr;
 extern long int fgcolour;
 extern char * blockgfxpt, * blockstrpt;
 extern char * altgfxpt;
+/* import.c */
+#define  STRICT
+#include <windows.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <setjmp.h>
+#include "mapwin.h"
+
+extern short int blockwidth, blockheight, blockdepth, numblockgfx, numblockstr;
+extern long int fgcolour;
+extern char * blockgfxpt, * blockstrpt;
+extern char * altgfxpt;
 extern unsigned char * cmappt;
 
 int imskip = 1;
+
+void decode_pcx (unsigned char * mempt, int memend, unsigned char * tomempt, int width, int height, int bpp, int pitch);
+
+/* ---- runtime libpng bridge (mapwin.lst: LIBPNG13.DLL -> LIBPNG12.DLL,
+ * png_* resolved with GetProcAddress, "Loadlib failed" if neither loads) ---- */
+typedef void * png_structp_;
+typedef void * png_infop_;
+typedef unsigned int png_uint_32_;
+typedef struct { unsigned char red, green, blue; } png_color_;
+typedef png_color_ * png_colorp_;
+typedef unsigned char * png_bytep_;
+typedef unsigned char ** png_bytepp_;
+typedef void (*png_error_ptr_)(png_structp_, const char *);
+
+typedef int (*png_sig_cmp_fn)(unsigned char *, unsigned long, unsigned long);
+typedef void * (*png_create_read_struct_fn)(const char *, void *, void *, void *);
+typedef void * (*png_create_info_struct_fn)(void *);
+typedef void (*png_init_io_fn)(void *, void *);
+typedef void (*png_set_sig_bytes_fn)(void *, int);
+typedef void (*png_read_png_fn)(void *, void *, unsigned int, void *);
+typedef void (*png_get_IHDR_fn)(void *, void *, png_uint_32_ *, png_uint_32_ *,
+	int *, int *, int *, int *, int *);
+typedef void (*png_get_PLTE_fn)(void *, void *, png_colorp_ *, int *);
+typedef png_bytepp_ (*png_get_rows_fn)(void *, void *);
+typedef void (*png_destroy_read_struct_fn)(void **, void **, void **);
+
+/* libpng transform flags (png.h) */
+#define PNG_TR_STRIP_16 0x0001
+#define PNG_TR_PACKING 0x0004
+#define PNG_TR_EXPAND 0x0010
+#define PNG_TR_BGR 0x0080
+#define PNG_TR_STRIP_ALPHA 0x0002
+
+static jmp_buf png_jmp;
+static void png_err_fn (void * p, const char * m) { (void) p; (void) m; longjmp (png_jmp, 1); }
+static void png_warn_fn (void * p, const char * m) { (void) p; (void) m; }
+
+/* Decode PNG into a BMP-layout buffer (14 + 40 + palette + bottom-up pixels).
+ * Supports 4/8/24/32-bit PNGs. Returns 0 ok, -1 on error. */
+static int IMDecodePNG (const char * fname, unsigned char ** outbuf, long * outsize)
+{
+FILE * fpt;
+unsigned char sig[8];
+HMODULE hpng;
+png_sig_cmp_fn p_sig_cmp;
+png_create_read_struct_fn p_create_read;
+png_create_info_struct_fn p_create_info;
+png_init_io_fn p_init_io;
+png_set_sig_bytes_fn p_set_sig;
+png_read_png_fn p_read_png;
+png_get_IHDR_fn p_get_IHDR;
+png_get_PLTE_fn p_get_PLTE;
+png_get_rows_fn p_get_rows;
+png_destroy_read_struct_fn p_destroy;
+void * png_ptr, * info_ptr;
+png_uint_32_ w, h;
+int bitdepth, colortype, interlace, compr, filt;
+png_bytepp_ rows;
+int npal;
+png_colorp_ pal;
+int ispal, i, x;
+long rowbytes, padrow, imgsize, palbytes, hdrsize, total;
+unsigned char * buf, * dp;
+BITMAPFILEHEADER * bfh;
+BITMAPINFOHEADER * bih;
+RGBQUAD * rq;
+
+	fpt = fopen (fname, "rb");
+	if (fpt==NULL) return -1;
+	if (fread (sig, 1, 8, fpt)!=8) { fclose (fpt); return -1; }
+
+	hpng = LoadLibrary ("LIBPNG13.DLL");
+	if (hpng==NULL) hpng = LoadLibrary ("LIBPNG12.DLL");
+	if (hpng==NULL) {
+		fclose (fpt);
+		MessageBox (NULL, "PNG import needs LIBPNG12.DLL (or LIBPNG13.DLL) and it could not be loaded.\nConvert the image to BMP or PCX first.", "Map Editor: Import", MB_OK|MB_ICONINFORMATION);
+		return -1;
+	}
+	p_sig_cmp = (png_sig_cmp_fn) GetProcAddress (hpng, "png_sig_cmp");
+	p_create_read = (png_create_read_struct_fn) GetProcAddress (hpng, "png_create_read_struct");
+	p_create_info = (png_create_info_struct_fn) GetProcAddress (hpng, "png_create_info_struct");
+	p_init_io = (png_init_io_fn) GetProcAddress (hpng, "png_init_io");
+	p_set_sig = (png_set_sig_bytes_fn) GetProcAddress (hpng, "png_set_sig_bytes");
+	p_read_png = (png_read_png_fn) GetProcAddress (hpng, "png_read_png");
+	p_get_IHDR = (png_get_IHDR_fn) GetProcAddress (hpng, "png_get_IHDR");
+	p_get_PLTE = (png_get_PLTE_fn) GetProcAddress (hpng, "png_get_PLTE");
+	p_get_rows = (png_get_rows_fn) GetProcAddress (hpng, "png_get_rows");
+	p_destroy = (png_destroy_read_struct_fn) GetProcAddress (hpng, "png_destroy_read_struct");
+	if (!p_sig_cmp || !p_create_read || !p_create_info || !p_init_io || !p_set_sig ||
+		!p_read_png || !p_get_IHDR || !p_get_PLTE || !p_get_rows || !p_destroy) {
+		fclose (fpt); FreeLibrary (hpng); return -1;
+	}
+
+	if (p_sig_cmp (sig, 0, 8)) { fclose (fpt); FreeLibrary (hpng); return -1; }
+
+	if (setjmp (png_jmp)) {
+		fclose (fpt); FreeLibrary (hpng); return -1;
+	}
+	png_ptr = p_create_read ("1.2.24", NULL, png_err_fn, png_warn_fn);
+	if (png_ptr==NULL) { fclose (fpt); FreeLibrary (hpng); return -1; }
+	info_ptr = p_create_info (png_ptr);
+	if (info_ptr==NULL) { p_destroy (&png_ptr, NULL, NULL); fclose (fpt); FreeLibrary (hpng); return -1; }
+	p_init_io (png_ptr, fpt);
+	p_set_sig (png_ptr, 8);
+	p_read_png (png_ptr, info_ptr, PNG_TR_PACKING|PNG_TR_STRIP_16, NULL);
+	p_get_IHDR (png_ptr, info_ptr, &w, &h, &bitdepth, &colortype, &interlace, &compr, &filt);
+	rows = p_get_rows (png_ptr, info_ptr);
+	if (rows==NULL || w==0 || h==0 || w>8192 || h>8192) {
+		p_destroy (&png_ptr, &info_ptr, NULL); fclose (fpt); FreeLibrary (hpng); return -1;
+	}
+
+	ispal = (colortype==3);
+	if (ispal) {
+		palbytes = 256*4; hdrsize = 14+40+palbytes; padrow = (w+3)&(~3L);
+	} else {
+		palbytes = 0; hdrsize = 14+40; padrow = ((w*3)+3)&(~3L);
+	}
+	imgsize = padrow*h;
+	total = hdrsize+imgsize;
+	buf = malloc (total);
+	if (buf==NULL) { p_destroy (&png_ptr, &info_ptr, NULL); fclose (fpt); FreeLibrary (hpng); return -1; }
+	memset (buf, 0, total);
+
+	bfh = (BITMAPFILEHEADER *) buf;
+	bfh->bfType = 19778;
+	bfh->bfSize = total;
+	bfh->bfOffBits = hdrsize;
+	bih = (BITMAPINFOHEADER *) (buf+14);
+	bih->biSize = 40;
+	bih->biWidth = w; bih->biHeight = h;
+	bih->biPlanes = 1; bih->biBitCount = ispal ? 8 : 24;
+	bih->biCompression = BI_RGB;
+	bih->biSizeImage = imgsize;
+	if (ispal) { bih->biClrUsed = 256; }
+	rq = (RGBQUAD *) (buf+14+40);
+	if (ispal) {
+		p_get_PLTE (png_ptr, info_ptr, &pal, &npal);
+		for (i=0;i<256;i++) {
+			if (pal!=NULL && i<npal) {
+				rq[i].rgbRed = pal[i].red; rq[i].rgbGreen = pal[i].green; rq[i].rgbBlue = pal[i].blue;
+			} else { rq[i].rgbRed = rq[i].rgbGreen = rq[i].rgbBlue = 0; }
+			rq[i].rgbReserved = 0;
+		}
+		if (cmappt!=NULL) {
+			for (i=0;i<256;i++) {
+				if (pal!=NULL && i<npal) {
+					cmappt[i*3] = pal[i].red; cmappt[i*3+1] = pal[i].green; cmappt[i*3+2] = pal[i].blue;
+				} else { cmappt[i*3] = cmappt[i*3+1] = cmappt[i*3+2] = 0; }
+			}
+		}
+	}
+	dp = buf+hdrsize;
+	rowbytes = ispal ? (long) w : (long) (w*3);
+	/* libpng rows are RGB(A)/gray; BMP wants BGR bottom-up.
+	 * channels derived from colour type (0=gray, 2=RGB, 3=pal, 4=gray+alpha, 6=RGBA) */
+	for (i=0;i<(int)h;i++) {
+		unsigned char * src = rows[i];
+		unsigned char * dst = dp+(h-1-i)*padrow;
+		if (ispal) {
+			memcpy (dst, src, (size_t) w);
+		} else if (colortype==0) {
+			for (x=0;x<(int)w;x++) {
+				dst[x*3] = dst[x*3+1] = dst[x*3+2] = src[x];
+			}
+		} else if (colortype==4) {
+			for (x=0;x<(int)w;x++) {
+				dst[x*3] = dst[x*3+1] = dst[x*3+2] = src[x*2];
+			}
+		} else if (colortype==6) {
+			for (x=0;x<(int)w;x++) {
+				dst[x*3] = src[x*4+2]; dst[x*3+1] = src[x*4+1]; dst[x*3+2] = src[x*4];
+			}
+		} else {
+			for (x=0;x<(int)w;x++) {
+				dst[x*3] = src[x*3+2]; dst[x*3+1] = src[x*3+1]; dst[x*3+2] = src[x*3];
+			}
+		}
+		(void) rowbytes;
+	}
+
+	p_destroy (&png_ptr, &info_ptr, NULL);
+	fclose (fpt);
+	FreeLibrary (hpng);
+	*outbuf = buf; *outsize = total;
+	return 0;
+}
+
+/* ---- MAPEXT.DLL hook (mapwin.lst sub_40A6EF: LoadLibrary("MAPEXT.DLL") ->
+ * GetProcAddress("MPYDecodeBMP") -> malloc(w*h*4+0x2710) ->
+ * MPYDecodeBMP(filename, filedata, outbuf), 0 = decoded 'BM' image) ---- */
+typedef int (__stdcall *MPYDecodeBMP_fn)(const char *, unsigned char *, unsigned char *);
+
+static int IMTryMapext (const char * fname, unsigned char * filedata, int iw, int ih,
+	unsigned char ** outbuf)
+{
+HMODULE hme;
+MPYDecodeBMP_fn pdec;
+unsigned char * outb;
+
+	hme = LoadLibrary ("MAPEXT.DLL");
+	if (hme==NULL) return -1;
+	pdec = (MPYDecodeBMP_fn) GetProcAddress (hme, "MPYDecodeBMP");
+	if (pdec==NULL) { FreeLibrary (hme); return -1; }
+	outb = malloc (iw*ih*4+0x2710);
+	if (outb==NULL) { FreeLibrary (hme); return -1; }
+	if (pdec (fname, filedata, outb)) { free (outb); FreeLibrary (hme); return -1; }
+	FreeLibrary (hme);
+	if (*(unsigned short *) outb != 19778) { free (outb); return -1; }
+	*outbuf = outb;
+	return 0;
+}
+
+/* Load BMP/PCX/PNG image as bottom-up 24-bit BGR pixels (for big-picture
+ * matching). Returns 0 ok. Caller frees *out. */
+int IMLoadImage24 (char * imname, unsigned char ** out, int * iw, int * ih)
+{
+FILE * fpt;
+long filesize;
+unsigned char * fbuf, * px;
+BITMAPFILEHEADER * bfh;
+BITMAPINFOHEADER * bih;
+int w, h, topdown = 0, bpp;
+long stride, y;
+unsigned char savedpal[768];
+
+	fpt = fopen (imname, "rb");
+	if (fpt==NULL) return -1;
+	fseek (fpt, 0, SEEK_END);
+	filesize = ftell (fpt);
+	fseek (fpt, 0, SEEK_SET);
+	fbuf = malloc (filesize);
+	if (fbuf==NULL) { fclose (fpt); return -1; }
+	if (fread (fbuf, 1, filesize, fpt)!=filesize) { fclose (fpt); free (fbuf); return -1; }
+	fclose (fpt);
+
+	if (!strcmp (imname+strlen(imname)-4, ".png") ||
+		!strcmp (imname+strlen(imname)-4, ".PNG") ||
+		!strcmp (imname+strlen(imname)-4, ".Png")) {
+		unsigned char * pngbuf = NULL; long pngsize = 0;
+		if (IMDecodePNG (imname, &pngbuf, &pngsize)) { free (fbuf); return -1; }
+		free (fbuf); fbuf = pngbuf; filesize = pngsize;
+	}
+
+	bfh = (BITMAPFILEHEADER *) fbuf;
+	if (bfh->bfType==19778) {
+		bih = (BITMAPINFOHEADER *) (fbuf+sizeof (BITMAPFILEHEADER));
+		w = bih->biWidth; h = bih->biHeight;
+		if (h<0) { h = -h; topdown = 1; }
+		bpp = bih->biBitCount;
+		if (bih->biCompression != BI_RGB || (bpp!=8 && bpp!=24) ||
+			w<=0 || h<=0 || w>4096 || h>4096) { free (fbuf); return -1; }
+		px = malloc (w*h*3);
+		if (px==NULL) { free (fbuf); return -1; }
+		if (bpp==24) {
+			unsigned char * src = fbuf+bfh->bfOffBits;
+			stride = ((w*3)+3)&(~3L);
+			for (y=0;y<h;y++) {
+				unsigned char * srow = topdown ? src+(h-1-y)*stride : src+y*stride;
+				memcpy (px+y*w*3, srow, w*3);
+			}
+		} else {
+			RGBQUAD * pal = (RGBQUAD *) (((char *) bih)+bih->biSize);
+			unsigned char * src = fbuf+bfh->bfOffBits;
+			stride = (w+3)&(~3L);
+			for (y=0;y<h;y++) {
+				unsigned char * srow = topdown ? src+(h-1-y)*stride : src+y*stride;
+				int x;
+				for (x=0;x<w;x++) {
+					px[(y*w+x)*3] = pal[srow[x]].rgbBlue;
+					px[(y*w+x)*3+1] = pal[srow[x]].rgbGreen;
+					px[(y*w+x)*3+2] = pal[srow[x]].rgbRed;
+				}
+			}
+		}
+		free (fbuf);
+		*out = px; *iw = w; *ih = h;
+		return 0;
+	}
+
+	/* try PCX (8/24-bit): decode_pcx writes cmappt, save/restore it */
+	memcpy (savedpal, cmappt, 768);
+	{
+		unsigned char * mempt = fbuf;
+		unsigned char * bmdatapt;
+		int pw, ph, pbpp, pitch, x;
+		mempt += 4;
+		pw = -(((unsigned short *) mempt)[0]);
+		ph = -(((unsigned short *) mempt)[1]);
+		pw += (((unsigned short *) mempt)[2])+1;
+		ph += (((unsigned short *) mempt)[3])+1;
+		if (pw<=0 || ph<=0 || pw>4096 || ph>4096) { memcpy (cmappt, savedpal, 768); free (fbuf); return -1; }
+		mempt += 12;
+		for (x=0;x<16;x++) {
+			cmappt[x*3] = ((unsigned char *) mempt)[0];
+			cmappt[x*3+1] = ((unsigned char *) mempt)[1];
+			cmappt[x*3+2] = ((unsigned char *) mempt)[2];
+			mempt += 3;
+		}
+		pbpp = mempt[1]*8;
+		if (pbpp!=8 && pbpp!=24) { memcpy (cmappt, savedpal, 768); free (fbuf); return -1; }
+		mempt += 2;
+		pitch = ((unsigned short *) mempt)[0];
+		mempt += 62;
+		bmdatapt = malloc ((pbpp/8)*(pw+4)*ph);
+		if (bmdatapt==NULL) { memcpy (cmappt, savedpal, 768); free (fbuf); return -1; }
+		decode_pcx (mempt, filesize, bmdatapt, pw, ph, pbpp, pitch);
+		px = malloc (pw*ph*3);
+		if (px==NULL) { free (bmdatapt); memcpy (cmappt, savedpal, 768); free (fbuf); return -1; }
+		stride = ((pw*(pbpp/8))+3)&-4;
+		for (y=0;y<ph;y++) {
+			unsigned char * srow = bmdatapt+y*stride;
+			int xx;
+			if (pbpp==8) {
+				for (xx=0;xx<pw;xx++) {
+					px[(y*pw+xx)*3] = cmappt[srow[xx]*3+2];
+					px[(y*pw+xx)*3+1] = cmappt[srow[xx]*3+1];
+					px[(y*pw+xx)*3+2] = cmappt[srow[xx]*3];
+				}
+			} else {
+				for (xx=0;xx<pw;xx++) {
+					px[(y*pw+xx)*3] = srow[xx*3];
+					px[(y*pw+xx)*3+1] = srow[xx*3+1];
+					px[(y*pw+xx)*3+2] = srow[xx*3+2];
+				}
+			}
+		}
+		free (bmdatapt);
+		memcpy (cmappt, savedpal, 768);
+		free (fbuf);
+		*out = px; *iw = pw; *ih = ph;
+		return 0;
+	}
+}
 
 void decode_pcx (unsigned char * mempt, int memend, unsigned char * tomempt, int width, int height, int bpp, int pitch)
 {
@@ -116,9 +462,10 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 	if (!strcmp (imname+strlen(imname)-4, ".png") ||
 		!strcmp (imname+strlen(imname)-4, ".PNG") ||
 		!strcmp (imname+strlen(imname)-4, ".Png")) {
-		/* PNG needs LIBPNG12.DLL at runtime; not linked in this build */
-		MessageBox (NULL, "PNG import needs LIBPNG12.DLL and is not linked in this build.\nConvert the image to BMP or PCX first.", "Map Editor: Import", MB_OK|MB_ICONINFORMATION);
-		free (bmppt); return -1;
+		/* runtime libpng bridge (LIBPNG13.DLL -> LIBPNG12.DLL) */
+		unsigned char * pngbuf = NULL; long pngsize = 0;
+		if (IMDecodePNG (imname, &pngbuf, &pngsize)) { free (bmppt); return -1; }
+		free (bmppt); bmppt = pngbuf; filesize = pngsize;
 	}
 	if (!strcmp (imname+strlen(imname)-4, ".PCX") ||
 		!strcmp (imname+strlen(imname)-4, ".pcx") ||
@@ -175,7 +522,22 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 	bmihpt = (BITMAPINFOHEADER *) (bmppt + sizeof (BITMAPFILEHEADER));
 	myrgbpt = (RGBQUAD *) (((char *) bmihpt) + bmihpt->biSize);
 
-	if (bmihpt->biCompression != BI_RGB) { free (bmppt); return -1; }
+	if (bmihpt->biCompression != BI_RGB ||
+		(bmihpt->biBitCount!=8 && bmihpt->biBitCount!=24)) {
+		/* unknown/compressed graphics: MAPEXT.DLL MPYDecodeBMP hook */
+		unsigned char * mxbuf = NULL;
+		int mxw = bmihpt->biWidth, mxh = bmihpt->biHeight;
+		if (mxh<0) mxh = -mxh;
+		if (mxw<=0 || mxh<=0 || mxw>8192 || mxh>8192) { free (bmppt); return -1; }
+		if (IMTryMapext (imname, bmppt, mxw, mxh, &mxbuf)) { free (bmppt); return -1; }
+		free (bmppt); bmppt = mxbuf;
+		bfh = (BITMAPFILEHEADER *) bmppt;
+		if (bfh->bfType!=19778) { free (bmppt); return -1; }
+		bmdatapt = bmppt + bfh->bfOffBits;
+		bmihpt = (BITMAPINFOHEADER *) (bmppt + sizeof (BITMAPFILEHEADER));
+		myrgbpt = (RGBQUAD *) (((char *) bmihpt) + bmihpt->biSize);
+		if (bmihpt->biCompression != BI_RGB) { free (bmppt); return -1; }
+	}
 
 	altnumb = 0;
 	if (imstyle == -2 && bmihpt->biBitCount!=8) { free (bmppt); return -1; }

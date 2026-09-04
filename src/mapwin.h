@@ -45,6 +45,9 @@ void DestroyUnusedAnims (void);
 void InsertAnimFrame (int, int, int);
 void DestroyUnusedGraphics (void);
 int ResizeMap (int, int, int);
+int HalveBlockDims (void);
+int Convert16to8 (void);
+int BigPictureToLayer (char *);
 void MapFill (int, int, int);
 void SetTranspColour (void);
 /* mapcust prototypes */
@@ -61,6 +64,7 @@ int DIALayerGoto (HWND);
 void DIALayerRename (HWND);
 int DIAImportNumber (HWND);
 int DIAExport (HWND, char *);
+int DIAExportText (HWND, char *);
 int DIAResizeMap (HWND);
 int DIANewProject (HWND);
 int DIAEditProperties (HWND, int);
@@ -92,6 +96,7 @@ void BESetScrollRange (void);
 HWND CreateBlockEditorWindow (HWND);
 /* import.c prototypes */
 int IMImportBlocks (char *, int);
+int IMLoadImage24 (char *, unsigned char **, int *, int *);
 /* animprev.cpp prototypes */
 void APDisplayMode (char *);
 void APSetup (HWND, int);

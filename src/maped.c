@@ -67,6 +67,9 @@ extern int showuser, gridstyle, mwheelstyle, mwheelblks, thumbtrack;
 extern int divideron, dividergapx, dividergapy;
 extern long dividercol;
 extern int zoomdiv, tbarinfo, panelzoom, zmstyle, wnesmode, rotatedtiles;
+extern int mb_l, mb_m, mb_r, mb_x1, mb_x2;
+extern int key1, key2, key3, keyi, keyk, keym;
+extern int keyF[10];
 
 #include "fmp.h"
 #include "fmp14.h"
@@ -769,6 +772,56 @@ DWORD blttype;
 		free (destmempt);
 }
 
+/* Custom mousebuttons (mapwin.ini): 0 None, 1 Current block, 2 Block 0,
+ * 3 Drag map 1, 4 Drag map 2, 5 Placer.lua, 6 Pick block, 7 Lay path,
+ * 8 Fill, 9 Line, 10 Area.lua, 100+ CM_ command. List per binary table.
+ * Returns 1 if handled (caller must swallow the click), 0 to continue. */
+static int rmapped = 0;
+static int MBDoAction (int act, HWND hwnd, LPARAM lParam)
+{
+	switch (act) {
+		case 0: /* None */
+			return 1;
+		case 1: /* Current block: normal flow */
+			return 0;
+		case 2: /* Block 0: select it, then normal flow */
+			curstr = 0; curanim = -1; curbrsh = 0;
+			return 0;
+		case 3: /* Drag map 1 */
+		case 4: /* Drag map 2 (full repaint while dragging) */
+			dragmode = 1;
+			dragox = LOWORD(lParam);
+			dragoy = HIWORD(lParam);
+			dragoxoff = xmapoffset;
+			dragoyoff = ymapoffset;
+			SetCursor(LoadCursor(NULL, IDC_SIZEALL));
+			if (act==4) InvalidateRgn (mhwnd, NULL, FALSE);
+			return 1;
+		case 5: /* Placer.lua */
+		case 10: /* Area.lua */
+			MessageBox (hwnd, "This mousebutton runs a Lua script (Placer/Area).\nLua support is Stage 3 and not in this build.", "Map Editor: Mousebuttons", MB_OK|MB_ICONINFORMATION);
+			return 1;
+		case 6: /* Pick block */
+			MEPickBlock ();
+			return 1;
+		case 7: /* Lay path */
+			if (pathmode) pathmode = 0; else { pathmode = 1; linemode = 0; }
+			return 1;
+		case 8: /* Fill */
+			MEFillMap (0);
+			return 1;
+		case 9: /* Line */
+			if (linemode) linemode = 0; else { linemode = 1; pathmode = 0; }
+			return 1;
+		default:
+			if (act>=100) {
+				SendMessage (GetParent (hwnd), WM_COMMAND, act, 0);
+				return 1;
+			}
+			return 0;
+	}
+}
+
 /* ---- Tier-2 helpers ---- */
 
 static void MEBresenhamLine (int x0, int y0, int x1, int y1)
@@ -839,6 +892,7 @@ PAINTSTRUCT ps;
 		break;
 	case WM_LBUTTONDOWN:
 		if (mappt==NULL) return 0;
+		if (MBDoAction (mb_l, hwnd, lParam)) return 0;
 		xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
 		yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
 		if (linemode) {
@@ -939,6 +993,7 @@ PAINTSTRUCT ps;
 		break;
 	case WM_RBUTTONUP:
 		if (mappt==NULL) break;
+		if (rmapped) { rmapped = 0; break; }
 		MECopyToUndo ();
 		xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
 		yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
@@ -951,8 +1006,18 @@ PAINTSTRUCT ps;
 			MEShowCoords (xblk, yblk);
 		}
 		break;
+	case WM_RBUTTONDOWN:
+		if (mappt==NULL) break;
+		if (MBDoAction (mb_r, hwnd, lParam)) rmapped = 1;
+		break;
+	case WM_XBUTTONDOWN:
+	case WM_XBUTTONUP:
+		if (mappt==NULL) break;
+		MBDoAction (HIWORD(wParam)==2 ? mb_x2 : mb_x1, hwnd, lParam);
+		break;
 	case WM_MBUTTONDOWN:
 		if (mappt==NULL) break;
+		if (MBDoAction (mb_m, hwnd, lParam)) break;
 		dragmode = 1;
 		dragox = LOWORD(lParam);
 		dragoy = HIWORD(lParam);
@@ -1046,7 +1111,18 @@ PAINTSTRUCT ps;
 		break;
 	case WM_KEYDOWN:
 		if (mappt==NULL) break;
+		if (LOWORD(wParam)>=VK_F1 && LOWORD(wParam)<=VK_F10) {
+			int fn = LOWORD(wParam)-VK_F1;
+			if (keyF[fn]) SendMessage (GetParent (hwnd), WM_COMMAND, keyF[fn], 0);
+			break;
+		}
 		switch (LOWORD(wParam)) {
+			case '1': if (key1) { SendMessage (GetParent (hwnd), WM_COMMAND, key1, 0); break; } break;
+			case '2': if (key2) { SendMessage (GetParent (hwnd), WM_COMMAND, key2, 0); break; } break;
+			case '3': if (key3) { SendMessage (GetParent (hwnd), WM_COMMAND, key3, 0); break; } break;
+			case 'I': if (keyi) { SendMessage (GetParent (hwnd), WM_COMMAND, keyi, 0); break; } break;
+			case 'K': if (keyk) { SendMessage (GetParent (hwnd), WM_COMMAND, keyk, 0); break; } break;
+			case 'M': if (keym) { SendMessage (GetParent (hwnd), WM_COMMAND, keym, 0); break; } break;
 			case 'L': /* line tool */
 				if (linemode) linemode = 0; else { linemode = 1; pathmode = 0; }
 				break;

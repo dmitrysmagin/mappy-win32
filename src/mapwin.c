@@ -28,6 +28,7 @@ extern short int mapwidth, mapheight, blockwidth, blockheight, blockdepth, xmapo
 extern int maptype, blockstaggerx, blockstaggery, isopillars, flippedtiles, isoreveal, clickmask, picklayer, picklx, pickly;
 extern short int numblockstr, numblockgfx;
 extern short int gridon, zoomon;
+extern short int maplayer;
 extern short int curbrsh, curanim, pastebrushnt;
 extern short int *brshpt[MAXBRSH];
 
@@ -42,6 +43,7 @@ extern int imskip;
 extern int csvadjust;
 extern int wlayout;
 extern int wnesmode, rotatedtiles;
+extern int brushhandle;
 
 /* Tier-1 1.4 settings */
 int dobackups = 0;		/* save .BAK before overwrite */
@@ -64,6 +66,13 @@ int panelzoom = 1;		/* block window follows map zoom */
 int zmstyle = 1;		/* 0=software 1=hardware zoom */
 int zoomdiv = 1;		/* 1=x1 2=x0.5 4=x0.25 (zoomon forced 1) */
 char folder[256] = ".";		/* file dialog start folder */
+/* Custom mousebuttons (binary list: 0 None,1 Current block,2 Block 0,
+ * 3 Drag map 1,4 Drag map 2,5 Placer.lua,6 Pick block,7 Lay path,
+ * 8 Fill,9 Line,10 Area.lua; 100+ = CM_ command) */
+int mb_l = 1, mb_m = 4, mb_r = 2, mb_x1 = 0, mb_x2 = 0, mb_x3 = 0, mb_x4 = 0;
+/* Function/numeric/letter key mapping to CM_ codes (0 = unmapped) */
+int keyF[10] = { 119, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+int key1 = 123, key2 = 124, key3 = 125, keyi = 0, keyk = 0, keym = 0;
 char textexportopts[64] = "110101010000100111000000"; /* text-export defaults */
 char blocklabels[16][64] = {
 	"User data:", "U1", "U2", "U3", "U4", "U5", "U6", "U7",
@@ -368,8 +377,8 @@ FILE * marfpt;
 				if (mappt==NULL) break;
 				szFile[0] = 0; szFileTitle[0] = 0; szInitDir[0] = 0;
 				memset (szFilter, 0, sizeof (szFilter));
-				strcpy (szFilter, "Image/map array files (*.BMP;*.PCX;*.MAR)|*.bmp;*.pcx;*.mar");
-				szFilter[41] = 0;
+				strcpy (szFilter, "Image/map array files (*.BMP;*.PCX;*.PNG;*.MAR)|*.bmp;*.pcx;*.png;*.mar");
+				szFilter[47] = 0;
 				memset(&ofn, 0, sizeof(OPENFILENAME));
 
 				ofn.lStructSize = sizeof(OPENFILENAME);
@@ -405,7 +414,7 @@ FILE * marfpt;
 					hCurSave = SetCursor(LoadCursor(NULL, IDC_WAIT));
 					if (IMImportBlocks (szFile, i)) {
 						MessageBox (hwnd, "There was an error importing blocks, see the helpfile section on importing\n"
-							"Likely causes:\nBMP file is compressed\nBMP file is not the correct colour depth", "Import", MB_OK|MB_ICONEXCLAMATION);
+							"Likely causes:\nBMP file is compressed (needs MAPEXT.DLL)\nBMP file is not the correct colour depth\nPNG file and LIBPNG12/13.DLL missing", "Import", MB_OK|MB_ICONEXCLAMATION);
 						numblockgfx = oldnumblockgfx;
 					}
 					if (numblockgfx < oldnumblockgfx && i == 0) {
@@ -479,6 +488,14 @@ FILE * marfpt;
 					if (DIAExport (hwnd, mapfilename))
 						MessageBox (hwnd, "Some elements were not exported correctly!", "Exporter", MB_OK|MB_ICONEXCLAMATION);
 					} else MessageBox (hwnd, "Can't export, map's name failed sanity check (doesn't end in .FMP, see above)", mapfilename, MB_OK|MB_ICONEXCLAMATION);
+				break;
+			case CM_FILEEXTTXT:
+				if (mappt==NULL || mapfilename[0]==0) {
+					MessageBox (hwnd, "No map to export from, or map has not been named ('Save As')", "Exporter", MB_OK|MB_ICONEXCLAMATION);
+					break;
+				}
+				if (DIAExportText (hwnd, mapfilename))
+					MessageBox (hwnd, "Text export failed!", "Exporter", MB_OK|MB_ICONEXCLAMATION);
 				break;
 			case CM_FILEEXIT:
 				if (mapaltered)
@@ -641,6 +658,13 @@ FILE * marfpt;
 			case CM_BRUSH14: curbrsh = 14; RejigBrshMenu (curbrsh);	break;
 			case CM_BRUSH15: curbrsh = 15; RejigBrshMenu (curbrsh);	break;
 			case CM_BRUSH16: curbrsh = 16; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSHHANDLE:
+				brushhandle = (brushhandle+1)&3;
+				MessageBox (hwnd, brushhandle==0 ? "Brush handle: top-left" :
+					brushhandle==1 ? "Brush handle: top-right" :
+					brushhandle==2 ? "Brush handle: bottom-left" : "Brush handle: bottom-right",
+					"Brush Handle", MB_OK|MB_ICONINFORMATION);
+				break;
 			case CM_LAYER0:
 				curlayer = 0; RejigLayerMenu (curlayer);
 				break;
@@ -719,6 +743,54 @@ FILE * marfpt;
 				if (mappt==NULL) break;
 				DIALayerSlide (hwnd);
 				InvalidateAll();
+				break;
+			case CM_TOOLHALVE:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Halve block dimensions? (you will lose any brushes that exist)",
+					"Useful Functions", MB_OKCANCEL|MB_ICONQUESTION)!=IDOK) break;
+				MEDestroyUndoBuffs();
+				if (HalveBlockDims ())
+					MessageBox (hwnd, "Can't halve (need even block dimensions >= 2 and graphics loaded).", "Useful Functions", MB_OK|MB_ICONINFORMATION);
+				else Rejig ();
+				break;
+			case CM_TOOLCONV16:
+				if (mappt==NULL) break;
+				MEDestroyUndoBuffs();
+				i = Convert16to8 ();
+				if (i==-2)
+					MessageBox (hwnd, "Can't convert: remove animations first (they reference block offsets).", "Useful Functions", MB_OK|MB_ICONINFORMATION);
+				else if (i)
+					MessageBox (hwnd, "Can't convert (need 16x16 blocks, fits in 30000 structures).", "Useful Functions", MB_OK|MB_ICONINFORMATION);
+				else { curlayer = maplayer; Rejig (); }
+				break;
+			case CM_TOOLBIGPIC:
+				if (mappt==NULL) break;
+				szFile[0] = 0; szFileTitle[0] = 0; szInitDir[0] = 0;
+				memset (szFilter, 0, sizeof (szFilter));
+				strcpy (szFilter, "Images (*.BMP;*.PCX;*.PNG)|*.bmp;*.pcx;*.png");
+				szFilter[26] = 0;
+				memset(&ofn, 0, sizeof(OPENFILENAME));
+				ofn.lStructSize = sizeof(OPENFILENAME);
+				ofn.hwndOwner = hwnd;
+				ofn.lpstrFilter = szFilter;
+				ofn.nFilterIndex = 1;
+				ofn.lpstrFile= szFile;
+				ofn.nMaxFile = sizeof(szFile);
+				ofn.lpstrFileTitle = szFileTitle;
+				ofn.nMaxFileTitle = sizeof(szFileTitle);
+				ofn.lpstrInitialDir = szInitDir;
+				ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+				if (GetOpenFileName(&ofn)) {
+					MEDestroyUndoBuffs();
+					hCurSave = SetCursor(LoadCursor(NULL, IDC_WAIT));
+					i = BigPictureToLayer (szFile);
+					SetCursor(hCurSave);
+					if (i==-2)
+						MessageBox (hwnd, "Image pixels must equal map pixels exactly (mapwidth*blockwidth x mapheight*blockheight).", "Useful Functions", MB_OK|MB_ICONINFORMATION);
+					else if (i<0)
+						MessageBox (hwnd, "Can't make layer (need rectangular map, graphics loaded, max 100 layers).", "Useful Functions", MB_OK|MB_ICONINFORMATION);
+					else { curlayer = i; RejigLayerMenu (curlayer); InvalidateAll(); }
+				}
 				break;
 			case CM_HELPCONTENTS:
 				sprintf (szFile, "%sMAPWIN.HTM", defpname);
@@ -848,6 +920,10 @@ FILE * marfpt;
 		}
 		break;
 	case WM_KEYDOWN:
+		if (LOWORD(wParam)>=VK_F1 && LOWORD(wParam)<=VK_F10) {
+			int fn = LOWORD(wParam)-VK_F1;
+			if (keyF[fn]) { SendMessage (hwnd, WM_COMMAND, keyF[fn], 0); break; }
+		}
 		if (mappt==NULL) break;
 		if (GetKeyState(VK_SHIFT)<0) {
 			/* shift+arrows scroll ×10 */
@@ -871,21 +947,19 @@ FILE * marfpt;
 		{
 			char dropname[256];
 			char * dext;
+			char savename[256];
 			DragQueryFile((HDROP)wParam, 0, dropname, 255);
 			DragFinish((HDROP)wParam);
 			if (!dropname[0]) break;
 			dext = dropname+strlen(dropname)-4;
-			if (!strcmp (dext, ".png") || !strcmp (dext, ".PNG") || !strcmp (dext, ".Png")) {
-				MessageBox (hwnd, "PNG import needs LIBPNG12.DLL and is not linked in this build.\nConvert to BMP/PCX first.", "Map Editor: Import", MB_OK|MB_ICONINFORMATION);
-				break;
-			}
 			if (strcmp (dext, ".fmp") && strcmp (dext, ".FMP") && strcmp (dext, ".Fmp") &&
 				strcmp (dext, ".map") && strcmp (dext, ".MAP") && strcmp (dext, ".Map") &&
 				strcmp (dext, ".bmp") && strcmp (dext, ".BMP") && strcmp (dext, ".Bmp") &&
 				strcmp (dext, ".pcx") && strcmp (dext, ".PCX") && strcmp (dext, ".Pcx") &&
+				strcmp (dext, ".png") && strcmp (dext, ".PNG") && strcmp (dext, ".Png") &&
 				strcmp (dext, ".mar") && strcmp (dext, ".MAR") && strcmp (dext, ".Mar") &&
 				strcmp (dext, ".lua") && strcmp (dext, ".LUA") && strcmp (dext, ".Lua")) {
-				MessageBox (hwnd, "Unrecognised file type (need .FMP, .MAP, .BMP, .PCX or .MAR).\nMap name not changed.", "Map Editor", MB_OK|MB_ICONINFORMATION);
+				MessageBox (hwnd, "Unrecognised file type (need .FMP, .MAP, .BMP, .PCX, .PNG or .MAR).\nMap name not changed.", "Map Editor", MB_OK|MB_ICONINFORMATION);
 				break;
 			}
 			MEDestroyUndoBuffs();
@@ -894,6 +968,48 @@ FILE * marfpt;
 				!strcmp((mapfilename+strlen(mapfilename))-4, ".MAP") ||
 				!strcmp((mapfilename+strlen(mapfilename))-4, ".Map")) {
 				MapCustomLoad(mapfilename, hwnd);
+			} else if (!strcmp((mapfilename+strlen(mapfilename))-4, ".bmp") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".BMP") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".Bmp") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".pcx") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".PCX") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".Pcx") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".png") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".PNG") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".Png")) {
+				/* image drop: import graphics (needs a map loaded) */
+				if (mappt==NULL) {
+					MessageBox (hwnd, "Load or create a map first, then drop the image again to import it.", "Map Editor", MB_OK|MB_ICONINFORMATION);
+					break;
+				}
+				strcpy (savename, mapfilename);
+				if (IMImportBlocks (dropname, 0)) {
+					MessageBox (hwnd, "There was an error importing blocks (PNG needs LIBPNG12/13.DLL).", "Import", MB_OK|MB_ICONEXCLAMATION);
+				} else mapaltered = 1;
+				strcpy (mapfilename, savename);
+				InvalidateAll();
+				break;
+			} else if (!strcmp((mapfilename+strlen(mapfilename))-4, ".mar") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".MAR") ||
+				!strcmp((mapfilename+strlen(mapfilename))-4, ".Mar")) {
+				/* map-array drop: re-import into current layer */
+				if (mappt==NULL) {
+					MessageBox (hwnd, "Load or create a map first, then drop the .MAR again.", "Map Editor", MB_OK|MB_ICONINFORMATION);
+					break;
+				}
+				strcpy (savename, mapfilename);
+				marfpt = fopen (dropname, "rb");
+				if (marfpt!=NULL) {
+					fseek (marfpt, 0, SEEK_END);
+					i = (int) ftell (marfpt);
+					fseek (marfpt, 0, SEEK_SET);
+					if (i==(mapwidth*mapheight*2) && fread (mappt, 1, i, marfpt)==i) mapaltered = 1;
+					else MessageBox (hwnd, "Error importing map array (wrong size!).", "Importer", MB_OK|MB_ICONEXCLAMATION);
+					fclose (marfpt);
+				}
+				strcpy (mapfilename, savename);
+				InvalidateAll();
+				break;
 			} else {
 				LoadProject();
 			}
@@ -1015,6 +1131,29 @@ char * iniinfo, * inipos;
 				if (!strncmp (inipos, "folder", 6)) { i = GetEquals(inipos); { int q = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && q<250) { folder[q++] = inipos[i]; i++; } folder[q]=0; } }
 				if (!strncmp (inipos, "textexportopts", 14)) { i = GetEquals(inipos); { int q = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && q<60) { textexportopts[q++] = inipos[i]; i++; } textexportopts[q]=0; } }
 				if (!strncmp (inipos, "blockdialoguelabels", 19)) { i = GetEquals(inipos); { int bl = 0, bc = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && bl<16) { if (inipos[i]==';') { blocklabels[bl][bc]=0; bl++; bc = 0; } else if (bc<63) { blocklabels[bl][bc++] = inipos[i]; } i++; } if (bl<16) blocklabels[bl][bc]=0; } }
+				if (!strncmp (inipos, "lbutton", 7)) { i = GetEquals(inipos); mb_l = atoi (inipos+i); }
+				if (!strncmp (inipos, "mbutton", 7)) { i = GetEquals(inipos); mb_m = atoi (inipos+i); }
+				if (!strncmp (inipos, "rbutton", 7)) { i = GetEquals(inipos); mb_r = atoi (inipos+i); }
+				if (!strncmp (inipos, "xbutton1", 8)) { i = GetEquals(inipos); mb_x1 = atoi (inipos+i); }
+				if (!strncmp (inipos, "xbutton2", 8)) { i = GetEquals(inipos); mb_x2 = atoi (inipos+i); }
+				if (!strncmp (inipos, "xbutton3", 8)) { i = GetEquals(inipos); mb_x3 = atoi (inipos+i); }
+				if (!strncmp (inipos, "xbutton4", 8)) { i = GetEquals(inipos); mb_x4 = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF10", 6)) { i = GetEquals(inipos); keyF[9] = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF1=", 6)) { i = GetEquals(inipos); keyF[0] = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF2=", 6)) { i = GetEquals(inipos); keyF[1] = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF3=", 6)) { i = GetEquals(inipos); keyF[2] = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF4=", 6)) { i = GetEquals(inipos); keyF[3] = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF5=", 6)) { i = GetEquals(inipos); keyF[4] = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF6=", 6)) { i = GetEquals(inipos); keyF[5] = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF7=", 6)) { i = GetEquals(inipos); keyF[6] = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF8=", 6)) { i = GetEquals(inipos); keyF[7] = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyF9=", 6)) { i = GetEquals(inipos); keyF[8] = atoi (inipos+i); }
+				if (!strncmp (inipos, "key1", 4)) { i = GetEquals(inipos); key1 = atoi (inipos+i); }
+				if (!strncmp (inipos, "key2", 4)) { i = GetEquals(inipos); key2 = atoi (inipos+i); }
+				if (!strncmp (inipos, "key3", 4)) { i = GetEquals(inipos); key3 = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyi", 4)) { i = GetEquals(inipos); keyi = atoi (inipos+i); }
+				if (!strncmp (inipos, "keyk", 4)) { i = GetEquals(inipos); keyk = atoi (inipos+i); }
+				if (!strncmp (inipos, "keym", 4)) { i = GetEquals(inipos); keym = atoi (inipos+i); }
 				if (!strncmp (inipos, "tbarname", 8)) { i = GetEquals(inipos); { int q = 0; if (inipos[i]=='"') i++; while (inipos[i] && inipos[i]!='"' && q<62) { tbarname[q++] = inipos[i]; i++; } tbarname[q]=0; } }
 			}
 			while (inipos<(iniinfo+flength)) { if (*inipos==0x0a) break; inipos++; } inipos++;

@@ -68,6 +68,8 @@ extern long dividercol;
 extern short int maplayer;
 extern char blocklabels[16][64];
 extern int rotatedtiles, flippedtiles, isopillars;
+extern char textexportopts[64];
+extern char folder[256];
 extern int mapaltered, onion, oniondark, onionlower;
 extern char * blockstrpt, * blockgfxpt, * animstrpt, * cmappt;
 extern short int * mappt;
@@ -2735,5 +2737,267 @@ DLGPROC dlgprc;
 	DialogBox (hInstance, (LPCSTR) "D_LAYERNAME", hwnd, dlgprc);
 	FreeProcInstance((FARPROC) dlgprc);
 	return;
+}
+
+/* ---- Export textfile (1.3.26 C text export; GBA/Lua variants are Stage 3).
+ * textexportopts chars: 0 CONST,1 CMAP,2 ANIBLKSTR,3 MAPARRAY,4 BLKGFX,
+ * 5 MA2D,6 MA1D,7 MAALL,8 MASINGLE,9 MERGEFLIP,10 16COL,12 CMAPGBA,
+ * 15 RESOLVEBG,17 USEPREFIX. ---- */
+static int txf[18];
+static char txprefix[64];
+
+BOOL CALLBACK DIAExportTextProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+int i;
+static const int ids[14] = {
+	IDC_TXTCONST, IDC_TXTCMAP, IDC_TXTANIBLK, IDC_TXTMAPARR, IDC_TXTBLKGFX,
+	IDC_TXTMA2D, IDC_TXTMA1D, IDC_TXTMAALL, IDC_TXTMASINGLE, IDC_TXTMERGEFLIP,
+	IDC_TXT16COL, IDC_TXTCMAPGBA, IDC_TXTRESOLVEBG, IDC_TXTUSEPREFIX };
+static const int opti[14] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 17 };
+
+	switch (msg) {
+		case WM_INITDIALOG:
+			for (i=0;i<14;i++)
+				CheckDlgButton (hwndDlg, ids[i], textexportopts[opti[i]]=='1' ? 1 : 0);
+			SetWindowText (GetDlgItem (hwndDlg, IDC_TXTPREFIX), "mappy");
+			break;
+		case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+			case IDOK:
+				for (i=0;i<14;i++) {
+					txf[opti[i]] = IsDlgButtonChecked (hwndDlg, ids[i]) ? 1 : 0;
+					textexportopts[opti[i]] = txf[opti[i]] ? '1' : '0';
+				}
+				GetWindowText (GetDlgItem (hwndDlg, IDC_TXTPREFIX), txprefix, 63);
+				txprefix[63] = 0;
+				if (txprefix[0]==0) strcpy (txprefix, "mappy");
+				SendMessage (hwndDlg, WM_CLOSE, 0, 1L);
+				break;
+			case IDCANCEL:
+				SendMessage (hwndDlg, WM_CLOSE, 0, -1L);
+				break;
+		}
+		break;
+		case WM_CLOSE:
+			EndDialog (hwndDlg, lParam);
+			break;
+		default:
+			return 0;
+	}
+	return -1;
+}
+
+/* resolved cell value for text/CSV export */
+static int TXCellVal (short int * layer, int idx, int withstructs)
+{
+int v = layer[idx];
+BLKSTR * bp;
+
+	if (v<0) {
+		if (!withstructs && txf[15]) {
+			/* resolve anim reference frame, then use its BG */
+			ANISTR * ap = (ANISTR *) (animstrpt+ANDTMEM+v);
+			long int * tp = (long int *) (animstrpt+ANDTMEM+ap->anstartoff);
+			tp--;
+			bp = (BLKSTR *) (blockstrpt+(*tp));
+			v = (int) bp->bgoff/(blockwidth*blockheight*((blockdepth+1)/8));
+		}
+		return v+csvadjust;
+	}
+	bp = (BLKSTR *) (blockstrpt+(((int) v)*sizeof(BLKSTR)));
+	if (!withstructs || txf[15]) {
+		v = (int) bp->bgoff/(blockwidth*blockheight*((blockdepth+1)/8));
+	} else if (txf[9] && flippedtiles) {
+		/* MERGEFLIP: fold H/V flip flags into bits 14/15 */
+		if (bp->unused2) v |= 0x4000;
+		if (bp->unused3) v |= 0x8000;
+	}
+	return v+csvadjust;
+}
+
+int DIAExportText (HWND hwnd, char * name)
+{
+DLGPROC dlgprc;
+OPENFILENAME ofn;
+char szFilter[64], szFile[256], szFileTitle[256];
+char outname[300];
+FILE * fpt;
+int i, j, k, l, m, li;
+ANISTR * myanpt;
+BLKSTR * myblk;
+int * myintpt;
+unsigned char * palpt;
+short int * lay;
+char sym[128], pre[72];
+short int nlayers;
+
+	if (mappt==NULL) return -1;
+	memset (txf, 0, sizeof (txf));
+	dlgprc = (DLGPROC) MakeProcInstance (DIAExportTextProc, hInstance);
+	i = DialogBox (hInstance, (LPCSTR) "D_TXTEXP", hwnd, dlgprc);
+	FreeProcInstance((FARPROC) dlgprc);
+	if (i!=1) return 0;
+
+	strcpy (outname, name);
+	i = strlen (outname);
+	while (i>0 && outname[i]!='.' && outname[i]!='/' && outname[i]!='\\' && outname[i]!=':') i--;
+	if (outname[i]=='.') outname[i] = 0;
+	strcat (outname, ".txt");
+	memset (szFilter, 0, sizeof (szFilter));
+	strcpy (szFilter, "Text files (*.TXT)|*.txt");
+	szFilter[18] = 0;
+	strcpy (szFile, outname);
+	szFileTitle[0] = 0;
+	memset (&ofn, 0, sizeof (OPENFILENAME));
+	ofn.lStructSize = sizeof (OPENFILENAME);
+	ofn.hwndOwner = hwnd;
+	ofn.lpstrFilter = szFilter;
+	ofn.nFilterIndex = 1;
+	ofn.lpstrFile = szFile;
+	ofn.nMaxFile = sizeof (szFile);
+	ofn.lpstrFileTitle = szFileTitle;
+	ofn.nMaxFileTitle = sizeof (szFileTitle);
+	ofn.lpstrInitialDir = folder;
+	ofn.lpstrDefExt = "txt";
+	ofn.Flags = OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+	if (!GetSaveFileName (&ofn)) return 0;
+	strcpy (outname, szFile);
+
+	fpt = fopen (outname, "w");
+	if (fpt==NULL) return -1;
+	if (txf[17]) sprintf (pre, "%s_", txprefix); else pre[0] = 0;
+
+	fprintf (fpt, "/* Exported by MappyWin32 (C text export) from %s */\n\n", name);
+
+	if (txf[1] && blockdepth==8) {
+		palpt = (unsigned char *) cmappt;
+		if (txf[12]) {
+			sprintf (sym, "%smapcmap", pre);
+			fprintf (fpt, "%sunsigned short %s[256] = {\n", txf[0] ? "const " : "", sym);
+			for (j=0;j<256;j++) {
+				k = (palpt[j*3] >> 3) | ((palpt[j*3+1]>>3) << 5) | ((palpt[j*3+2]>>3) << 10);
+				if (j==255) fprintf (fpt, "0x%04X\n};\n\n", k);
+				else if (j%8==7) fprintf (fpt, "0x%04X,\n", k);
+				else fprintf (fpt, "0x%04X, ", k);
+			}
+		} else {
+			sprintf (sym, "%smapcmap", pre);
+			fprintf (fpt, "%sunsigned int %s[256] = {\n", txf[0] ? "const " : "", sym);
+			for (j=0;j<256;j++) {
+				k = (palpt[j*3]<<16) | (palpt[j*3+1]<<8) | palpt[j*3+2];
+				if (j==255) fprintf (fpt, "0x%06X\n};\n\n", k);
+				else if (j%8==7) fprintf (fpt, "0x%06X,\n", k);
+				else fprintf (fpt, "0x%06X, ", k);
+			}
+		}
+	}
+
+	if (txf[2]) {
+		sprintf (sym, "%sblockstr", pre);
+		fprintf (fpt, "%sBLKSTR %s[%d] = {\n", txf[0] ? "const " : "", sym, numblockstr);
+		myblk = (BLKSTR *) blockstrpt;
+		for (j=0;j<numblockstr;j++) {
+			l = 0; if (myblk->tl) l |= 1;
+			if (myblk->tr) l |= 2;
+			if (myblk->bl) l |= 4;
+			if (myblk->br) l |= 8;
+			if (myblk->trigger) l |= 16;
+			if (myblk->unused1) l |= 32;
+			if (myblk->unused2) l |= 64;
+			if (myblk->unused3) l |= 128;
+			fprintf (fpt, "{ %d, %d, %d, %d, ", (int) myblk->bgoff/(blockwidth*blockheight*((blockdepth+1)/8)), (int) myblk->fgoff/(blockwidth*blockheight*((blockdepth+1)/8)), (int) myblk->fgoff2/(blockwidth*blockheight*((blockdepth+1)/8)), (int) myblk->fgoff3/(blockwidth*blockheight*((blockdepth+1)/8)));
+			fprintf (fpt, "%d, %d, %d, %d, ", (int) myblk->user1, (int) myblk->user2, myblk->user3, myblk->user4);
+			if (j == (numblockstr-1)) fprintf (fpt, "%d, %d, %d, 0x%02X }\n", myblk->user5, myblk->user6, myblk->user7, l);
+			else fprintf (fpt, "%d, %d, %d, 0x%02X },\n", myblk->user5, myblk->user6, myblk->user7, l);
+			myblk++;
+		}
+		fprintf (fpt, "};\n\n");
+		if (animstrpt != NULL) {
+			InitAnims ();
+			myanpt = (ANISTR *) (animstrpt+ANDTMEM); l = 0; j = 0; k = 0; myanpt--;
+			while (myanpt->antype!=-1) { if (myanpt->anstartoff<j) j = myanpt->anstartoff; myanpt--; l++; k-=16; }
+			j -= 4; k -= 16;
+			sprintf (sym, "%sanimseq", pre);
+			fprintf (fpt, "%sint %s[%d] = {\n", txf[0] ? "const " : "", sym, (k-j)/4);
+			myintpt = (int *) (animstrpt+ANDTMEM+j);
+			m = 1; while (1) {
+				if (m == ((k-j)/4)) { fprintf (fpt, "%d", (*myintpt)/32); break; }
+				if (!(m%16)) fprintf (fpt, "%d,\n", (*myintpt)/32);
+				else fprintf (fpt, "%d, ", (*myintpt)/32);
+				myintpt++; m++;
+			}
+			fprintf (fpt, "\n};\n\n");
+			sprintf (sym, "%sanimstr", pre);
+			fprintf (fpt, "%sANISTR %s[%d] = {\n", txf[0] ? "const " : "", sym, l);
+			myanpt = (ANISTR *) (animstrpt+ANDTMEM); myanpt--;
+			while (myanpt->antype!=-1) {
+				fprintf (fpt, "{ %d, %d, %d, %d, ", (int) myanpt->antype, (int) myanpt->andelay, (int) myanpt->ancount, (int) myanpt->anuser);
+				l--; if (l)	fprintf (fpt, "%d, %d, %d },\n", (int) (myanpt->ancuroff-j)/4, (int) (myanpt->anstartoff-j)/4, (int) (myanpt->anendoff-j)/4);
+				else fprintf (fpt, "%d, %d, %d }\n", (int) (myanpt->ancuroff-j)/4, (int) (myanpt->anstartoff-j)/4, (int) (myanpt->anendoff-j)/4);
+				myanpt--;
+			}
+			fprintf (fpt, "};\n\n");
+		}
+	}
+
+	if (txf[3]) {
+		nlayers = 0;
+		for (li=0;li<MAXMAPLAYERS;li++) if (GetLayerpt (li)!=NULL) nlayers++;
+		for (li=0;li<MAXMAPLAYERS;li++) {
+			lay = GetLayerpt (li);
+			if (lay==NULL) continue;
+			if (!txf[7] && lay!=mappt) continue; /* single layer only */
+			if (txf[7] && nlayers>1) sprintf (sym, "%smaparray_L%d", pre, li);
+			else sprintf (sym, "%smaparray", pre);
+			if (txf[5]) {
+				fprintf (fpt, "%sint %s[%d][%d] = {\n", txf[0] ? "const " : "", sym, mapheight, mapwidth);
+				for (l=0;l<mapheight;l++) {
+					fprintf (fpt, "{ ");
+					for (j=0;j<mapwidth;j++) {
+						fprintf (fpt, "%d", TXCellVal (lay, j+l*mapwidth, txf[2]));
+						if (j<mapwidth-1) fprintf (fpt, ",");
+					}
+					if (l<mapheight-1) fprintf (fpt, " },\n"); else fprintf (fpt, " }\n");
+				}
+				fprintf (fpt, "};\n\n");
+			} else {
+				fprintf (fpt, "%sint %s[%d] = {\n", txf[0] ? "const " : "", sym, mapwidth*mapheight);
+				for (l=0;l<mapwidth*mapheight;l++) {
+					fprintf (fpt, "%d", TXCellVal (lay, l, txf[2]));
+					if (l<mapwidth*mapheight-1) fprintf (fpt, ",");
+					if ((l+1)%16==0) fprintf (fpt, "\n");
+				}
+				fprintf (fpt, "};\n\n");
+			}
+			if (!txf[7]) break;
+		}
+	}
+
+	if (txf[4] && numblockgfx) {
+		palpt = (unsigned char *) blockgfxpt;
+		sprintf (sym, "%sblockgfx", pre);
+		if (txf[10] && blockdepth==8) {
+			int ng = numblockgfx*blockwidth*blockheight/2;
+			fprintf (fpt, "%sunsigned char %s[%d] = {\n", txf[0] ? "const " : "", sym, ng);
+			for (j=0;j<ng;j++) {
+				k = ((palpt[j*2]&0x0F)<<4) | (palpt[j*2+1]&0x0F);
+				if (j==ng-1) fprintf (fpt, "0x%02X\n};\n\n", k);
+				else if (j%16==15) fprintf (fpt, "0x%02X,\n", k);
+				else fprintf (fpt, "0x%02X, ", k);
+			}
+		} else {
+			int ng = numblockgfx*blockwidth*blockheight*((blockdepth+1)/8);
+			fprintf (fpt, "%sunsigned char %s[%d] = {\n", txf[0] ? "const " : "", sym, ng);
+			for (j=0;j<ng;j++) {
+				if (j==ng-1) fprintf (fpt, "0x%02X\n};\n\n", palpt[j]);
+				else if (j%16==15) fprintf (fpt, "0x%02X,\n", palpt[j]);
+				else fprintf (fpt, "0x%02X, ", palpt[j]);
+			}
+		}
+	}
+
+	fclose (fpt);
+	return 0;
 }
 
