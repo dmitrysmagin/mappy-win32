@@ -1444,6 +1444,7 @@ PAINTSTRUCT ps;
 /* deliberately run into mousemove */
 	case WM_MOUSEMOVE:
 		if (mappt==NULL) return 0;
+		if (betype == BETYPE_GRAPH) return 0;
 		if (dragmode) {
 			MEDragMap (LOWORD(lParam), HIWORD(lParam));
 			return 0;

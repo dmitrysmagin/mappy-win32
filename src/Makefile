@@ -29,22 +29,29 @@ LUADIR2 = lua-5.0.3/src/lib
 LUA_CFILES = $(filter-out $(LUADIR)/ltests.c, $(wildcard $(LUADIR)/*.c))
 LUA_CFILES += $(filter-out $(LUADIR2)/loadlib.c, $(wildcard $(LUADIR2)/*.c))
 LUA_OFILES = $(LUA_CFILES:.c=.o)
-LUA_CFLAGS = -O2 -Wall -Wextra -std=gnu99 -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -I$(LUADIR)/../include
+LUA_CFLAGS = -O2 -Wall -Wextra -std=gnu99 -fno-lto -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -I$(LUADIR)/../include
 
 CFILES  = mapfunc.c fmp14.c mapwin.c maped.c blocked.c mapdia.c mapcust.c import.c objedit.c luabind.c $(ANIMSRC)
 OFILES  = $(CFILES:.c=.o)
 DFILES  = $(CFILES:.c=.d)
 
-CFLAGS  = -O2 -Wall -Wextra -std=gnu99
+CFLAGS  = -O2 -Wall -Wextra -std=gnu99 -fno-lto
 CFLAGS  += $(CDEFINES) -D_WIN32_WINNT=0x0601 -DWINVER=0x0601
 CFLAGS  += -I$(LUADIR)/../include
-LDFLAGS = -mwindows
-LIBS    = -lcomdlg32 -lgdi32 -luser32 -lkernel32 -lcomctl32 $(DXLIBS)
-
-# --------------------------------------------------------------------
+# Collect2's LTO plugin crashes on GCC 15.2.0; use ld directly
+LD      = ld
+LDFLAGS = -m i386pep --subsystem windows -Bdynamic
+CRTBEGIN = $(shell $(CC) -print-file-name=crtbegin.o)
+CRTEND   = $(shell $(CC) -print-file-name=crtend.o)
+CRT2     = $(shell $(CC) -print-file-name=crt2.o)
+LIBDIRS  = -L$(shell dirname $(CRTBEGIN))
+SYSLIBS  = -lmingw32 -lgcc -lgcc_eh -lmingwex -lmsvcrt -lkernel32 -lpthread
+MANIFEST = $(shell $(CC) -print-file-name=default-manifest.o)
+LIBS    = -lcomdlg32 -lgdi32 -luser32 -lkernel32 -lcomctl32 -lshell32 -lole32 $(DXLIBS)
 
 $(PROGRAM): $(OFILES) $(LUA_OFILES) mapwinrc.o
-	$(CC) $(LDFLAGS) -o $@ $(OFILES) $(LUA_OFILES) mapwinrc.o $(LIBS)
+	$(LD) $(LDFLAGS) $(LIBDIRS) -o $@ $(CRT2) $(CRTBEGIN) \
+		$(OFILES) $(LUA_OFILES) mapwinrc.o $(LIBS) $(SYSLIBS) $(MANIFEST) $(CRTEND)
 
 mapwinrc.o: mapwin.rc mapdefs.h MAPWIN.ICO
 	$(WINDRES) mapwin.rc -o mapwinrc.o
