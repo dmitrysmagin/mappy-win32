@@ -35,7 +35,7 @@ static HWND mhwnd = NULL;
 static char szMapEdname[] = "Map Editor";
 static int painton = 0, gettingbrush = 0;
 static short int * undobuff1, * undobuff2;
-int megetabrush = 0, onion = 0, oniondark = 0;
+int megetabrush = 0, onion = 0, oniondark = 0, onionlower = 0;
 int wlayout = 0;
 
 static int meoldbx, meoldby, mebrushx, mebrushy, mebrushx2, mebrushy2;
@@ -54,16 +54,19 @@ extern short int blockwidth, blockheight, blockdepth, gridon, zoomon, curbrsh;
 extern int blockgapx, blockgapy, blockstaggerx, blockstaggery, clickmask;
 extern unsigned char trans16hi, trans16low, transred, transgreen, transblue, trans8bit;
 extern short int mapwidth, mapheight, xmapoffset, ymapoffset;
+extern short int maplayer;
 extern int mapaltered;
 extern char * blockgfxpt, * blockstrpt;
 extern short int * mappt;
 extern long int curplacetile;
 extern short int curstr, curanim;
+extern short int numblockstr;
 
 /* Tier-1 settings (from mapwin.c) */
 extern int showuser, gridstyle, mwheelstyle, mwheelblks, thumbtrack;
 extern int divideron, dividergapx, dividergapy;
 extern long dividercol;
+extern int zoomdiv, tbarinfo, panelzoom, zmstyle, wnesmode, rotatedtiles;
 
 #include "fmp.h"
 #include "fmp14.h"
@@ -175,16 +178,20 @@ unsigned char * mygfxpt;
 
 }
 
+/* zoom helpers: zoomon in {1,2,4}, zoomdiv in {1,2,4} (x1,x0.5,x0.25) */
+static int ZX (int v) { return (v * zoomon) / zoomdiv; }
+static int ZD (int v) { return (v * zoomdiv) / zoomon; }
+
 int MEGetX (int xpix, int ypix)
 {
 int xb;
 
 	if (blockstaggerx || blockstaggery) {
-		xpix += (blockstaggerx*zoomon);
-		ypix += (blockstaggery*zoomon);
+		xpix += (blockstaggerx*zoomon/zoomdiv);
+		ypix += (blockstaggery*zoomon/zoomdiv);
 	}
-	xpix /= zoomon;
-	ypix /= zoomon;
+	xpix = ZD (xpix);
+	ypix = ZD (ypix);
 	xb = xpix/blockgapx;
 
 	if ((blockstaggerx || blockstaggery) && clickmask) xb += MEClickmask (xpix, ypix, 0);
@@ -197,11 +204,11 @@ int MEGetY (int xpix, int ypix)
 int yb;
 
 	if (blockstaggerx || blockstaggery) {
-		xpix += (blockstaggerx*zoomon);
-		ypix += (blockstaggery*zoomon);
+		xpix += (blockstaggerx*zoomon/zoomdiv);
+		ypix += (blockstaggery*zoomon/zoomdiv);
 	}
-	xpix /= zoomon;
-	ypix /= zoomon;
+	xpix = ZD (xpix);
+	ypix = ZD (ypix);
 	yb = ypix/blockgapy;
 
 	if ((blockstaggerx || blockstaggery) && clickmask) {
@@ -254,11 +261,15 @@ RECT merect;
 
 void MEShowCoords (int x, int y)
 {
-char temptext[192];
+char temptext[256];
 char scbits[16];
+char dettxt[128];
 BLKSTR * myblkstrpt;
 //ANISTR * myanpt;
 short int * mymappt;
+int nlayers, li;
+const char * lname;
+const char * tstr;
 
 	if (mappt == NULL) return;
 	if (blockstrpt == NULL) return;
@@ -271,9 +282,9 @@ short int * mymappt;
 
 	mymappt += (x+(y*mapwidth));
 
+	dettxt[0] = 0;
 	if (*mymappt<0) {
-		sprintf (temptext, "X %d/%d, Y %d/%d. Anim %d",
-			x, mapwidth-1, y, mapheight-1, (-(*mymappt))/sizeof(ANISTR)-1);
+		sprintf (dettxt, "Anim %d", (-(*mymappt))/sizeof(ANISTR)-1);
 	} else {
 		myblkstrpt = (BLKSTR *) (blockstrpt + (((int)(*mymappt))*sizeof(BLKSTR)));
 		memset (scbits, 0, 16);
@@ -286,11 +297,57 @@ short int * mymappt;
 		if (myblkstrpt->unused2) scbits[6] = '1'; else scbits[6] = '0';
 		if (myblkstrpt->unused3) scbits[7] = '1'; else scbits[7] = '0';
 		if (myblkstrpt->trigger) scbits[9] = '1'; else scbits[9] = '0';
-		sprintf (temptext, "X %d/%d, Y %d/%d. Block %d (BG=%d, FG=%d, Bits=%s, T=%s)",
-			x, mapwidth-1, y, mapheight-1, (*mymappt),
+		sprintf (dettxt, "Block %d (BG=%d, FG=%d, Bits=%s, T=%s)",
+			(*mymappt),
 			(int) myblkstrpt->bgoff/(blockwidth*blockheight*((blockdepth+1)/8)),
 			(int) myblkstrpt->fgoff/(blockwidth*blockheight*((blockdepth+1)/8)),
 			scbits, scbits+9);
+	}
+
+	nlayers = 0; for (li=0;li<MAXMAPLAYERS;li++) if (GetLayerpt (li)!=NULL) nlayers++;
+
+	/* tbarinfo titlebar modes (mapwin.ini) */
+	switch (tbarinfo) {
+		case 0:
+			strcpy (temptext, "Map Editor");
+			break;
+		case 3:
+			if (*mymappt<0) sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, %s",
+				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, dettxt);
+			else sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, Block %d",
+				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, (*mymappt));
+			break;
+		case 4:
+			sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, %s",
+				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, dettxt);
+			break;
+		case 5:
+			tstr = F14_TstrGet (0);
+			if (tstr==NULL) tstr = "";
+			sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, %s [%s]",
+				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0,
+				(*mymappt<0) ? dettxt : dettxt, tstr);
+			if (*mymappt>=0) sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, Block %d [%s]",
+				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, (*mymappt), tstr);
+			break;
+		case 6:
+			lname = F14_LayerName (maplayer);
+			if (lname==NULL) lname = "";
+			tstr = F14_TstrGet (0);
+			if (tstr==NULL) tstr = "";
+			sprintf (temptext, "X %d/%d, Y %d/%d, [%s] %d/%d, %s [%s]",
+				x, mapwidth-1, y, mapheight-1, lname, maplayer, nlayers ? nlayers-1 : 0, dettxt, tstr);
+			break;
+		case 2:
+			sprintf (temptext, "X %d/%d, Y %d/%d. %s",
+				x, mapwidth-1, y, mapheight-1, dettxt);
+			break;
+		default: /* 1 */
+			if (*mymappt<0) sprintf (temptext, "X %d/%d, Y %d/%d. %s",
+				x, mapwidth-1, y, mapheight-1, dettxt);
+			else sprintf (temptext, "X %d/%d, Y %d/%d. Block %d",
+				x, mapwidth-1, y, mapheight-1, (*mymappt));
+			break;
 	}
 
 	/* Tier-2 tool help: show active L/D/P mode in title (keys L/P/D, ESC cancels) */
@@ -309,13 +366,13 @@ HDC myhdc;
 HBRUSH oldbrush;
 int oldrop;
 
-	xoff *= (blockgapx*zoomon); xoff2 *= (blockgapx*zoomon);
-	yoff *= (blockgapy*zoomon); yoff2 *= (blockgapy*zoomon);
+	xoff = (xoff*blockgapx*zoomon)/zoomdiv; xoff2 = (xoff2*blockgapx*zoomon)/zoomdiv;
+	yoff = (yoff*blockgapy*zoomon)/zoomdiv; yoff2 = (yoff2*blockgapy*zoomon)/zoomdiv;
    if (blockstaggerx || blockstaggery) { yoff /= 2; yoff2 /= 2; }
-	if (xoff<xoff2) { dragboxrect.left = xoff; dragboxrect.right = xoff2+(blockwidth*zoomon)-1; }
-	else { dragboxrect.left = xoff2; dragboxrect.right = xoff+(blockwidth*zoomon)-1; }
-	if (yoff<yoff2) { dragboxrect.top = yoff; dragboxrect.bottom = yoff2+(blockheight*zoomon)-1; }
-	else { dragboxrect.top = yoff2; dragboxrect.bottom = yoff+(blockheight*zoomon)-1; }
+	if (xoff<xoff2) { dragboxrect.left = xoff; dragboxrect.right = xoff2+(blockwidth*zoomon/zoomdiv)-1; }
+	else { dragboxrect.left = xoff2; dragboxrect.right = xoff+(blockwidth*zoomon/zoomdiv)-1; }
+	if (yoff<yoff2) { dragboxrect.top = yoff; dragboxrect.bottom = yoff2+(blockheight*zoomon/zoomdiv)-1; }
+	else { dragboxrect.top = yoff2; dragboxrect.bottom = yoff+(blockheight*zoomon/zoomdiv)-1; }
 	myhdc = GetDC (hwnd);
 	oldrop = SetROP2 (myhdc, R2_NOT);
 	oldbrush = SelectObject (myhdc, GetStockObject (HOLLOW_BRUSH));
@@ -362,7 +419,7 @@ RGBQUAD rgbq;
 			destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
 
 		hbmpold = SelectObject(fromhdc, temphbm);
-		if (zoomon==1) {
+		if (zoomon==1 && zoomdiv==1) {
 /*			if (blockstaggerx || blockstaggery) {
 				if (yoff&1)
 					BitBlt (myhdc, ((xoff-xmapoffset)*blockgapx)+blockstaggerx,
@@ -376,8 +433,8 @@ RGBQUAD rgbq;
 					blockwidth, blockheight, fromhdc, 0, 0, SRCCOPY);
 //			}
 		} else {
-			StretchBlt (myhdc, (xoff-xmapoffset)*blockwidth*zoomon, (yoff-ymapoffset)*blockheight*zoomon,
-				blockwidth*zoomon, blockheight*zoomon, fromhdc, 0, 0, blockwidth, blockheight, SRCCOPY);
+			StretchBlt (myhdc, ZX((xoff-xmapoffset)*blockwidth), ZX((yoff-ymapoffset)*blockheight),
+				ZX(blockwidth), ZX(blockheight), fromhdc, 0, 0, blockwidth, blockheight, SRCCOPY);
 		}
 
 		SelectObject (fromhdc, hbmpold);
@@ -386,6 +443,30 @@ RGBQUAD rgbq;
 		DeleteDC (fromhdc);
 		ReleaseDC (hwnd, myhdc);
 		free (destmempt);
+}
+
+/* onion backdrop: single layer, All layers, or 0..layer (show lower layers) */
+static void MEOnionBg (int x, int y, unsigned char * dst, int xo, int yo, int ls)
+{
+	if (onion==ONION_ALL) OnionCompto24 (x, y, dst, xo, yo, ls, MAXMAPLAYERS-1);
+	else if (onionlower) OnionCompto24 (x, y, dst, xo, yo, ls, onion-1);
+	else Onionto24 (x, y, dst, xo, yo, ls, onion-1);
+}
+
+/* software stretch (zmstyle=0): nearest-neighbour, no StretchBlt */
+static void MESoftStretch (HDC dst, int dx, int dy, int dw, int dh,
+	HDC src, int sx, int sy, int sw, int sh)
+{
+int x, y;
+COLORREF c;
+
+	if (dw<=0 || dh<=0 || sw<=0 || sh<=0) return;
+	for (y=0;y<dh;y++) {
+		for (x=0;x<dw;x++) {
+			c = GetPixel (src, sx + (x*sw)/dw, sy + (y*sh)/dh);
+			SetPixel (dst, dx+x, dy+y, c);
+		}
+	}
 }
 
 void MEDrawMap (HWND phwnd, HDC myhdc)
@@ -401,9 +482,9 @@ RECT rc;
 
 		GetWindowRect (phwnd, &rc);
 		k = (((rc.right)-(rc.left))/blockgapx)+2;
-		if (zoomon!=1) { k /= zoomon; k+=(zoomon-1); }
+		if (zoomon!=1||zoomdiv!=1) { k = (k*zoomdiv)/zoomon+(zoomon-1); }
 		l = (((rc.bottom)-(rc.top+20))/blockgapy)+2;
-		if (zoomon!=1) { l /= zoomon; l+=(zoomon-1); }
+		if (zoomon!=1||zoomdiv!=1) { l = (l*zoomdiv)/zoomon+(zoomon-1); }
 
 		bwpitch = ((k*blockgapx*3)+3)&0x7FFC;
 		destmempt = malloc ((l+2)*bwpitch*blockgapy);
@@ -424,16 +505,16 @@ RECT rc;
 		for (j=0;j<l;j++) {
 			for (i=0;i<k;i++) {
 				if (blockstaggerx || blockstaggery) {
-					if (onion) Onionto24 (xmapoffset+i, ymapoffset+(j*2), destmempt, i*blockgapx, j*blockgapy, bwpitch, onion-1);
+					if (onion) MEOnionBg (xmapoffset+i, ymapoffset+(j*2), destmempt, i*blockgapx, j*blockgapy, bwpitch);
 					else Overlayto24 (xmapoffset+i, ymapoffset+(j*2), destmempt, i*blockgapx, j*blockgapy, bwpitch, -1);
 				} else {
-					if (onion) Onionto24 (xmapoffset+i, ymapoffset+j, destmempt, i*blockgapx, j*blockgapy, bwpitch, onion-1);
+					if (onion) MEOnionBg (xmapoffset+i, ymapoffset+j, destmempt, i*blockgapx, j*blockgapy, bwpitch);
 					else Blockto24 (xmapoffset+i, ymapoffset+j, destmempt, i*blockgapx, j*blockgapy, bwpitch);
 				}
 			}
 			for (i=0;i<k;i++) {
 				if (blockstaggerx || blockstaggery) {
-					if (onion) Onionto24 (xmapoffset+i, ymapoffset+(j*2+1), destmempt, i*blockgapx+blockstaggerx, j*blockgapy+blockstaggery, bwpitch, onion-1);
+					if (onion) MEOnionBg (xmapoffset+i, ymapoffset+(j*2+1), destmempt, i*blockgapx+blockstaggerx, j*blockgapy+blockstaggery, bwpitch);
 					else Overlayto24 (xmapoffset+i, ymapoffset+(j*2+1), destmempt, i*blockgapx+blockstaggerx, j*blockgapy+blockstaggery, bwpitch, -1);
 				}
 			}
@@ -463,18 +544,37 @@ RECT rc;
 			destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
 
 		hbmpold = SelectObject(fromhdc, temphbm);
-		if (zoomon==1)
+		if (zoomon==1 && zoomdiv==1)
 			BitBlt (myhdc, 0, 0, k*blockgapx, l*blockgapy, fromhdc, blockstaggerx, blockstaggery, SRCCOPY);
+		else if (zmstyle==0)
+			MESoftStretch (myhdc, 0, 0, ZX((k*blockgapx)-blockstaggerx), ZX((l*blockgapy)-blockstaggery),
+				fromhdc, blockstaggerx, blockstaggery, k*blockgapx-blockstaggerx, l*blockgapy-blockstaggery);
 		else
-			StretchBlt (myhdc, 0, 0, ((k*blockgapx)-blockstaggerx)*zoomon, ((l*blockgapy)-blockstaggery)*zoomon, fromhdc, blockstaggerx, blockstaggery, k*blockgapx-blockstaggerx, l*blockgapy-blockstaggery, SRCCOPY);
+			StretchBlt (myhdc, 0, 0, ZX((k*blockgapx)-blockstaggerx), ZX((l*blockgapy)-blockstaggery), fromhdc, blockstaggerx, blockstaggery, k*blockgapx-blockstaggerx, l*blockgapy-blockstaggery, SRCCOPY);
 		SelectObject (fromhdc, hbmpold);
 		DeleteObject (temphbm);
 
+		if (wnesmode) {
+			/* 3D-wall mode: red vertical wall markers at tile left edges */
+			RECT wrc; HPEN wpen, wold; int wx, wy0, wy1;
+			GetClientRect (phwnd, &wrc);
+			wpen = CreatePen (PS_SOLID, 1, RGB (255, 0, 0));
+			wold = SelectObject (myhdc, wpen);
+			for (j=0;j<=k;j++) {
+				wx = ZX(j*blockgapx);
+				wy0 = 0; wy1 = wrc.bottom;
+				MoveToEx (myhdc, wx, wy0, NULL);
+				LineTo (myhdc, wx, wy1);
+			}
+			SelectObject (myhdc, wold);
+			DeleteObject (wpen);
+		}
+
 		if (divideron && dividergapx >= 8 && dividergapy >= 8) {
 			RECT crc; HPEN hpen, holdpen;
-			int stepx = dividergapx * zoomon, stepy = dividergapy * zoomon;
-			int ox = (xmapoffset * blockwidth * zoomon) % stepx;
-			int oy = (ymapoffset * blockheight * zoomon) % stepy;
+			int stepx = dividergapx * zoomon / zoomdiv, stepy = dividergapy * zoomon / zoomdiv;
+			int ox = (xmapoffset * blockwidth * zoomon / zoomdiv) % stepx;
+			int oy = (ymapoffset * blockheight * zoomon / zoomdiv) % stepy;
 			int x, y;
 			GetClientRect (phwnd, &crc);
 			hpen = CreatePen (PS_SOLID, 1, RGB ((dividercol>>16)&0xFF, (dividercol>>8)&0xFF, dividercol&0xFF));
@@ -489,6 +589,33 @@ RECT rc;
 			}
 			SelectObject (myhdc, holdpen);
 			DeleteObject (hpen);
+		}
+
+		if (showuser>=1 && showuser<=8) {
+			/* show user field / flags overlaying tiles */
+			char utxt[24]; int vx, vy, ti, tj; short int bv; BLKSTR * bp;
+			SetBkMode (myhdc, TRANSPARENT);
+			SetTextColor (myhdc, RGB (255, 255, 0));
+			for (tj=0;tj<l;tj++) {
+				for (ti=0;ti<k;ti++) {
+					vx = xmapoffset+ti; vy = ymapoffset+tj;
+					if (vx<0 || vy<0 || vx>=mapwidth || vy>=mapheight) continue;
+					bv = mappt[vx+vy*mapwidth];
+					if (bv<0 || bv>=numblockstr) continue;
+					bp = (BLKSTR *) (blockstrpt + (((int) bv)*sizeof(BLKSTR)));
+					switch (showuser) {
+						case 1: sprintf (utxt, "%lu", bp->user1); break;
+						case 2: sprintf (utxt, "%lu", bp->user2); break;
+						case 3: sprintf (utxt, "%u", bp->user3); break;
+						case 4: sprintf (utxt, "%u", bp->user4); break;
+						case 5: sprintf (utxt, "%u", bp->user5); break;
+						case 6: sprintf (utxt, "%u", bp->user6); break;
+						case 7: sprintf (utxt, "%u", bp->user7); break;
+						default: sprintf (utxt, "%d%d%d%d%d", bp->tl, bp->tr, bp->bl, bp->br, bp->trigger); break;
+					}
+					TextOut (myhdc, ZX(ti*blockgapx), ZX(tj*blockgapy), utxt, strlen (utxt));
+				}
+			}
 		}
 
 		DeleteDC (fromhdc);
@@ -508,6 +635,7 @@ DWORD blttype;
 
 		if (gettingbrush) return;
 		if (mappt==NULL || !gridon) return;
+		if (zoomdiv>1) return; /* grid not drawn in software zoomout */
 		if (xoff==meoldbx && yoff==meoldby) return;
 
 		bwpitch = ((blockwidth*3)+3)&0x7FFC;
@@ -530,7 +658,7 @@ DWORD blttype;
 		if (blockstaggerx || blockstaggery) {
 			MEDrawMap (hwnd, myhdc);
 		} else {
-			if (onion) Onionto24 (meoldbx, meoldby, destmempt, 0, 0, bwpitch, onion-1);
+			if (onion) MEOnionBg (meoldbx, meoldby, destmempt, 0, 0, bwpitch);
 			else Blockto24 (meoldbx, meoldby, destmempt, 0, 0, bwpitch);
 			if (oniondark) {
 			i = bwpitch*blockheight; darkenpt = destmempt; while (i) {
@@ -540,14 +668,14 @@ DWORD blttype;
 
 			temphbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 				destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
-			x = (meoldbx-xmapoffset)*blockwidth;
-			y = (meoldby-ymapoffset)*blockheight;
+			x = ZX((meoldbx-xmapoffset)*blockwidth);
+			y = ZX((meoldby-ymapoffset)*blockheight);
 			hbmpold = SelectObject(fromhdc, temphbm);
-			if (zoomon==1)
+			if (zoomon==1 && zoomdiv==1)
 				BitBlt (myhdc, x, y,	blockwidth, blockheight, fromhdc, 0, 0, SRCCOPY);
 			else
-				StretchBlt (myhdc, x*zoomon, y*zoomon,
-					blockwidth*zoomon, blockheight*zoomon, fromhdc, 0, 0, blockwidth, blockheight, SRCCOPY);
+				StretchBlt (myhdc, x, y,
+					ZX(blockwidth), ZX(blockheight), fromhdc, 0, 0, blockwidth, blockheight, SRCCOPY);
 			SelectObject (fromhdc, hbmpold);
 			DeleteObject (temphbm);
 		}
@@ -617,21 +745,21 @@ DWORD blttype;
 			x = (xoff-xmapoffset);
 			y = (yoff-ymapoffset);
 			if (y&1) i = 1; else i = 0;
-			x *= blockgapx;
-			y /= 2; y *= blockgapy;
-			if (!i) { x -= blockstaggerx; y -= blockstaggery; }
+			x = ZX(x*blockgapx);
+			y /= 2; y = ZX(y*blockgapy);
+			if (!i) { x -= ZX(blockstaggerx); y -= ZX(blockstaggery); }
 			blttype = SRCPAINT;
 		} else {
-			x = (xoff-xmapoffset)*blockwidth;
-			y = (yoff-ymapoffset)*blockheight;
+			x = ZX((xoff-xmapoffset)*blockwidth);
+			y = ZX((yoff-ymapoffset)*blockheight);
 			blttype = SRCCOPY;
 		}
 
-		if (zoomon==1)
+		if (zoomon==1 && zoomdiv==1)
 			BitBlt (myhdc, x, y,	blockwidth, blockheight, fromhdc, 0, 0, blttype);
 		else
-			StretchBlt (myhdc, x*zoomon, y*zoomon,
-				blockwidth*zoomon, blockheight*zoomon, fromhdc, 0, 0, blockwidth, blockheight, blttype);
+			StretchBlt (myhdc, x, y,
+				ZX(blockwidth), ZX(blockheight), fromhdc, 0, 0, blockwidth, blockheight, blttype);
 
 		SelectObject (fromhdc, hbmpold);
 		DeleteObject (temphbm);
@@ -670,8 +798,8 @@ static void MEBresenhamLine (int x0, int y0, int x1, int y1)
 
 static void MEDragMap (int xpix, int ypix)
 {
-	int dx = (xpix - dragox) / zoomon;
-	int dy = (ypix - dragoy) / zoomon;
+	int dx = ZD (xpix - dragox);
+	int dy = ZD (ypix - dragoy);
 	int nx = dragoxoff - dx;
 	int ny = dragoyoff - dy;
 	if (nx < 0) nx = 0;
@@ -939,6 +1067,10 @@ PAINTSTRUCT ps;
 				} else {
 					MEDragFinish();
 				}
+				break;
+			case 'E': /* edit block/anim properties */
+				if (curanim>=0) DIAEditAnimProperties (mhwnd, curanim);
+				else DIAEditProperties (mhwnd, curstr);
 				break;
 			case VK_ESCAPE:
 				linemode = 0; pathmode = 0;

@@ -10,6 +10,8 @@ static short int beyoff, betype, bebpr = 1;
 static char szBlockEdname[] = "Block Editor";
 extern HINSTANCE hInstance;
 extern short int blockwidth, blockheight, blockdepth, gridon, zoomon;
+extern int panelzoom;
+static int BEZoom (void) { return panelzoom ? zoomon : 1; }
 extern short int mapwidth, mapheight, xmapoffset, ymapoffset;
 extern short int numblockstr, curstr, numblockanim, curanim, curbrsh;
 extern char * blockgfxpt, * blockstrpt, * animstrpt;
@@ -169,11 +171,11 @@ RECT rc;
 
 		GetWindowRect (phwnd, &rc);
 		k = (rc.right)-(rc.left);
-		if (zoomon!=1) { k /= zoomon; k+= (zoomon-1); }
+		if (BEZoom()!=1) { k /= BEZoom(); k+= (BEZoom()-1); }
 		if (k<blockwidth) k = blockwidth;
 		k += 3; k &= -4;
 		l = ((rc.bottom)-(rc.top))/(blockheight+2);
-		if (zoomon!=1) { l /= zoomon; l+= (zoomon-1); }
+		if (BEZoom()!=1) { l /= BEZoom(); l+= (BEZoom()-1); }
 
 		destmempt = malloc (k*l*(blockheight+2)*3);
 		if (destmempt==NULL) return;
@@ -191,7 +193,7 @@ RECT rc;
 		bih.biCompression = BI_RGB;
 
 
-		bebpr = (short int) (k-(24/zoomon))/(blockwidth+2);
+		bebpr = (short int) (k-(24/BEZoom()))/(blockwidth+2);
 		if (bebpr<1) bebpr = 1;
 		if (betype) {
 		for (i=0;i<l;i++)
@@ -217,10 +219,10 @@ RECT rc;
 			destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
 
 		hbmpold = SelectObject(fromhdc, temphbm);
-		if (zoomon==1)
+		if (BEZoom()==1)
 			BitBlt (myhdc, 0, 0, k, l*(blockheight+2), fromhdc, 0, 0, SRCCOPY);
 		else
-			StretchBlt (myhdc, 0, 0, k*zoomon, l*(blockheight+2)*zoomon, fromhdc, 0, 0, k, l*(blockheight+2), SRCCOPY);
+			StretchBlt (myhdc, 0, 0, k*BEZoom(), l*(blockheight+2)*BEZoom(), fromhdc, 0, 0, k, l*(blockheight+2), SRCCOPY);
 		SelectObject (fromhdc, hbmpold);
 		DeleteObject (temphbm);
 
@@ -277,15 +279,15 @@ PAINTSTRUCT ps;
 		InvalidateRgn (bhwnd, NULL, FALSE);
 		break;
 	case WM_LBUTTONUP:
-		if (LOWORD(lParam)>((blockwidth+2)*zoomon*bebpr)) break;
+		if (LOWORD(lParam)>((blockwidth+2)*BEZoom()*bebpr)) break;
 		if (betype && animstrpt!=NULL) {
 		curbrsh = 0;
-		curanim = ((beyoff + ((HIWORD(lParam))/((blockheight+2)*zoomon))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*zoomon));
+		curanim = ((beyoff + ((HIWORD(lParam))/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
 		if (curanim>=numblockanim) curanim = numblockanim-1;
 		if (curanim<0) curanim = 0;
 		} else {
 		curanim = -1; curbrsh = 0;
-		curstr = ((beyoff + ((HIWORD(lParam))/((blockheight+2)*zoomon))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*zoomon));
+		curstr = ((beyoff + ((HIWORD(lParam))/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
 		if (curstr>=numblockstr) curstr = numblockstr-1;
 		if (curstr<0) curstr = 0;
 		}
@@ -299,15 +301,15 @@ PAINTSTRUCT ps;
 		break;
 	case WM_LBUTTONDBLCLK:
 		if (blockstrpt == NULL) break;
-		if (LOWORD(lParam)>((blockwidth+2)*zoomon*bebpr)) break;
+		if (LOWORD(lParam)>((blockwidth+2)*BEZoom()*bebpr)) break;
 		if (betype) {
 		curbrsh = 0;
-		curanim = ((beyoff + ((HIWORD(lParam))/((blockheight+2)*zoomon))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*zoomon));
+		curanim = ((beyoff + ((HIWORD(lParam))/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
 		if (curanim>=numblockanim) { curstr = numblockanim-1; break; }
 		if (curanim<0) curanim = 0;
 		} else {
 		curanim = -1; curbrsh = 0;
-		curstr = ((beyoff + ((HIWORD(lParam))/((blockheight+2)*zoomon))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*zoomon));
+		curstr = ((beyoff + ((HIWORD(lParam))/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
 		if (curstr>=numblockstr) { curstr = numblockstr-1; break; }
 		if (curstr<0) curstr = 0;
 		}
@@ -315,6 +317,18 @@ PAINTSTRUCT ps;
 		if (curanim==-1 && curbrsh==0) DIAEditProperties (hwnd, curstr);
 		if (curanim!=-1 && curbrsh==0) DIAEditAnimProperties (hwnd, curanim);
 		InvalidateAll ();
+		break;
+	case WM_MOUSEWHEEL:
+		/* mousewheel over block window scrolls the block list */
+		if (blockgfxpt==NULL) break;
+		{
+			int bdelta = (short)HIWORD(wParam);
+			if (betype) i = numblockanim; else i = numblockstr;
+			if (bdelta>0) { if (beyoff>0) beyoff--; }
+			else { if (beyoff<(i-1)) beyoff++; }
+			SetScrollPos (bhwnd, SB_VERT, beyoff, TRUE);
+			InvalidateRgn (bhwnd, NULL, FALSE);
+		}
 		break;
 	default:
 		return DefWindowProc(hwnd, message, wParam, lParam);

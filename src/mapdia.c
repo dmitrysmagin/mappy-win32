@@ -5,6 +5,7 @@
 #include <string.h>
 #include "mapwin.h"
 #include "compat.h"
+#include "fmp14.h"
 
 #define ANDTMEM (65536*4)
 #define BLOCKSTRSIZE 32
@@ -64,11 +65,14 @@ extern int maptype;
 extern int csvadjust, csvusebg;
 extern int divideron, dividergapx, dividergapy;
 extern long dividercol;
-extern int mapaltered, onion, oniondark;
+extern short int maplayer;
+extern char blocklabels[16][64];
+extern int rotatedtiles, flippedtiles, isopillars;
+extern int mapaltered, onion, oniondark, onionlower;
 extern char * blockstrpt, * blockgfxpt, * animstrpt, * cmappt;
 extern short int * mappt;
 extern char * altgfxpt;
-extern short int * mapmappt[8];
+extern short int * mapmappt[MAXMAPLAYERS];
 extern short int * brshpt[MAXBRSH];
 extern char mapfilename[256];
 extern char authorname[70];
@@ -456,6 +460,12 @@ BLKSTR * myblkstrpt;
 		case WM_INITDIALOG:
 			sprintf (mytext, "Block Structure %d", editnum);
 			SetDlgItemText(hwndDlg, IDC_PROPNUM, mytext);
+			/* user-settable dialogue labels (blockdialoguelabels= in mapwin.ini) */
+			SetDlgItemText(hwndDlg, IDC_PROPLBLUSER, blocklabels[0]);
+			SetDlgItemText(hwndDlg, IDC_PROPTRIGGER, blocklabels[12]);
+			if (rotatedtiles) SetDlgItemText(hwndDlg, IDC_PROPLBLUSER, "User data: (U7=rotation 1-3)");
+			else if (flippedtiles) SetDlgItemText(hwndDlg, IDC_PROPLBLUSER, "User data: (flipped mode)");
+			else if (isopillars) SetDlgItemText(hwndDlg, IDC_PROPLBLUSER, "User data: (pillar mode)");
 			myblkstrpt = (BLKSTR *) blockstrpt;
 			myblkstrpt += editnum;
 			sprintf (mytext, "%08X", (unsigned int) myblkstrpt->user1);
@@ -1245,7 +1255,7 @@ char mytext[256];
 			sprintf (mytext, "Filename: %s", mapfilename);
 			SetWindowText (GetDlgItem (hwndDlg, IDC_INFONAME), mytext);
 			totalmapmem = 0;
-			i = 0; for (j=0;j<8;j++) { if (mapmappt[j]!=NULL) i++; }
+			i = 0; for (j=0;j<MAXMAPLAYERS;j++) { if (mapmappt[j]!=NULL) i++; }
 			sprintf (mytext, "Map Array: Width=%d, Height=%d, Layers=%d, (%d)", mapwidth, mapheight, i,
 				mapwidth*mapheight*2*i);
 			totalmapmem += mapwidth*mapheight*2*i;
@@ -1473,8 +1483,10 @@ char textbuf[80];
 		case WM_INITDIALOG:
 			CheckDlgButton (hwndDlg, IDC_SKINONOFF, 0);
 			CheckDlgButton (hwndDlg, IDC_SKINDARKEN, 0);
+			CheckDlgButton (hwndDlg, IDC_SKINLOWER, 0);
 			if (onion) CheckDlgButton (hwndDlg, IDC_SKINONOFF, 1);
 			if (oniondark) CheckDlgButton (hwndDlg, IDC_SKINDARKEN, 1);
+			if (onionlower) CheckDlgButton (hwndDlg, IDC_SKINLOWER, 1);
 			SendMessage (hwndDlg, WM_COMMAND, 99, 0L);
 			break;
 		case WM_COMMAND:
@@ -1482,21 +1494,26 @@ char textbuf[80];
 		{
 			case 99:
 				SendDlgItemMessage (hwndDlg, IDC_SKINLAYER, CB_RESETCONTENT, 0, 0);
-				i = 0; while (i<8) { sprintf (textbuf, "%d", i);
+				i = 0; while (i<MAXMAPLAYERS) { sprintf (textbuf, "%d", i);
 				SendDlgItemMessage (hwndDlg, IDC_SKINLAYER, CB_ADDSTRING, 0,
 					 (LPARAM) ((LPSTR) textbuf)); i++; }
+				SendDlgItemMessage (hwndDlg, IDC_SKINLAYER, CB_ADDSTRING, 0,
+					 (LPARAM) ((LPSTR) "All"));
 				SendDlgItemMessage(hwndDlg, IDC_SKINLAYER, CB_SETITEMHEIGHT,
 						 0, 14);
-				if (onion>0) sprintf (textbuf, "%d", onion-1); else strcpy (textbuf, "0");
+				if (onion==ONION_ALL) strcpy (textbuf, "All");
+				else if (onion>0) sprintf (textbuf, "%d", onion-1); else strcpy (textbuf, "0");
 				SendDlgItemMessage (hwndDlg, IDC_SKINLAYER, CB_SELECTSTRING, -1,
 					(LPARAM) ((LPSTR) textbuf));
 				break;
 			case IDOK:
 				GetWindowText (GetDlgItem (hwndDlg, IDC_SKINLAYER), textbuf, 80);
-				onion = atoi (textbuf); onion++;
+				if (!strcmp (textbuf, "All")) onion = ONION_ALL;
+				else { onion = atoi (textbuf); onion++; }
 				if (onion<1) onion = 1;
-				if (onion>8) onion = 8;
+				if (onion>MAXMAPLAYERS && onion!=ONION_ALL) onion = MAXMAPLAYERS;
 				if (IsDlgButtonChecked (hwndDlg, IDC_SKINDARKEN)) oniondark = 1; else oniondark = 0;
+				if (IsDlgButtonChecked (hwndDlg, IDC_SKINLOWER)) onionlower = 1; else onionlower = 0;
 				if (!IsDlgButtonChecked (hwndDlg, IDC_SKINONOFF)) { onion = 0; oniondark = 0; }
 
 				SendMessage (hwndDlg, WM_CLOSE, 0, 0L);
@@ -2225,16 +2242,22 @@ unsigned long int * darkenpt;
 		for (j=0;j<k;j++) {
 			for (i=0;i<mapwidth;i++) {
 				if (blockstaggerx || blockstaggery) {
-					if (onion) Onionto24 (i, (j*2), bmdatapt, i*blockgapx, j*blockgapy, bwpitch, onion-1);
+					if (onion==ONION_ALL) OnionCompto24 (i, (j*2), bmdatapt, i*blockgapx, j*blockgapy, bwpitch, MAXMAPLAYERS-1);
+					else if (onion && onionlower) OnionCompto24 (i, (j*2), bmdatapt, i*blockgapx, j*blockgapy, bwpitch, onion-1);
+					else if (onion) Onionto24 (i, (j*2), bmdatapt, i*blockgapx, j*blockgapy, bwpitch, onion-1);
 					else Overlayto24 (i, (j*2), bmdatapt, i*blockgapx, j*blockgapy, bwpitch, -1);
 				} else {
-					if (onion) Onionto24 (i, j, bmdatapt, i*blockgapx, j*blockgapy, bwpitch, onion-1);
+					if (onion==ONION_ALL) OnionCompto24 (i, j, bmdatapt, i*blockgapx, j*blockgapy, bwpitch, MAXMAPLAYERS-1);
+					else if (onion && onionlower) OnionCompto24 (i, j, bmdatapt, i*blockgapx, j*blockgapy, bwpitch, onion-1);
+					else if (onion) Onionto24 (i, j, bmdatapt, i*blockgapx, j*blockgapy, bwpitch, onion-1);
 					else Blockto24 (i, j, bmdatapt, i*blockgapx, j*blockgapy, bwpitch);
 				}
 			}
 			for (i=0;i<mapwidth;i++) {
 				if (blockstaggerx || blockstaggery) {
-					if (onion) Onionto24 (i, (j*2+1), bmdatapt, i*blockgapx+blockstaggerx, j*blockgapy+blockstaggery, bwpitch, onion-1);
+					if (onion==ONION_ALL) OnionCompto24 (i, (j*2+1), bmdatapt, i*blockgapx+blockstaggerx, j*blockgapy+blockstaggery, bwpitch, MAXMAPLAYERS-1);
+					else if (onion && onionlower) OnionCompto24 (i, (j*2+1), bmdatapt, i*blockgapx+blockstaggerx, j*blockgapy+blockstaggery, bwpitch, onion-1);
+					else if (onion) Onionto24 (i, (j*2+1), bmdatapt, i*blockgapx+blockstaggerx, j*blockgapy+blockstaggery, bwpitch, onion-1);
 					else Overlayto24 (i, (j*2+1), bmdatapt, i*blockgapx+blockstaggerx, j*blockgapy+blockstaggery, bwpitch, -1);
 				}
 			}
@@ -2616,6 +2639,100 @@ DLGPROC dlgprc;
 
 	dlgprc = (DLGPROC) MakeProcInstance (DIADividersProc, hInstance);
 	DialogBox (hInstance, (LPCSTR) "D_DIVIDER", hwnd, dlgprc);
+	FreeProcInstance((FARPROC) dlgprc);
+	return;
+}
+
+BOOL CALLBACK DIALayerGotoProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+char textbuf[80];
+int i;
+
+	switch (msg) {
+		case WM_INITDIALOG:
+			sprintf (textbuf, "%d", maplayer);
+			SetWindowText (GetDlgItem (hwndDlg, IDC_IMPNUMWHERE), textbuf);
+			break;
+		case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+			case IDOK:
+				GetWindowText (GetDlgItem (hwndDlg, IDC_IMPNUMWHERE), textbuf, 80);
+				i = atoi (textbuf);
+				if (i<0 || i>=MAXMAPLAYERS) {
+					sprintf (textbuf, "Layer must be between 0 and %d", MAXMAPLAYERS-1);
+					MessageBox (hwndDlg, textbuf, "Go To Layer", MB_ICONEXCLAMATION|MB_OK);
+					break;
+				}
+				SendMessage (hwndDlg, WM_CLOSE, 0, i);
+				break;
+			case IDCANCEL:
+				SendMessage (hwndDlg, WM_CLOSE, 0, -1L);
+				break;
+		}
+		break;
+		case WM_CLOSE:
+			EndDialog (hwndDlg, lParam);
+			break;
+		default:
+			return 0;
+	}
+	return -1;
+}
+
+int DIALayerGoto (HWND hwnd)
+{
+int i;
+DLGPROC dlgprc;
+
+	dlgprc = (DLGPROC) MakeProcInstance (DIALayerGotoProc, hInstance);
+	i = DialogBox (hInstance, (LPCSTR) "D_LAYERNUM", hwnd, dlgprc);
+	FreeProcInstance((FARPROC) dlgprc);
+	return i;
+}
+
+BOOL CALLBACK DIALayerRenameProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+const char * oldn;
+
+	switch (msg) {
+		case WM_INITDIALOG:
+			oldn = F14_LayerName (maplayer);
+			if (oldn==NULL) oldn = "";
+			SetWindowText (GetDlgItem (hwndDlg, IDC_BRSHNAME), oldn);
+			break;
+		case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+			case IDOK:
+			{
+				char nb[64];
+				GetWindowText (GetDlgItem (hwndDlg, IDC_BRSHNAME), nb, 63);
+				nb[63] = 0;
+				F14_LayerNameSet (maplayer, nb);
+				SendMessage (hwndDlg, WM_CLOSE, 0, 0L);
+				break;
+			}
+			case IDCANCEL:
+				SendMessage (hwndDlg, WM_CLOSE, 0, -1L);
+				break;
+		}
+		break;
+		case WM_CLOSE:
+			EndDialog (hwndDlg, lParam);
+			break;
+		default:
+			return 0;
+	}
+	return -1;
+}
+
+void DIALayerRename (HWND hwnd)
+{
+DLGPROC dlgprc;
+
+	dlgprc = (DLGPROC) MakeProcInstance (DIALayerRenameProc, hInstance);
+	DialogBox (hInstance, (LPCSTR) "D_LAYERNAME", hwnd, dlgprc);
 	FreeProcInstance((FARPROC) dlgprc);
 	return;
 }

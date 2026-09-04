@@ -8,6 +8,7 @@
 #include <string.h>
 #include "mapwin.h"
 #include "compat.h"
+#include "fmp14.h"
 
 HINSTANCE hInstance;
 HWND hwnd;
@@ -22,7 +23,7 @@ extern char * blockstrpt, *blockgfxpt;
 extern char * altgfxpt;
 extern short int * mappt;
 extern char mapfilename[256];
-extern int mapaltered, megetabrush, onion, oniondark;
+extern int mapaltered, megetabrush, onion, oniondark, onionlower;
 extern short int mapwidth, mapheight, blockwidth, blockheight, blockdepth, xmapoffset, ymapoffset;
 extern int maptype, blockstaggerx, blockstaggery, isopillars, flippedtiles, isoreveal, clickmask, picklayer, picklx, pickly;
 extern short int numblockstr, numblockgfx;
@@ -40,6 +41,7 @@ extern char * mcdname;
 extern int imskip;
 extern int csvadjust;
 extern int wlayout;
+extern int wnesmode, rotatedtiles;
 
 /* Tier-1 1.4 settings */
 int dobackups = 0;		/* save .BAK before overwrite */
@@ -57,6 +59,16 @@ int divideron = 0;		/* divider grid overlay enable */
 int dividergapx = 32;		/* divider pixel gap X */
 int dividergapy = 32;		/* divider pixel gap Y */
 long dividercol = 0xFFFFFF;	/* divider line colour RRGGBB */
+int tbarinfo = 1;		/* map-window titlebar mode 0..6 */
+int panelzoom = 1;		/* block window follows map zoom */
+int zmstyle = 1;		/* 0=software 1=hardware zoom */
+int zoomdiv = 1;		/* 1=x1 2=x0.5 4=x0.25 (zoomon forced 1) */
+char folder[256] = ".";		/* file dialog start folder */
+char textexportopts[64] = "110101010000100111000000"; /* text-export defaults */
+char blocklabels[16][64] = {
+	"User data:", "U1", "U2", "U3", "U4", "U5", "U6", "U7",
+	"tl", "tr", "bl", "br", "bg transp", "flag 1", "flag 2", "flag 3"
+};	/* block properties dialogue labels */
 
 void InvalidateAll (void)
 {
@@ -101,6 +113,10 @@ int i;
 
 void RejigLayerMenu (int lyernum)
 {
+int li;
+char mtxt[80];
+const char * lname;
+
 	if (mappt==NULL) return;
 	if (ChangeLayer (lyernum)<0) {
 		MessageBox (hwnd, "Can't change to this layer, doesn't exist", "Map Editor: Layers", MB_OK|MB_ICONEXCLAMATION);
@@ -116,6 +132,19 @@ void RejigLayerMenu (int lyernum)
 	CheckMenuItem (hMenu, CM_LAYER5, MF_UNCHECKED);
 	CheckMenuItem (hMenu, CM_LAYER6, MF_UNCHECKED);
 	CheckMenuItem (hMenu, CM_LAYER7, MF_UNCHECKED);
+
+	/* grey layers that don't exist; annotate 0..7 with LSTR names */
+	for (li=0;li<8;li++) {
+		if (GetLayerpt (li)==NULL)
+			EnableMenuItem (hMenu, CM_LAYER0+li, MF_BYCOMMAND|MF_GRAYED);
+		else
+			EnableMenuItem (hMenu, CM_LAYER0+li, MF_BYCOMMAND|MF_ENABLED);
+		lname = F14_LayerName (li);
+		if (lname!=NULL && lname[0]) {
+			sprintf (mtxt, "Layer %d (%s)", li, lname);
+			ModifyMenu (hMenu, CM_LAYER0+li, MF_BYCOMMAND|MF_STRING, CM_LAYER0+li, mtxt);
+		}
+	}
 
 	switch (lyernum)
 	{
@@ -639,7 +668,7 @@ FILE * marfpt;
 			case CM_LAYERADD:
 				if (mappt==NULL) break;
 				i = CreateMapLayer(); if (i==-1) {
-					MessageBox (hwnd, "Can't create new layer (max 8 layers?)", "Map Editor: Layers", MB_OK|MB_ICONINFORMATION);
+					MessageBox (hwnd, "Can't create new layer (max 100 layers?)", "Map Editor: Layers", MB_OK|MB_ICONINFORMATION);
 				} else {
 					curlayer = i; RejigLayerMenu (curlayer); InvalidateAll();
 				}
@@ -647,10 +676,20 @@ FILE * marfpt;
 			case CM_LAYERDUP:
 				if (mappt==NULL) break;
 				i = DuplicateMapLayer(); if (i==-1) {
-					MessageBox (hwnd, "Can't duplicate layer (max 8 layers or no source layer?)", "Map Editor: Layers", MB_OK|MB_ICONINFORMATION);
+					MessageBox (hwnd, "Can't duplicate layer (max 100 layers or no source layer?)", "Map Editor: Layers", MB_OK|MB_ICONINFORMATION);
 				} else {
 					curlayer = i; RejigLayerMenu (curlayer); InvalidateAll();
 				}
+				break;
+			case CM_LAYERGOTO:
+				if (mappt==NULL) break;
+				i = DIALayerGoto (hwnd);
+				if (i>=0) { curlayer = i; RejigLayerMenu (curlayer); }
+				break;
+			case CM_LAYERRENAME:
+				if (mappt==NULL) break;
+				DIALayerRename (hwnd);
+				RejigLayerMenu (curlayer); InvalidateAll ();
 				break;
 			case CM_LAYERDELETE:
 				if (mappt==NULL) break;
@@ -704,25 +743,61 @@ FILE * marfpt;
 				InvalidateAll ();
 				break;
 			case CM_TOOLZOOM1:
-				zoomon = 1;
+				zoomon = 1; zoomdiv = 1;
 				CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_CHECKED);
 				CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_UNCHECKED);
 				CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM05, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM025, MF_UNCHECKED);
 				Rejig ();
 				break;
 			case CM_TOOLZOOM2:
-				zoomon = 2;
+				zoomon = 2; zoomdiv = 1;
 				CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_UNCHECKED);
 				CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_CHECKED);
 				CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM05, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM025, MF_UNCHECKED);
 				Rejig ();
 				break;
 			case CM_TOOLZOOM4:
-				zoomon = 4;
+				zoomon = 4; zoomdiv = 1;
 				CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_UNCHECKED);
 				CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_UNCHECKED);
 				CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_CHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM05, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM025, MF_UNCHECKED);
 				Rejig ();
+				break;
+			case CM_TOOLZOOM05:
+				zoomon = 1; zoomdiv = 2;
+				CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM05, MF_CHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM025, MF_UNCHECKED);
+				Rejig ();
+				break;
+			case CM_TOOLZOOM025:
+				zoomon = 1; zoomdiv = 4;
+				CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM05, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM025, MF_CHECKED);
+				Rejig ();
+				break;
+			case CM_TOOLWNES:
+				wnesmode = 1-wnesmode;
+				if (wnesmode) CheckMenuItem (hMenu, CM_TOOLWNES, MF_CHECKED);
+				else CheckMenuItem (hMenu, CM_TOOLWNES, MF_UNCHECKED);
+				InvalidateAll ();
+				break;
+			case CM_TOOLROTATED:
+				rotatedtiles = 1-rotatedtiles;
+				if (rotatedtiles) CheckMenuItem (hMenu, CM_TOOLROTATED, MF_CHECKED);
+				else CheckMenuItem (hMenu, CM_TOOLROTATED, MF_UNCHECKED);
+				InvalidateAll ();
 				break;
 			case CM_TOOLPILLARS:
 				isopillars = 1-isopillars;
@@ -760,6 +835,18 @@ FILE * marfpt;
 		MEResizeWind (LOWORD(lParam), HIWORD(lParam));
 		BEResizeWind (LOWORD(lParam), HIWORD(lParam));
 		break;
+	case WM_MOUSEWHEEL:
+		/* mousewheel scrolls the window the mouse is over */
+		{
+			POINT wpt; HWND wchild;
+			GetCursorPos (&wpt);
+			wchild = WindowFromPoint (wpt);
+			if (wchild!=NULL && wchild!=hwnd) {
+				SendMessage (wchild, message, wParam, lParam);
+				break;
+			}
+		}
+		break;
 	case WM_KEYDOWN:
 		if (mappt==NULL) break;
 		if (GetKeyState(VK_SHIFT)<0) {
@@ -783,9 +870,24 @@ FILE * marfpt;
 		}
 		{
 			char dropname[256];
+			char * dext;
 			DragQueryFile((HDROP)wParam, 0, dropname, 255);
 			DragFinish((HDROP)wParam);
 			if (!dropname[0]) break;
+			dext = dropname+strlen(dropname)-4;
+			if (!strcmp (dext, ".png") || !strcmp (dext, ".PNG") || !strcmp (dext, ".Png")) {
+				MessageBox (hwnd, "PNG import needs LIBPNG12.DLL and is not linked in this build.\nConvert to BMP/PCX first.", "Map Editor: Import", MB_OK|MB_ICONINFORMATION);
+				break;
+			}
+			if (strcmp (dext, ".fmp") && strcmp (dext, ".FMP") && strcmp (dext, ".Fmp") &&
+				strcmp (dext, ".map") && strcmp (dext, ".MAP") && strcmp (dext, ".Map") &&
+				strcmp (dext, ".bmp") && strcmp (dext, ".BMP") && strcmp (dext, ".Bmp") &&
+				strcmp (dext, ".pcx") && strcmp (dext, ".PCX") && strcmp (dext, ".Pcx") &&
+				strcmp (dext, ".mar") && strcmp (dext, ".MAR") && strcmp (dext, ".Mar") &&
+				strcmp (dext, ".lua") && strcmp (dext, ".LUA") && strcmp (dext, ".Lua")) {
+				MessageBox (hwnd, "Unrecognised file type (need .FMP, .MAP, .BMP, .PCX or .MAR).\nMap name not changed.", "Map Editor", MB_OK|MB_ICONINFORMATION);
+				break;
+			}
 			MEDestroyUndoBuffs();
 			strcpy(mapfilename, dropname);
 			if (!strcmp((mapfilename+strlen(mapfilename))-4, ".map") ||
@@ -866,11 +968,16 @@ char * iniinfo, * inipos;
 			if (inipos[0]!=';') {
 				if (!strncmp (inipos, "width", 5)) { i = GetEquals(inipos); defwidth = atoi (inipos+i); }
 				if (!strncmp (inipos, "height", 6)) { i = GetEquals(inipos); defheight = atoi (inipos+i); }
-				if (!strncmp (inipos, "wlayout", 7)) { i = GetEquals(inipos); if (inipos[i]=='0') wlayout = 0; if (inipos[i]=='1') wlayout = 1; }
+				if (!strncmp (inipos, "wlayout", 7)) { i = GetEquals(inipos); if (inipos[i]=='0') wlayout = 0; if (inipos[i]=='1') wlayout = 1; if (inipos[i]=='-') wlayout = -1; }
 				if (!strncmp (inipos, "grid", 4)) { i = GetEquals(inipos); if (inipos[i]=='1') gridon = 1; if (inipos[i]=='2') gridon = 2; }
-				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='1') zoomon = 1; }
-				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='2') zoomon = 2; }
-				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='4') zoomon = 4; }
+				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='1') { zoomon = 1; zoomdiv = 1; } }
+				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='2') { zoomon = 2; zoomdiv = 1; } }
+				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='4') { zoomon = 4; zoomdiv = 1; } }
+				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='-' && inipos[i+1]=='2') { zoomon = 1; zoomdiv = 2; } }
+				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='-' && inipos[i+1]=='4') { zoomon = 1; zoomdiv = 4; } }
+				if (!strncmp (inipos, "zmstyle", 7)) { i = GetEquals(inipos); zmstyle = atoi (inipos+i); }
+				if (!strncmp (inipos, "panelzoom", 9)) { i = GetEquals(inipos); panelzoom = atoi (inipos+i); }
+				if (!strncmp (inipos, "tbarinfo", 8)) { i = GetEquals(inipos); tbarinfo = atoi (inipos+i); if (tbarinfo<0) tbarinfo = 0; if (tbarinfo>6) tbarinfo = 6; }
 				if (!strncmp (inipos, "picklayer", 9)) { i = GetEquals(inipos); picklayer = atoi (inipos+i); }
 				if (!strncmp (inipos, "flippedtiles", 12)) { i = GetEquals(inipos); flippedtiles = atoi (inipos+i); }
 				if (!strncmp (inipos, "transred", 8)) { i = GetEquals(inipos); transred = atoi (inipos+i); }
@@ -903,6 +1010,11 @@ char * iniinfo, * inipos;
 				if (!strncmp (inipos, "dividergapx", 11)) { i = GetEquals(inipos); dividergapx = atoi (inipos+i); }
 				if (!strncmp (inipos, "dividergapy", 11)) { i = GetEquals(inipos); dividergapy = atoi (inipos+i); }
 				if (!strncmp (inipos, "dividercol", 10)) { i = GetEquals(inipos); dividercol = strtol (inipos+i, NULL, 16) & 0xFFFFFF; }
+				if (!strncmp (inipos, "wnesmode", 8)) { i = GetEquals(inipos); wnesmode = atoi (inipos+i); }
+				if (!strncmp (inipos, "rotatedtiles", 12)) { i = GetEquals(inipos); rotatedtiles = atoi (inipos+i); }
+				if (!strncmp (inipos, "folder", 6)) { i = GetEquals(inipos); { int q = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && q<250) { folder[q++] = inipos[i]; i++; } folder[q]=0; } }
+				if (!strncmp (inipos, "textexportopts", 14)) { i = GetEquals(inipos); { int q = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && q<60) { textexportopts[q++] = inipos[i]; i++; } textexportopts[q]=0; } }
+				if (!strncmp (inipos, "blockdialoguelabels", 19)) { i = GetEquals(inipos); { int bl = 0, bc = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && bl<16) { if (inipos[i]==';') { blocklabels[bl][bc]=0; bl++; bc = 0; } else if (bc<63) { blocklabels[bl][bc++] = inipos[i]; } i++; } if (bl<16) blocklabels[bl][bc]=0; } }
 				if (!strncmp (inipos, "tbarname", 8)) { i = GetEquals(inipos); { int q = 0; if (inipos[i]=='"') i++; while (inipos[i] && inipos[i]!='"' && q<62) { tbarname[q++] = inipos[i]; i++; } tbarname[q]=0; } }
 			}
 			while (inipos<(iniinfo+flength)) { if (*inipos==0x0a) break; inipos++; } inipos++;

@@ -15,6 +15,7 @@
 #include "fmp.h"
 #include "fmp14.h"
 #include "compat.h"
+#include "mapdefs.h"
 
 #define MAPVERH 1
 #define MAPVERL 0
@@ -167,6 +168,7 @@ FILE *filept;
 GENHEAD genheader; /* kept for compat; NOT written directly (see fmp.h) */
 FmpUnknownChunk *chunklist = NULL;
 int isopillars = 0, isoreveal = 0, flippedtiles = 0;
+int wnesmode = 0, rotatedtiles = 0;
 
 short int * mappt = NULL;
 char * blockgfxpt = NULL;
@@ -181,7 +183,7 @@ char brshname[MAXBRSH][64]= {
 "Brush", "Brush", "Brush", "Brush",
 "Brush", "Brush", "Brush", "Brush",
 "Brush", "Brush", "Brush", "Brush" };
-short int * mapmappt[8]={ NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
+short int * mapmappt[MAXMAPLAYERS]={ NULL };
 
 int mapaltered;
 
@@ -304,6 +306,7 @@ char * GetBrushName (int bnum)
 
 short int * GetLayerpt (int layernum)
 {
+	if (layernum<0 || layernum>=MAXMAPLAYERS) return NULL;
 	return mapmappt[layernum];
 }
 
@@ -311,6 +314,7 @@ int PickLayer (void)
 {
 int i;
 
+	if (picklayer<0 || picklayer>=MAXMAPLAYERS) return -1;
 	if (mapmappt[picklayer]==NULL) return -1;
 	mappt = mapmappt[picklayer];
 	i = maplayer; maplayer = picklayer;	picklayer = i;
@@ -321,6 +325,7 @@ int i;
 
 int ChangeLayer (int newlayer)
 {
+	if (newlayer<0 || newlayer>=MAXMAPLAYERS) return -1;
 	if (mapmappt[newlayer]==NULL) return -1;
 	mappt = mapmappt[newlayer]; maplayer = newlayer;
 	return 0;
@@ -332,8 +337,8 @@ int i;
 
 	if (maplayer==0 && mapmappt[1]==NULL) return -1;
 	if (mapmappt[maplayer]!=NULL) free (mapmappt[maplayer]);
-	for (i=maplayer;i<7;i++) mapmappt[i] = mapmappt[i+1];
-	mapmappt[7] = NULL;
+	for (i=maplayer;i<MAXMAPLAYERS-1;i++) mapmappt[i] = mapmappt[i+1];
+	mapmappt[MAXMAPLAYERS-1] = NULL;
 	if (maplayer>0) maplayer--;
 	mappt = mapmappt[maplayer];
 	return maplayer;
@@ -343,9 +348,10 @@ int CreateMapLayer (void)
 {
 int i;
 
-	if (mapmappt[7]!=NULL) return -1;
+	if (mapmappt[MAXMAPLAYERS-1]!=NULL) return -1;
 	maplayer++;
-	for (i=7;i>maplayer;i--) mapmappt[i] = mapmappt[i-1];
+	if (maplayer>=MAXMAPLAYERS) { maplayer--; return -1; }
+	for (i=MAXMAPLAYERS-1;i>maplayer;i--) mapmappt[i] = mapmappt[i-1];
 	mapmappt[maplayer] = (short int *) malloc (mapwidth*mapheight*2);
 	if (mapmappt[maplayer]==NULL) return -1;
 	else { memset (mapmappt[maplayer], 0, mapwidth*mapheight*2); return maplayer; }
@@ -354,10 +360,10 @@ int i;
 int DuplicateMapLayer (void)
 {
 int i;
-	if (mapmappt[7]!=NULL) return -1;
+	if (mapmappt[MAXMAPLAYERS-1]!=NULL) return -1;
 	if (mapmappt[maplayer]==NULL) return -1;
 	/* shift layers up */
-	for (i=7;i>maplayer+1;i--) mapmappt[i] = mapmappt[i-1];
+	for (i=MAXMAPLAYERS-1;i>maplayer+1;i--) mapmappt[i] = mapmappt[i-1];
 	/* create new layer after current */
 	maplayer++;
 	mapmappt[maplayer] = (short int *) malloc (mapwidth*mapheight*2);
@@ -377,7 +383,7 @@ FmpUnknownChunk *tmp;
 	if (blockstrpt!=NULL) { free (blockstrpt); blockstrpt = NULL; }
 	if (animstrpt!=NULL) { free (animstrpt); animstrpt = NULL; }
 	if (cmappt!=NULL) { free (cmappt); cmappt = NULL; }
-	for (i=0;i<8;i++)
+	for (i=0;i<MAXMAPLAYERS;i++)
 	{
 		if (mapmappt[i]!=NULL) { free (mapmappt[i]); mapmappt[i] = NULL; }
 	}
@@ -947,7 +953,9 @@ int DecodeLayer (unsigned char * mdatpt, int lnum)
 int i, j, k, l;
 short int * mymappt, * mymap2pt;
 
+	if (lnum<0 || lnum>=MAXMAPLAYERS) return -1;
 	logit ("Layer %d: %d bytes.\n", lnum, MapGetchksz (mdatpt+4));
+	if (mapmappt[lnum]!=NULL) free (mapmappt[lnum]);
 	mapmappt[lnum] = malloc (mapwidth*mapheight*sizeof(short int));
 	if (mapmappt[lnum] == NULL) { merror = ER_OUTOFMEM; return -1; }
 	logit ("Maptype=%d\n", maptype);
@@ -1107,13 +1115,12 @@ char mphdr[8];
 		if (!strncmp (fmappospt, "BGFX", 4)) { chkdn = 1; DecodeBGFX (fmappospt); }
 		if (!strncmp (fmappospt, "NOVC", 4)) { chkdn = 1; DecodeNOVC (fmappospt); }
 		if (!strncmp (fmappospt, "BODY", 4)) { chkdn = 1; DecodeLayer (fmappospt, 0); }
-		if (!strncmp (fmappospt, "LYR1", 4)) { chkdn = 1; DecodeLayer (fmappospt, 1); }
-		if (!strncmp (fmappospt, "LYR2", 4)) { chkdn = 1; DecodeLayer (fmappospt, 2); }
-		if (!strncmp (fmappospt, "LYR3", 4)) { chkdn = 1; DecodeLayer (fmappospt, 3); }
-		if (!strncmp (fmappospt, "LYR4", 4)) { chkdn = 1; DecodeLayer (fmappospt, 4); }
-		if (!strncmp (fmappospt, "LYR5", 4)) { chkdn = 1; DecodeLayer (fmappospt, 5); }
-		if (!strncmp (fmappospt, "LYR6", 4)) { chkdn = 1; DecodeLayer (fmappospt, 6); }
-		if (!strncmp (fmappospt, "LYR7", 4)) { chkdn = 1; DecodeLayer (fmappospt, 7); }
+		if (!strncmp (fmappospt, "LYR", 3) && fmappospt[3]>='1' && fmappospt[3]<='9') { chkdn = 1; DecodeLayer (fmappospt, fmappospt[3]-'0'); }
+		/* Layers 10..99: our LY10..LY99 extension (NLYR layout unverified, stays opaque) */
+		if (!strncmp (fmappospt, "LY", 2) && fmappospt[2]>='1' && fmappospt[2]<='9' && fmappospt[3]>='0' && fmappospt[3]<='9') {
+			int lyn = (fmappospt[2]-'0')*10+(fmappospt[3]-'0');
+			if (lyn>=10 && lyn<MAXMAPLAYERS) { chkdn = 1; DecodeLayer (fmappospt, lyn); }
+		}
 		if (!chkdn) DecodeNULL (fmappospt);
 
 		mpfilesize -= 8;
@@ -1813,11 +1820,14 @@ int * myanseqpt;
 	{ if (fwrite (blockgfxpt, 1, 1, filept)!=1)
 	{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; } }
 
-	for (i=0;i<8;i++) { if (mapmappt[i]!=NULL) {
+	for (i=0;i<MAXMAPLAYERS;i++) { if (mapmappt[i]!=NULL) {
 	if (i == 0) {
 		genheader.id1='B'; genheader.id2='O'; genheader.id3='D'; genheader.id4='Y';
-	} else {
+	} else if (i < 10) {
 		genheader.id1='L'; genheader.id2='Y'; genheader.id3='R'; genheader.id4=i+48;
+	} else {
+		/* Layers 10..99: LY10..LY99 extension (NLYR layout unverified) */
+		genheader.id1='L'; genheader.id2='Y'; genheader.id3=(i/10)+48; genheader.id4=(i%10)+48;
 	}
 	genheader.headsize=byteswapl((unsigned long)(mapwidth*mapheight*2));
 
@@ -2361,6 +2371,20 @@ ANISTR * myanpt;
 	}
 }
 
+/* OnionCompto24: composite layers 0..top (skipping NULL) as onion backdrop.
+ * Used for onion==ONION_ALL and onionlower ("show lower layers"). */
+void OnionCompto24 (int x, int y, unsigned char * destpt, int xoff, int yoff, int linesize, int top)
+{
+int l;
+
+	if (top<0) return;
+	if (top>=MAXMAPLAYERS) top = MAXMAPLAYERS-1;
+	for (l=0;l<=top;l++) {
+		if (mapmappt[l]==NULL) continue;
+		Onionto24 (x, y, destpt, xoff, yoff, linesize, l);
+	}
+}
+
 void Overlayto24 (int x, int y, unsigned char * destpt, int xoff, int yoff, int linesize, int olayer)
 {
 int i, isop;
@@ -2759,7 +2783,7 @@ long int * templpt;
 	curstr++; numblockstr++; strpt+=(((int)curstr)*BLOCKSTRSIZE);
 	InsertBytes (strpt, blockstrpt+BKDTMEM, BLOCKSTRSIZE);
 
-	for (k=0;k<8;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
+	for (k=0;k<MAXMAPLAYERS;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
 	for (j=0;j<mapheight;j++)
 	{
 		for (i=0;i<mapwidth;i++)
@@ -2814,7 +2838,7 @@ long int * templpt;
 	blkbuffer.unused2 = blkpt->unused2;
 	blkbuffer.unused3 = blkpt->unused3;
 	RemoveBytes (blktpt, blockstrpt+BKDTMEM, BLOCKSTRSIZE);
-	for (k=0;k<8;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
+	for (k=0;k<MAXMAPLAYERS;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
 	for (j=0;j<mapheight;j++)
 	{
 		for (i=0;i<mapwidth;i++)
@@ -2883,7 +2907,7 @@ long int * templpt;
 	curstr++; numblockstr++;
 	blktpt += ((int)curstr)*BLOCKSTRSIZE;
 	InsertBytes (blktpt, blockstrpt+BKDTMEM, BLOCKSTRSIZE);
-	for (k=0;k<8;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
+	for (k=0;k<MAXMAPLAYERS;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
 	for (j=0;j<mapheight;j++)
 	{
 		for (i=0;i<mapwidth;i++)
@@ -2941,7 +2965,7 @@ short int * mymappt;
 	blkcount = (numblockstr-1); while (blkcount) {
 	blkfound = 0;
    if (isopillars && blkcount > 0) { if (((BLKSTR *) blockstrpt)[blkcount-1].unused1) blkfound = 1; } 
-	for (k=0;k<8;k++) {
+	for (k=0;k<MAXMAPLAYERS;k++) {
 		mymappt = mapmappt[k]; if (mymappt!=NULL) {
 		for (j=0;j<mapheight;j++) {
 			for (i=0;i<mapwidth;i++) {
@@ -3031,7 +3055,7 @@ short int * mymappt;
 	myanim2pt -= 4; templpt = (long int *) myanim2pt; *templpt=0;
 	/* (int) curstr*FMP_BLK_MEMUNIT; */
 
-	for (k=0;k<8;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
+	for (k=0;k<MAXMAPLAYERS;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
 	i = mapwidth*mapheight; while (i) {
 		if (*mymappt<=j) *mymappt -= FMP_ANI_MEMUNIT;
 		mymappt++; i--; } } }
@@ -3088,7 +3112,7 @@ short int * mymappt;
 	copycount = -((curanim+1)*FMP_ANI_MEMUNIT);
 	numblockanim--; if (numblockanim==curanim) curanim--; if (curanim<0) curanim = 0;
 
-	for (k=0;k<8;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
+	for (k=0;k<MAXMAPLAYERS;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
 	i = mapwidth*mapheight; while (i) {
 		if (*mymappt<copycount) *mymappt += FMP_ANI_MEMUNIT;
 		else if (*mymappt==copycount) *mymappt = 0;
@@ -3164,7 +3188,7 @@ short int * mymappt;
 	while (copycount) { *mycpypt = *myabpt; mycpypt++; myabpt++; copycount--; }
 	myanimpt->anendoff = (mycpypt-(animstrpt+ANDTMEM));
 
-	for (k=0;k<8;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
+	for (k=0;k<MAXMAPLAYERS;k++) { mymappt = mapmappt[k]; if (mymappt != NULL) {
 	i = mapwidth*mapheight; while (i) {
 		if (*mymappt<=j) *mymappt -= FMP_ANI_MEMUNIT;
 		mymappt++; i--; } } }
@@ -3230,7 +3254,7 @@ short int * mymappt;
 
 	while (ancount) {
 	anfound = 0;
-	for (k=0;k<8;k++) {
+	for (k=0;k<MAXMAPLAYERS;k++) {
 		mymappt = mapmappt[k]; if (mymappt!=NULL) {
 		for (j=0;j<mapheight;j++) {
 			for (i=0;i<mapwidth;i++) {
@@ -3340,7 +3364,7 @@ int i, j, k;
 short int sxoff, syoff, dxoff, dyoff;
 short int * temppt, * spt, * dpt;
 
-	for (k=0;k<8;k++) { if (mapmappt[k] != NULL) {
+	for (k=0;k<MAXMAPLAYERS;k++) { if (mapmappt[k] != NULL) {
 		temppt = (short int *) malloc (neww*newh*2);
 		if (temppt==NULL) return -1;
 		memset (temppt, 0, neww*newh*2);

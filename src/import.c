@@ -113,6 +113,13 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 	fclose (fpt);
 
 	isapcx = 0;
+	if (!strcmp (imname+strlen(imname)-4, ".png") ||
+		!strcmp (imname+strlen(imname)-4, ".PNG") ||
+		!strcmp (imname+strlen(imname)-4, ".Png")) {
+		/* PNG needs LIBPNG12.DLL at runtime; not linked in this build */
+		MessageBox (NULL, "PNG import needs LIBPNG12.DLL and is not linked in this build.\nConvert the image to BMP or PCX first.", "Map Editor: Import", MB_OK|MB_ICONINFORMATION);
+		free (bmppt); return -1;
+	}
 	if (!strcmp (imname+strlen(imname)-4, ".PCX") ||
 		!strcmp (imname+strlen(imname)-4, ".pcx") ||
 		!strcmp (imname+strlen(imname)-4, ".Pcx")) {
