@@ -17,6 +17,7 @@ char defpname[256];
 static HMENU hMenu = NULL;
 static char szAppname[] = "Mappy - Win32";
 static char argvline[256];
+static char argluascript[256];
 static int curlayer = 0;
 
 extern unsigned char transred, transgreen, transblue, trans8bit;
@@ -255,6 +256,11 @@ FILE * marfpt;
 					strcpy (mapfilename, argvline);
 					LoadProject (); curlayer = 0; Rejig ();
 					argvline[0]=0;
+					/* Run deferred Lua script after map is loaded */
+					if (argluascript[0]) {
+						LuaRunScript (argluascript);
+						argluascript[0]=0;
+					}
 				}
 				break;
 			case CM_ARROWUP:
@@ -1123,10 +1129,17 @@ char * iniinfo, * inipos;
 	i=strlen (defpname); while (i) { if (defpname[i]=='\\' || defpname[i]=='/') break; i--; }
 	if (i>0) defpname[i+1] = 0;
 
- 	argvline[0] = 0;
-	if (lpszCmdParam!=NULL && (strlen(argvline)<256)) {
-	if (lpszCmdParam[0] == '"') { strcpy (argvline, lpszCmdParam+1);
-		argvline[strlen(argvline)-1] = 0; } else { strcpy (argvline, lpszCmdParam); } }
+ 	argvline[0] = 0; argluascript[0] = 0;
+	if (lpszCmdParam!=NULL) {
+		char *p = (char *)lpszCmdParam;
+		/* Parse: "file.fmp" "script.lua" or file.fmp script.lua */
+		while (*p == ' ') p++;
+		if (*p == '"') { p++; { char *q = strchr(p, '"'); if (q) { int n = q-p; if (n>255) n=255; memcpy(argvline, p, n); argvline[n]=0; p = q+1; } } }
+		else { char *q = p; while (*q && *q != ' ') q++; { int n = q-p; if (n>255) n=255; memcpy(argvline, p, n); argvline[n]=0; p = q; } }
+		while (*p == ' ') p++;
+		if (*p == '"') { p++; { char *q = strchr(p, '"'); if (q) { int n = q-p; if (n>255) n=255; memcpy(argluascript, p, n); argluascript[n]=0; } } }
+		else if (*p) { char *q = p; while (*q && *q != ' ') q++; { int n = q-p; if (n>255) n=255; memcpy(argluascript, p, n); argluascript[n]=0; } }
+	}
 
 	defwidth = 640; defheight = 480; gridon = 0; zoomon = 1; picklayer = 1;
 	picklx = 0; pickly = 0; csvadjust = -1; flippedtiles = 0; wlayout = 0;
@@ -1284,18 +1297,16 @@ char * iniinfo, * inipos;
 		DrawMenuBar (hwnd);
 	}
 
-	/* Execute command-line .lua script */
+	/* Execute command-line .lua script (standalone or deferred) */
 	{
 		char * ext = argvline + strlen (argvline);
 		while (ext > argvline && *(ext - 1) != '.' && *(ext - 1) != '/' && *(ext - 1) != '\\') ext--;
 		if (!strcmpi (ext, "lua") && argvline[0]) {
-			char scriptpath[512];
-			sprintf (scriptpath, "%s%s", defpname, argvline);
-			/* Remove filename from defpname for script path */
-			{ char * sl = strrchr (scriptpath, '\\'); if (!sl) sl = strrchr (scriptpath, '/'); if (sl) *(sl + 1) = 0; }
+			/* Standalone .lua (no FMP): run now */
 			LuaRunScript (argvline);
 			argvline[0] = 0;
 		}
+		/* If FMP + .lua provided, case 99 will run script after map loads */
 	}
 
 	while (GetMessage(&msg, NULL, 0, 0)) {

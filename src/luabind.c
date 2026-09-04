@@ -17,6 +17,12 @@
 #include "fmp.h"
 #include "luabind.h"
 
+/* ---- debug logging (minimal, for test harness) ---- */
+static FILE *dbglog = NULL;
+static void dbglog_init(void) {
+	if (!dbglog) dbglog = fopen("lua_test.log", "a");
+}
+
 /* ---- globals from other modules ---- */
 extern short int mapwidth, mapheight, blockwidth, blockheight, blockdepth;
 extern short int numblockstr, numblockgfx, numblockanim, numbrushes;
@@ -1144,6 +1150,9 @@ int LuaRunScript (const char * filename)
 	long len;
 	char * buf;
 	int r;
+	dbglog_init();
+	if (dbglog) fprintf(dbglog, "LuaRunScript: %s\n", filename);
+	if (dbglog) fflush(dbglog);
 	if (L == NULL) return -1;
 	f = fopen (filename, "rb");
 	if (f == NULL) return -1;
@@ -1158,7 +1167,8 @@ int LuaRunScript (const char * filename)
 	r = lua_dostring (L, buf);
 	free (buf);
 	if (r != 0) {
-		MessageBox (hwndMain, lua_tostring (L, -1), "LUA script error", MB_OK | MB_ICONEXCLAMATION);
+		const char *err = lua_tostring (L, -1);
+		MessageBox (hwndMain, err ? err : "Unknown error", "LUA script error", MB_OK | MB_ICONEXCLAMATION);
 		lua_pop (L, 1);
 		return -1;
 	}
