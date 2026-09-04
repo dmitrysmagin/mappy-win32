@@ -87,6 +87,7 @@ char objlabels[16][64] = {
 int objplace = 0;		/* object placement mode (map clicks place) */
 int objshow = 1;		/* draw objects on map */
 int sortobjects = 0;		/* draw objects sorted by Y */
+int luafilemenu = 0;		/* override File menu with luascr/luafile*.lua */
 int objlayeruser = 0;		/* user field holding object layer (0 = off) */
 
 void InvalidateAll (void)
@@ -214,6 +215,22 @@ void Rejig (void)
 	InvalidateAll ();
 }
 
+void MapRenameMenuItem (int code, const char *name)
+{
+	if (hMenu != NULL && name != NULL)
+		ModifyMenu (hMenu, code, MF_BYCOMMAND | MF_STRING, (UINT_PTR) code, name);
+}
+
+const char *MapGetCmdLine (void)
+{
+	return argvline;
+}
+
+HWND MapGetMainHWND (void)
+{
+	return hwnd;
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 //char dropname[256];
@@ -250,6 +267,8 @@ FILE * marfpt;
 		SendMessage (hwnd, WM_COMMAND, 99, 0L);
 		break;
 	case WM_COMMAND:
+		if (luafilemenu && LuaFileMenuRun (LOWORD(wParam)))
+			break;
 		switch (LOWORD(wParam)) {
 			case 99:
 				if (argvline[0]!=0) {
@@ -1246,6 +1265,7 @@ char * iniinfo, * inipos;
 				if (!strncmp (inipos, "objectdialoguelabels", 20)) { i = GetEquals(inipos); { int bl = 0, bc = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && bl<16) { if (inipos[i]==';') { objlabels[bl][bc]=0; bl++; bc = 0; } else if (bc<63) { objlabels[bl][bc++] = inipos[i]; } i++; } if (bl<16) objlabels[bl][bc]=0; } }
 				if (!strncmp (inipos, "sortobjects", 11)) { i = GetEquals(inipos); sortobjects = atoi (inipos+i); }
 				if (!strncmp (inipos, "objlayeruser", 12)) { i = GetEquals(inipos); objlayeruser = atoi (inipos+i); }
+				if (!strncmp (inipos, "luafilemenu", 11)) { i = GetEquals(inipos); luafilemenu = atoi (inipos+i); }
 				if (!strncmp (inipos, "lua", 3) && inipos[3] >= '0' && inipos[3] <= '9') {
 					int li = (inipos[3] - '0') * 10;
 					if (inipos[4] >= '0' && inipos[4] <= '9') li += inipos[4] - '0';
@@ -1296,8 +1316,9 @@ char * iniinfo, * inipos;
 	CreateAnimPreviewWindow (hwnd);
 	Rejig ();
 
-	/* Initialize Lua engine */
-	if (LuaInit () == 0 && numluascript > 0) {
+	/* Initialize Lua engine (always; scripts can be dropped later) */
+	LuaInit ();
+	if (numluascript > 0) {
 		HMENU hScriptMenu = CreateMenu ();
 		int si;
 		for (si = 0; si < numluascript; si++) {
@@ -1308,7 +1329,7 @@ char * iniinfo, * inipos;
 				AppendMenu (hScriptMenu, MF_STRING, 7000 + si, fn);
 			}
 		}
-		InsertMenu (hMenu, 4, MF_BYPOSITION | MF_POPUP, (UINT_PTR) hScriptMenu, "&Scripts");
+		InsertMenu (hMenu, 4, MF_BYPOSITION | MF_POPUP, (UINT_PTR) hScriptMenu, "&Custom");
 		DrawMenuBar (hwnd);
 	}
 

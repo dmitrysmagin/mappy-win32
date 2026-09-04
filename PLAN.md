@@ -52,12 +52,9 @@ This is the real Pro graph UI (`graphed.c` / `_GEDrawGraphEd` in the binary), no
 - `sortblocks` / `sortobjects` Lua filter hooks.
 - Object properties Text String field; next/prev on brushes and objects.
 
-## Stage 3 — LUA IN PROGRESS
+## Stage 3 — LUA [DONE]
 
-L0 harness DONE (Lua 5.0.3, Script menu, drop, cmdline, mouse 5/10/400+).
-68 `mappy.*` names are **registered**; many are stubs or wrong vs `DOCS/luascript.html`. Subplan: `PLAN-LUA.md`.
-
-Must-fix before bundled `luascr/` can match 1.4.23: `getPixel` A,R,G,B; `createBlock(index)`; `sendMessage(CM_,0)`; `shellExecute` 5 args; `fileRequester` / dialogues; `newMap` / chunks / text strings; BlockProp/ObjectProp per-draw hooks; Placer/Area from INI names not hardcoded paths; constants (`NUMLAYERS`, `AN_*`, `MAPONION`, …).
+L0–L4 in `PLAN-LUA.md`. Bundled `src/luascr/` scripts use the 1.4.23 `mappy.*` contracts (`getPixel` A,R,G,B / 8-bit index, `createBlock(index)`, `fileRequester`/`doDialogue`, `sendMessage(CM_,0)`, `shellExecute` 5 args, Placer/Area/400+ mouse, BlockProp/ObjectProp, `luafilemenu`). Custom menu is `&Custom`. Remaining polish: `sortblocks` draw filter, in-GUI script pass.
 
 ## Stage 4 — Polish / release
 

@@ -17,6 +17,7 @@
 #include "mapwin.h"
 #include "compat.h"
 #include "fmp14.h"
+#include "luabind.h"
 
 extern HINSTANCE hInstance;
 extern short int mapwidth, mapheight, blockwidth, blockheight, blockdepth;
@@ -423,6 +424,7 @@ int i;
 	switch (msg) {
 		case WM_INITDIALOG:
 			edidx = (int) lParam;
+			LuaRunObjectProp (edidx);
 			{
 				const F14Obj * o = F14_GetObject (edidx);
 				if (o == NULL) { EndDialog (hwndDlg, -1L); break; }

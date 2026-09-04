@@ -1075,6 +1075,95 @@ uint32_t sz = (uint32_t) MapGetchksz (mdatpt+4);
 	return 0;
 }
 
+int FmpChunkCount (void)
+{
+	int n = 0;
+	FmpUnknownChunk *p = chunklist;
+	while (p) { n++; p = p->next; }
+	return n;
+}
+
+static FmpUnknownChunk *FmpChunkAt (int idx)
+{
+	FmpUnknownChunk *p = chunklist;
+	while (p && idx > 0) { p = p->next; idx--; }
+	return (idx == 0) ? p : NULL;
+}
+
+int FmpChunkCreate (const char *id4, int size, int pos)
+{
+	FmpUnknownChunk *node, *p, *prev;
+	int i;
+	unsigned char *raw;
+	if (id4 == NULL || size < 0) return -1;
+	node = (FmpUnknownChunk *) malloc (sizeof (FmpUnknownChunk) + (size_t) size + 8);
+	if (node == NULL) return -1;
+	memset (node, 0, sizeof (FmpUnknownChunk) + (size_t) size + 8);
+	node->next = NULL;
+	memcpy (node->id, id4, 4);
+	node->size = (uint32_t) size;
+	raw = (unsigned char *) (node + 1);
+	memcpy (raw, id4, 4);
+	raw[4] = (unsigned char) ((size >> 24) & 0xFF);
+	raw[5] = (unsigned char) ((size >> 16) & 0xFF);
+	raw[6] = (unsigned char) ((size >> 8) & 0xFF);
+	raw[7] = (unsigned char) (size & 0xFF);
+	if (pos <= 0 || chunklist == NULL) {
+		node->next = chunklist;
+		chunklist = node;
+		return 0;
+	}
+	prev = chunklist; p = chunklist->next; i = 1;
+	while (p && i < pos) { prev = p; p = p->next; i++; }
+	node->next = p;
+	prev->next = node;
+	return i;
+}
+
+void FmpChunkDelete (int idx)
+{
+	FmpUnknownChunk *p = chunklist, *prev = NULL;
+	while (p && idx > 0) { prev = p; p = p->next; idx--; }
+	if (p == NULL) return;
+	if (prev) prev->next = p->next;
+	else chunklist = p->next;
+	free (p);
+}
+
+int FmpChunkGetVal (int idx, int off)
+{
+	FmpUnknownChunk *p = FmpChunkAt (idx);
+	unsigned char *body;
+	if (p == NULL) return 0;
+	if (off == -1)
+		return ((unsigned char) p->id[0]) |
+			(((unsigned char) p->id[1]) << 8) |
+			(((unsigned char) p->id[2]) << 16) |
+			(((unsigned char) p->id[3]) << 24);
+	if (off == -2) return (int) p->size;
+	if (off < 0 || off >= (int) p->size) return 0;
+	body = (unsigned char *) (p + 1) + 8;
+	return body[off];
+}
+
+void FmpChunkSetVal (int idx, int off, int val)
+{
+	FmpUnknownChunk *p = FmpChunkAt (idx);
+	unsigned char *body;
+	if (p == NULL) return;
+	if (off == -1) {
+		p->id[0] = (char) (val & 0xFF);
+		p->id[1] = (char) ((val >> 8) & 0xFF);
+		p->id[2] = (char) ((val >> 16) & 0xFF);
+		p->id[3] = (char) ((val >> 24) & 0xFF);
+		memcpy ((unsigned char *) (p + 1), p->id, 4);
+		return;
+	}
+	if (off < 0 || off >= (int) p->size) return;
+	body = (unsigned char *) (p + 1) + 8;
+	body[off] = (unsigned char) val;
+}
+
 int MapDecode (FILE * mfpt, int mpfilesize)
 {
 int chkdn;

@@ -18,6 +18,7 @@
 #define F14_MAXLAYERNAMES 100
 #define F14_MAXNAMELEN 64
 #define F14_MAXTEXTSTR 256
+#define F14_MAXTSTRCOUNT 256
 #define F14_MAXOBJ 4096
 #define F14_MAXIMAGES 4096
 #define F14_MAXIMGNAMELEN 260
@@ -84,9 +85,10 @@ int F14_EphdSize(void);              /* stored body size (32 or 40) */
 #define F14_EPHD_S13 15  /* +38 short (present if size > 0x27) */
 #define F14_EPHD_NFIELDS 16
 
-int F14_TstrCount(void);             /* always 4 when present */
+int F14_TstrCount(void);
 const char *F14_TstrGet(int i);
 void F14_TstrSet(int i, const char *s);
+void F14_TstrDelLast(void);
 
 int F14_LstrCount(void);
 const char *F14_LayerName(int i);
@@ -98,11 +100,13 @@ void F14_SetCurObject(int i);
 const F14Obj *F14_GetObject(int i);
 void F14_SetObject(int i, const F14Obj *o);
 int F14_NewObject(void);             /* append zeroed, returns index or -1 */
+int F14_NewObjectAt(int pos);        /* insert at pos, returns index or -1 */
 void F14_DeleteObject(int i);
 
 int F14_NumImages(void);
 const char *F14_ImageName(int i);
 int F14_AddImage(const char *fname);
+void F14_SetImageName(int i, const char *fname);
 void F14_DeleteImage(int i);
 
 /* NOTE: NLYR (100-layer container) and layers 9..99 are intentionally NOT

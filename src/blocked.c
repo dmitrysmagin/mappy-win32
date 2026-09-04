@@ -652,3 +652,8 @@ WNDCLASS wndclass;
 	UpdateWindow(bhwnd);
 	return bhwnd;
 }
+
+HWND BEGetHWND (void)
+{
+	return bhwnd;
+}

@@ -144,26 +144,28 @@ int F14_SaveEPHD(FILE *f, int is_lsb)
 	return 0;
 }
 
-/* ---------------- TSTR (4 fixed strings) ---------------- */
+/* ---------------- TSTR (growable NUL-terminated strings) ---------------- */
 
 static struct {
 	int present;
-	char s[4][F14_MAXTEXTSTR];
+	int count;
+	char s[F14_MAXTSTRCOUNT][F14_MAXTEXTSTR];
 } tstr;
 
 int F14_DecodeTSTR(const unsigned char *chunk, int bodysize)
 {
 	int i, pos = 8; /* chunk+8 = body start */
-	if (bodysize < 4) return -1;
+	if (bodysize < 1) return -1;
 	memset(&tstr, 0, sizeof(tstr));
 	tstr.present = 1;
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < F14_MAXTSTRCOUNT && pos < 8 + bodysize; i++) {
 		int n = 0;
 		while (pos < 8 + bodysize && chunk[pos] != 0 && n < F14_MAXTEXTSTR - 1)
 			tstr.s[i][n++] = (char)chunk[pos++];
 		tstr.s[i][n] = 0;
 		if (pos < 8 + bodysize) pos++; /* skip NUL */
-		else break;
+		tstr.count = i + 1;
+		if (pos >= 8 + bodysize) break;
 	}
 	return 0;
 }
@@ -171,8 +173,8 @@ int F14_DecodeTSTR(const unsigned char *chunk, int bodysize)
 int F14_HasTSTR(void)
 {
 	int i;
-	if (!tstr.present) return 0;
-	for (i = 0; i < 4; i++)
+	if (!tstr.present || tstr.count <= 0) return 0;
+	for (i = 0; i < tstr.count; i++)
 		if (tstr.s[i][0] != 0) return 1;
 	return 0;
 }
@@ -182,27 +184,39 @@ int F14_SaveTSTR(FILE *f)
 	int i;
 	size_t total = 0;
 	if (!F14_HasTSTR()) return 0;
-	for (i = 0; i < 4; i++) total += strlen(tstr.s[i]) + 1;
+	for (i = 0; i < tstr.count; i++) total += strlen(tstr.s[i]) + 1;
 	if (fmp_write_chunk_header(f, 'T', 'S', 'T', 'R', (uint32_t)total) != 0)
 		return -1;
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < tstr.count; i++)
 		if (fwrite(tstr.s[i], 1, strlen(tstr.s[i]) + 1, f) != strlen(tstr.s[i]) + 1)
 			return -1;
 	return 0;
 }
 
-int F14_TstrCount(void) { return tstr.present ? 4 : 0; }
+int F14_TstrCount(void) { return tstr.present ? tstr.count : 0; }
 const char *F14_TstrGet(int i)
 {
-	if (!tstr.present || i < 0 || i > 3) return NULL;
+	if (!tstr.present || i < 0 || i >= tstr.count) return NULL;
 	return tstr.s[i];
 }
 void F14_TstrSet(int i, const char *s)
 {
-	if (i < 0 || i > 3 || s == NULL) return;
+	int k;
+	if (i < 0 || i >= F14_MAXTSTRCOUNT || s == NULL) return;
 	tstr.present = 1;
+	if (i >= tstr.count) {
+		for (k = tstr.count; k < i; k++) tstr.s[k][0] = 0;
+		tstr.count = i + 1;
+	}
 	strncpy(tstr.s[i], s, F14_MAXTEXTSTR - 1);
 	tstr.s[i][F14_MAXTEXTSTR - 1] = 0;
+}
+void F14_TstrDelLast(void)
+{
+	if (!tstr.present || tstr.count <= 0) return;
+	tstr.count--;
+	tstr.s[tstr.count][0] = 0;
+	if (tstr.count == 0) tstr.present = 0;
 }
 
 /* ---------------- LSTR (layer names) ---------------- */
@@ -420,6 +434,21 @@ int F14_NewObject(void)
 	memset(&obs.objs[obs.numobj], 0, sizeof(F14Obj));
 	return obs.numobj++;
 }
+int F14_NewObjectAt(int pos)
+{
+	int i, n;
+	n = F14_NewObject();
+	if (n < 0) return -1;
+	if (pos < 0) pos = 0;
+	if (pos >= n) return n;
+	{
+		F14Obj tmp = obs.objs[n];
+		for (i = n; i > pos; i--) obs.objs[i] = obs.objs[i - 1];
+		obs.objs[pos] = tmp;
+	}
+	obs.curobj = pos;
+	return pos;
+}
 void F14_DeleteObject(int i)
 {
 	int k;
@@ -442,6 +471,20 @@ int F14_AddImage(const char *fname)
 	strncpy(obs.images[obs.numimg], fname, F14_MAXIMGNAMELEN - 1);
 	obs.images[obs.numimg][F14_MAXIMGNAMELEN - 1] = 0;
 	return obs.numimg++;
+}
+void F14_SetImageName(int i, const char *fname)
+{
+	int k;
+	if (i < 0 || i >= F14_MAXIMAGES || fname == NULL) return;
+	if (!obs.have_obdt && obs.numimg == 0) {
+		obs.have_obdt = 1;
+	}
+	if (i >= obs.numimg) {
+		for (k = obs.numimg; k < i; k++) obs.images[k][0] = 0;
+		obs.numimg = i + 1;
+	}
+	strncpy(obs.images[i], fname, F14_MAXIMGNAMELEN - 1);
+	obs.images[i][F14_MAXIMGNAMELEN - 1] = 0;
 }
 void F14_DeleteImage(int i)
 {

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "mapwin.h"
+#include "luabind.h"
 
 typedef struct {	/* Structure for data blocks */
 long int bgoff, fgoff;	/* offsets from start of graphic blocks */
@@ -39,6 +40,7 @@ int megetabrush = 0, onion = 0, oniondark = 0, onionlower = 0;
 int wlayout = 0;
 
 static int meoldbx, meoldby, mebrushx, mebrushy, mebrushx2, mebrushy2;
+static int lua_mb_act = 0, lua_area_x = 0, lua_area_y = 0;
 
 /* Graphic editor mode (when Graph tab selected in Block Editor) */
 extern short int betype;
@@ -121,6 +123,32 @@ void MECopyToUndo (void)
 	if (undobuff2==NULL) { undobuff2 = malloc (mapwidth*mapheight*2);
 		if (undobuff2==NULL) return; memset (undobuff2, 0, mapwidth*mapheight*2); }
 	memcpy (undobuff1, mappt, mapwidth*mapheight*2);
+}
+
+static void MEEnsureUndoBuf (void)
+{
+	size_t n = (size_t) mapwidth * (size_t) mapheight * 2;
+	if (n == 0) return;
+	if (undobuff1==NULL) { undobuff1 = malloc (n); if (undobuff1) memset (undobuff1, 0, n); }
+	if (undobuff2==NULL) { undobuff2 = malloc (n); if (undobuff2) memset (undobuff2, 0, n); }
+}
+
+void MECopyLayerToUndo (short int *src)
+{
+	size_t n = (size_t) mapwidth * (size_t) mapheight * 2;
+	MEEnsureUndoBuf ();
+	if (undobuff1 != NULL && src != NULL) memcpy (undobuff1, src, n);
+}
+
+void MECopyUndoToLayer (short int *dst)
+{
+	size_t n = (size_t) mapwidth * (size_t) mapheight * 2;
+	if (undobuff1 != NULL && dst != NULL) memcpy (dst, undobuff1, n);
+}
+
+HWND MEGetHWND (void)
+{
+	return mhwnd;
 }
 
 int MEClickmask (int x, int y, int xory)
@@ -815,12 +843,19 @@ static int MBDoAction (int act, HWND hwnd, LPARAM lParam)
 			SetCursor(LoadCursor(NULL, IDC_SIZEALL));
 			if (act==4) InvalidateRgn (mhwnd, NULL, FALSE);
 			return 1;
-		case 5: /* Placer.lua */
-		case 10: /* Area.lua */
-			{ extern int LuaRunMouseButton (int, int, int);
-			  int bx = (LOWORD(lParam)) / blockgapx + xmapoffset;
+		case 5: /* Placer.lua — run on click and while dragged */
+			{ int bx = (LOWORD(lParam)) / blockgapx + xmapoffset;
 			  int by = (HIWORD(lParam)) / blockgapy + ymapoffset;
+			  lua_mb_act = 5;
+			  LuaSetMouseBlock (bx, by, bx, by);
 			  LuaRunMouseButton (act, bx, by); }
+			return 1;
+		case 10: /* Area.lua — capture drag, run on button up */
+			{ int bx = (LOWORD(lParam)) / blockgapx + xmapoffset;
+			  int by = (HIWORD(lParam)) / blockgapy + ymapoffset;
+			  lua_mb_act = 10;
+			  lua_area_x = bx; lua_area_y = by;
+			  LuaSetMouseBlock (bx, by, bx, by); }
 			return 1;
 		case 6: /* Pick block */
 			MEPickBlock ();
@@ -836,9 +871,9 @@ static int MBDoAction (int act, HWND hwnd, LPARAM lParam)
 			return 1;
 		default:
 			if (act>=400) {
-				extern int LuaRunMouseButton (int, int, int);
 				int bx = (LOWORD(lParam)) / blockgapx + xmapoffset;
 				int by = (HIWORD(lParam)) / blockgapy + ymapoffset;
+				LuaSetMouseBlock (bx, by, bx, by);
 				LuaRunMouseButton (act, bx, by);
 				return 1;
 			}
@@ -1798,6 +1833,15 @@ PAINTSTRUCT ps;
 		}
 		xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
 		yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
+		LuaSetMouseBlock (lua_mb_act==10 ? lua_area_x : xblk,
+			lua_mb_act==10 ? lua_area_y : yblk,
+			lua_mb_act==10 ? xblk : xblk,
+			lua_mb_act==10 ? yblk : yblk);
+		if (lua_mb_act == 5 && (GetAsyncKeyState(VK_LBUTTON)<0 ||
+			GetAsyncKeyState(VK_RBUTTON)<0 || GetAsyncKeyState(VK_MBUTTON)<0)) {
+			if (meoldbx != xblk || meoldby != yblk)
+				LuaRunMouseButton (5, xblk, yblk);
+		}
 		if (GetAsyncKeyState(VK_LBUTTON)>=0 && !gettingbrush &&
 			GetAsyncKeyState(VK_RBUTTON)>=0) painton = 0;
 		if (meoldbx != xblk || meoldby != yblk) {
@@ -1826,6 +1870,13 @@ PAINTSTRUCT ps;
 			GEOnLButtonUp (hwnd);
 			return 0;
 		}
+		if (lua_mb_act == 10) {
+			xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
+			yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
+			LuaSetMouseBlock (lua_area_x, lua_area_y, xblk, yblk);
+			LuaRunMouseButton (10, xblk, yblk);
+			lua_mb_act = 0;
+		} else lua_mb_act = 0;
 		painton = 0;
 		if (gettingbrush) {
 			if (mebrushx2<mebrushx) { i = mebrushx; mebrushx = mebrushx2; mebrushx2 = i; }
@@ -1839,6 +1890,16 @@ PAINTSTRUCT ps;
 		break;
 	case WM_RBUTTONUP:
 		if (mappt==NULL) break;
+		if (lua_mb_act == 10) {
+			xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
+			yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
+			LuaSetMouseBlock (lua_area_x, lua_area_y, xblk, yblk);
+			LuaRunMouseButton (10, xblk, yblk);
+			lua_mb_act = 0;
+			rmapped = 0;
+			break;
+		}
+		lua_mb_act = 0;
 		if (rmapped) { rmapped = 0; break; }
 		MECopyToUndo ();
 		xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));

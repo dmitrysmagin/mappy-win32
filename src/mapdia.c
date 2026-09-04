@@ -6,6 +6,7 @@
 #include "mapwin.h"
 #include "compat.h"
 #include "fmp14.h"
+#include "luabind.h"
 
 #define ANDTMEM (65536*4)
 #define BLOCKSTRSIZE 32
@@ -462,6 +463,7 @@ BLKSTR * myblkstrpt;
 
 	switch (msg) {
 		case WM_INITDIALOG:
+			LuaRunBlockProp (editnum);
 			if (propedit_haspos)
 				SetWindowPos (hwndDlg, NULL, propedit_rc.left, propedit_rc.top,
 					0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);

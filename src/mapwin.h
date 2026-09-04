@@ -78,7 +78,11 @@ void DIALayerAdj (HWND);
 void DIRemove (HWND);
 /* mapwin.c prototypes */
 void InvalidateAll (void);
+void Rejig (void);
 void RejigBrshMenu (int);
+void MapRenameMenuItem (int code, const char *name);
+const char *MapGetCmdLine (void);
+HWND MapGetMainHWND (void);
 /* maped.c prototypes */
 void MEResizeWind (int, int);
 void MESetScrollRange (int, int, int, int);
@@ -88,6 +92,9 @@ void MEDestroyUndoBuffs (void);
 void MEUndo (void);
 void MEUpdateScrollVis (void);
 HWND CreateMapEditorWindow (HWND);
+HWND MEGetHWND (void);
+void MECopyLayerToUndo (short int *src);
+void MECopyUndoToLayer (short int *dst);
 /* blocked.c prototypes */
 void BEResizeWind (int, int);
 void BENewBlock (void);
@@ -100,8 +107,16 @@ void BEInvalidate (void);
 void BEUpdateScrollVis (void);
 void BESetScrollRange (void);
 HWND CreateBlockEditorWindow (HWND);
+HWND BEGetHWND (void);
 /* import.c prototypes */
 int IMImportBlocks (char *, int);
+void InsertBytes (char *, char *, int);
+void RemoveBytes (char *, char *, int);
+int FmpChunkCount (void);
+int FmpChunkCreate (const char *id4, int size, int pos);
+void FmpChunkDelete (int idx);
+int FmpChunkGetVal (int idx, int off);
+void FmpChunkSetVal (int idx, int off, int val);
 int IMLoadImage24 (char *, unsigned char **, int *, int *);
 /* objedit.c prototypes (Pro object/area/label + graph editors) */
 void DIAObjectProps (HWND, int);
