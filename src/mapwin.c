@@ -622,6 +622,27 @@ FILE * marfpt;
 				mapaltered = 1;
 				Rejig ();
 				break;
+			case CM_TOOLRESIZEBLK:
+				DIAResizeBlk (hwnd);
+				Rejig ();
+				InvalidateAll ();
+				break;
+			case CM_TOOLDUPGFX:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Remove duplicate graphics?\nThis may take a long time.", "Remove Duplicates", MB_ICONQUESTION|MB_YESNO)==IDYES) {
+					RemoveDuplicateGraphics ();
+					Rejig ();
+				}
+				InvalidateAll ();
+				break;
+			case CM_TOOLDUPBLK:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Remove duplicate blocks?\nThis may take a long time.", "Remove Duplicates", MB_ICONQUESTION|MB_YESNO)==IDYES) {
+					RemoveDuplicateBlocks ();
+					Rejig ();
+				}
+				InvalidateAll ();
+				break;
 			case CM_TOOLINFO:
 				if (mappt!=NULL) DIAEditInfo (hwnd);
 				InvalidateAll ();

@@ -3020,3 +3020,224 @@ short int nlayers;
 	return 0;
 }
 
+/* ---------------- Resize Block Dimensions (D_RESIZET) ---------------- */
+
+extern short int blockwidth, blockheight, blockdepth;
+extern char * blockgfxpt;
+extern short int numblockgfx, numblockstr;
+extern short int mapwidth, mapheight;
+extern char * blockstrpt;
+
+BOOL CALLBACK DIAResizeBlkProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+char txt[32];
+int neww, newh, newd;
+
+	switch (msg) {
+		case WM_INITDIALOG:
+			sprintf (txt, "%d", (int) blockwidth);
+			SetWindowText (GetDlgItem (hwndDlg, IDC_RESBLKW), txt);
+			sprintf (txt, "%d", (int) blockheight);
+			SetWindowText (GetDlgItem (hwndDlg, IDC_RESBLKH), txt);
+			SendDlgItemMessage (hwndDlg, IDC_RESBLKD, CB_RESETCONTENT, 0, 0);
+			SendDlgItemMessage (hwndDlg, IDC_RESBLKD, CB_ADDSTRING, 0, (LPARAM) "8");
+			SendDlgItemMessage (hwndDlg, IDC_RESBLKD, CB_ADDSTRING, 0, (LPARAM) "15");
+			SendDlgItemMessage (hwndDlg, IDC_RESBLKD, CB_ADDSTRING, 0, (LPARAM) "16");
+			SendDlgItemMessage (hwndDlg, IDC_RESBLKD, CB_ADDSTRING, 0, (LPARAM) "24");
+			SendDlgItemMessage (hwndDlg, IDC_RESBLKD, CB_ADDSTRING, 0, (LPARAM) "32");
+			{
+				int sel = 0;
+				if (blockdepth == 15) sel = 1;
+				else if (blockdepth == 16) sel = 2;
+				else if (blockdepth == 24) sel = 3;
+				else if (blockdepth == 32) sel = 4;
+				SendDlgItemMessage (hwndDlg, IDC_RESBLKD, CB_SETCURSEL, sel, 0);
+			}
+			break;
+		case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+			case IDOK:
+				GetWindowText (GetDlgItem (hwndDlg, IDC_RESBLKW), txt, 32);
+				neww = atoi (txt);
+				GetWindowText (GetDlgItem (hwndDlg, IDC_RESBLKH), txt, 32);
+				newh = atoi (txt);
+				if (neww < 4 || neww > 252 || newh < 4 || newh > 252) {
+					MessageBox (hwndDlg, "Width and height must be between 4 and 252.", "Resize Block Dimensions", MB_OK|MB_ICONINFORMATION);
+					break;
+				}
+				{
+					int sidx = SendDlgItemMessage (hwndDlg, IDC_RESBLKD, CB_GETCURSEL, 0, 0);
+					const char * depthstrs[] = { "8", "15", "16", "24", "32" };
+					int depths[] = { 8, 15, 16, 24, 32 };
+					newd = depths[sidx];
+				}
+				if (neww == blockwidth && newh == blockheight && newd == blockdepth) {
+					EndDialog (hwndDlg, 0);
+					break;
+				}
+				{
+					int tbpp_old = (blockdepth + 1) / 8;
+					int tbpp_new = (newd + 1) / 8;
+					int oldpixsz = blockwidth * blockheight * tbpp_old;
+					int newpixsz = neww * newh * tbpp_new;
+					int i;
+					int * bs;
+					if (oldpixsz == 0 || newpixsz == 0) break;
+					bs = (int *) blockstrpt;
+					for (i = 0; i < numblockstr; i++) {
+						int * rec = bs + i * 8;
+						int j;
+						for (j = 0; j < 4; j++) {
+							long val = rec[j];
+							rec[j] = (int) ((long) val * newpixsz / oldpixsz);
+						}
+					}
+					blockwidth = (short int) neww;
+					blockheight = (short int) newh;
+					blockdepth = (short int) newd;
+					if (blockgfxpt != NULL) memset (blockgfxpt, 0, numblockgfx * newpixsz);
+					mapaltered = 1;
+					MessageBox (hwndDlg, "Block dimensions changed.\nBlock graphics have been reset to zero.", "Resize Block Dimensions", MB_OK|MB_ICONINFORMATION);
+				}
+				EndDialog (hwndDlg, 1);
+				break;
+			case IDCANCEL:
+				EndDialog (hwndDlg, 0);
+				break;
+		}
+		break;
+		default:
+			return 0;
+	}
+	return -1;
+}
+
+void DIAResizeBlk (HWND hwnd)
+{
+DLGPROC dlgprc;
+
+	if (mappt == NULL) {
+		MessageBox (hwnd, "Load or create a map first.", "Resize Block Dimensions", MB_OK|MB_ICONINFORMATION);
+		return;
+	}
+	dlgprc = (DLGPROC) MakeProcInstance (DIAResizeBlkProc, hInstance);
+	DialogBox (hInstance, (LPCSTR) "D_RESIZET", hwnd, dlgprc);
+	FreeProcInstance((FARPROC) dlgprc);
+	return;
+}
+
+/* ---------------- Remove Duplicate Graphics ---------------- */
+
+static int OE_GfxBytes (void)
+{
+	return blockwidth * blockheight * ((blockdepth + 1) / 8);
+}
+
+static int OE_GfxEq (int a, int b)
+{
+	char * ga = blockgfxpt + a * OE_GfxBytes ();
+	char * gb = blockgfxpt + b * OE_GfxBytes ();
+	return (memcmp (ga, gb, OE_GfxBytes ()) == 0);
+}
+
+void RemoveDuplicateGraphics (void)
+{
+	int n, i, j, compacted;
+	char * deleted;
+	int bytes_per_gfx;
+
+	if (blockgfxpt == NULL || numblockgfx <= 1) return;
+	bytes_per_gfx = OE_GfxBytes ();
+	deleted = (char *) calloc (numblockgfx, 1);
+	if (deleted == NULL) return;
+
+	compacted = 0;
+	for (i = 1; i < numblockgfx; i++) {
+		if (deleted[i]) continue;
+		for (j = 0; j < i; j++) {
+			if (deleted[j]) continue;
+			if (OE_GfxEq (i, j)) {
+				deleted[i] = 1;
+				/* reindex block references: i -> j */
+				/* BLKSTR layout (32 bytes): bgoff(+0), fgoff(+4), fgoff2(+8), fgoff3(+12), ... */
+				{
+					int k;
+					for (k = 0; k < numblockstr; k++) {
+						int * rec = (int *) (blockstrpt + k * 32);
+						if (rec[0] == i * bytes_per_gfx) rec[0] = j * bytes_per_gfx;
+						if (rec[1] == i * bytes_per_gfx) rec[1] = j * bytes_per_gfx;
+						if (rec[2] == i * bytes_per_gfx) rec[2] = j * bytes_per_gfx;
+						if (rec[3] == i * bytes_per_gfx) rec[3] = j * bytes_per_gfx;
+					}
+				}
+				break;
+			}
+		}
+	}
+
+	/* compact: move non-deleted forward */
+	compacted = 0;
+	for (i = 0; i < numblockgfx; i++) {
+		if (deleted[i]) {
+			compacted++;
+			continue;
+		}
+		if (compacted > 0) {
+			memcpy (blockgfxpt + (i - compacted) * bytes_per_gfx,
+				blockgfxpt + i * bytes_per_gfx, bytes_per_gfx);
+		}
+	}
+	numblockgfx -= compacted;
+	free (deleted);
+	mapaltered = 1;
+}
+
+/* ---------------- Remove Duplicate Blocks ---------------- */
+
+static int OE_BlkEq (int a, int b)
+{
+	/* BLKSTR layout: 8 int32 (32 bytes), last int32 masks bits 20-23 */
+	unsigned int * ra = (unsigned int *) (blockstrpt + a * 32);
+	unsigned int * rb = (unsigned int *) (blockstrpt + b * 32);
+	int k;
+	for (k = 0; k < 7; k++) {
+		if (ra[k] != rb[k]) return 0;
+	}
+	if ((ra[7] & 0x0F0FFFFF) != (rb[7] & 0x0F0FFFFF)) return 0;
+	return 1;
+}
+
+void RemoveDuplicateBlocks (void)
+{
+	int n, i, j;
+
+	if (blockstrpt == NULL || numblockstr <= 1) return;
+
+	for (i = 1; i < numblockstr; i++) {
+		for (j = 0; j < i; j++) {
+			if (OE_BlkEq (i, j)) {
+				/* duplicate: reindex all map layers i -> j */
+				int k, mx, my;
+				for (k = 0; k < MAXMAPLAYERS; k++) {
+					short int * mp = mapmappt[k];
+					if (mp == NULL) continue;
+					for (my = 0; my < mapheight; my++) {
+						for (mx = 0; mx < mapwidth; mx++) {
+							if (mp[mx + my * mapwidth] == (short int) i)
+								mp[mx + my * mapwidth] = (short int) j;
+						}
+					}
+				}
+				/* shift higher-indexed blocks down by overwriting */
+				memmove (blockstrpt + i * 32, blockstrpt + (i + 1) * 32,
+					(numblockstr - i - 1) * 32);
+				numblockstr--;
+				i--; /* re-check this index */
+				mapaltered = 1;
+				break;
+			}
+		}
+	}
+}
+

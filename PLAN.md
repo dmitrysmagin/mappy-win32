@@ -27,9 +27,15 @@ Stage 1b DONE (all `mapwin.lst`-checked where noted, build clean, smoke `exit=12
 - Key/mouse mapping (`.lst`-verified tables): `l/m/r/xbutton1-4` + exact 0-10 action list (`None/Current block/Block 0/Drag map 1/Drag map 2/Placer.lua/Pick block/Lay path/Fill/Line/Area.lua`; 100+ = CM_, Lua entries message Stage 3); `keyF1-10/key1-3/keyi/keyk/keym` -> CM_ in main + map windows; F1 accelerator removed so `keyF1` remaps (default 119 = help).
 - Drop routing fixed (images -> import, `.MAR` -> layer re-import, no rename on non-map drops).
 
-Stage 1b REMAINING (deferred, no verified spec in `.lst`/docs):
-- `Save FMP without graphics`, `Change block size/depth`, Import-`.MAP`-as-layers, marker-graphics/Adjust-Values helpers, remove-duplicate perf (function exists).
-- `ANIBLKSTRCUT/UNUSED/GBA8X816/OBJSTR/AREASTR` text flags (need Stage 2 objects/areas + Lua GBA scripts).
+Stage 1b REMAINING DONE (build clean, smoke `exit=124`):
+- Resize block dimensions: `D_RESIZET` dialog (`DIAResizeBlk` in `src/mapdia.c`): width/height edit (4..252), depth combo (8/15/16/24/32), block struct offsets rescaled proportionally, graphics buffer zeroed with "graphics have been reset" warning. Menu item `CM_TOOLRESIZEBLK` under Useful functions.
+- Remove duplicate graphics: `RemoveDuplicateGraphics` in `src/mapdia.c` (brute-force O(n^2) pixel-by-pixel compare via `memcmp`, mark-and-sweep deletion, block reference reindexing, buffer compaction). Menu `CM_TOOLDUPGFX` (Ctrl+Shift+G).
+- Remove duplicate blocks: `RemoveDuplicateBlocks` in `src/mapdia.c` (O(n^2) 32-byte record compare with mask `0x0F0FFFFF` on flags, map layer reindexing, `memmove` compaction). Menu `CM_TOOLDUPBLK` (Ctrl+Shift+B).
+
+Stage 1b CANCELLED (no verified spec in binary):
+- `Save FMP without graphics`: No conditional skip found in the binary's save path; BGFX always written.
+- Import `.MAP` as layers: `sub_439040` always replaces current layer; no "import as additional layer" function exists.
+- Marker-graphics / Adjust-Values helpers: Not found as distinct functions in `.lst`.
 
 ## Stage 2 — Pro editors (still no LUA) DONE
 Batch built clean, smoke `exit=124`:
@@ -41,10 +47,6 @@ Batch built clean, smoke `exit=124`:
 - Objects menu + menu items wired in `mapwin.c` (`CM_OBJMGR/CM_OBJPLACE/CM_OBJSHOW/CM_GRAPHEDIT`); Objects menu checked at load; `objplace` exported to `maped.c`.
 - `F14_SetCurObject`, `F14_DeleteImage` added to `src/fmp14.c` public API.
 - `objedit.o` added to Makefile.
-
-Stage 1b REMAINING (deferred, no verified spec in `.lst`/docs):
-- `Save FMP without graphics`, `Change block size/depth`, Import-`.MAP`-as-layers, marker-graphics/Adjust-Values helpers, remove-duplicate perf (function exists).
-- `ANIBLKSTRCUT/UNUSED/GBA8X816/OBJSTR/AREASTR` text flags (need Lua GBA scripts).
 
 ## Stage 3 — LUA (deferred)
 Subplan in `PLAN-LUA.md` (to be created). Scope: engine + bindings + scripts + INI/menus. Not started until Stages 1-2 are stable.

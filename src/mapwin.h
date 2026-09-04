@@ -109,6 +109,9 @@ int OE_PickObject (int, int);
 void OE_PlaceSelected (int, int, int);
 int OE_ObjOverlayText (int, int, char *, int);
 void OE_ExportObjStr (FILE *, const char *, int);
+void DIAResizeBlk (HWND);
+void RemoveDuplicateGraphics (void);
+void RemoveDuplicateBlocks (void);
 /* animprev.cpp prototypes */
 void APDisplayMode (char *);
 void APSetup (HWND, int);
