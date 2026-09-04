@@ -48,8 +48,8 @@ Batch built clean, smoke `exit=124`:
 - `F14_SetCurObject`, `F14_DeleteImage` added to `src/fmp14.c` public API.
 - `objedit.o` added to Makefile.
 
-## Stage 3 — LUA (deferred)
-Subplan in `PLAN-LUA.md` (to be created). Scope: engine + bindings + scripts + INI/menus. Not started until Stages 1-2 are stable.
+## Stage 3 — LUA (in progress)
+Lua 5.0.3 source placed in `src/lua/lua-5.0.3/`. Makefile compiles core + lib objects. `luabind.c` registers 68 `mappy.*` functions + constants. `mapwin.c` wires INI `lua0-16`, Script menu (IDs 7000+), command-line `.lua` dispatch, `LuaShutdown()`. `maped.c` dispatches mouse buttons 5/10/400+ to `LuaRunMouseButton`. Build clean, smoke `exit=124`. Runtime testing pending (requires GUI). Subplan in `PLAN-LUA.md`.
 
 ## Stage 4 — Polish / release
 - `MAPWIN.INI` comments/defaults sync with `mapwin1423/MAPWIN.INI`, docs sync (`MAPWIN.HTM`, Pro docs), About cleanup, Tutorials-menu removal check.

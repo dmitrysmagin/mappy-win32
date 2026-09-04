@@ -810,7 +810,10 @@ static int MBDoAction (int act, HWND hwnd, LPARAM lParam)
 			return 1;
 		case 5: /* Placer.lua */
 		case 10: /* Area.lua */
-			MessageBox (hwnd, "This mousebutton runs a Lua script (Placer/Area).\nLua support is Stage 3 and not in this build.", "Map Editor: Mousebuttons", MB_OK|MB_ICONINFORMATION);
+			{ extern int LuaRunMouseButton (int, int, int);
+			  int bx = (LOWORD(lParam)) / blockgapx + xmapoffset;
+			  int by = (HIWORD(lParam)) / blockgapy + ymapoffset;
+			  LuaRunMouseButton (act, bx, by); }
 			return 1;
 		case 6: /* Pick block */
 			MEPickBlock ();
@@ -825,6 +828,13 @@ static int MBDoAction (int act, HWND hwnd, LPARAM lParam)
 			if (linemode) linemode = 0; else { linemode = 1; pathmode = 0; }
 			return 1;
 		default:
+			if (act>=400) {
+				extern int LuaRunMouseButton (int, int, int);
+				int bx = (LOWORD(lParam)) / blockgapx + xmapoffset;
+				int by = (HIWORD(lParam)) / blockgapy + ymapoffset;
+				LuaRunMouseButton (act, bx, by);
+				return 1;
+			}
 			if (act>=100) {
 				SendMessage (GetParent (hwnd), WM_COMMAND, act, 0);
 				return 1;

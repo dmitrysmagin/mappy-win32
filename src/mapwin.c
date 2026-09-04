@@ -9,6 +9,7 @@
 #include "mapwin.h"
 #include "compat.h"
 #include "fmp14.h"
+#include "luabind.h"
 
 HINSTANCE hInstance;
 HWND hwnd;
@@ -1211,6 +1212,15 @@ char * iniinfo, * inipos;
 				if (!strncmp (inipos, "objectdialoguelabels", 20)) { i = GetEquals(inipos); { int bl = 0, bc = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && bl<16) { if (inipos[i]==';') { objlabels[bl][bc]=0; bl++; bc = 0; } else if (bc<63) { objlabels[bl][bc++] = inipos[i]; } i++; } if (bl<16) objlabels[bl][bc]=0; } }
 				if (!strncmp (inipos, "sortobjects", 11)) { i = GetEquals(inipos); sortobjects = atoi (inipos+i); }
 				if (!strncmp (inipos, "objlayeruser", 12)) { i = GetEquals(inipos); objlayeruser = atoi (inipos+i); }
+				if (!strncmp (inipos, "lua", 3) && inipos[3] >= '0' && inipos[3] <= '9') {
+					int li = (inipos[3] - '0') * 10;
+					if (inipos[4] >= '0' && inipos[4] <= '9') li += inipos[4] - '0';
+					if (li >= 0 && li < MAXLUAMENU) {
+						i = GetEquals(inipos);
+						{ int q = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && q<259) { luascriptmenu[li][q++] = inipos[i]; i++; } luascriptmenu[li][q]=0; }
+						if (li >= numluascript) numluascript = li + 1;
+					}
+				}
 				if (!strncmp (inipos, "tbarname", 8)) { i = GetEquals(inipos); { int q = 0; if (inipos[i]=='"') i++; while (inipos[i] && inipos[i]!='"' && q<62) { tbarname[q++] = inipos[i]; i++; } tbarname[q]=0; } }
 			}
 			while (inipos<(iniinfo+flength)) { if (*inipos==0x0a) break; inipos++; } inipos++;
@@ -1252,6 +1262,36 @@ char * iniinfo, * inipos;
 	CreateAnimPreviewWindow (hwnd);
 	Rejig ();
 
+	/* Initialize Lua engine */
+	if (LuaInit () == 0 && numluascript > 0) {
+		HMENU hScriptMenu = CreateMenu ();
+		int si;
+		for (si = 0; si < numluascript; si++) {
+			if (luascriptmenu[si][0]) {
+				char * fn = strrchr (luascriptmenu[si], '/');
+				if (!fn) fn = strrchr (luascriptmenu[si], '\\');
+				if (!fn) fn = luascriptmenu[si]; else fn++;
+				AppendMenu (hScriptMenu, MF_STRING, 7000 + si, fn);
+			}
+		}
+		InsertMenu (hMenu, 4, MF_BYPOSITION | MF_POPUP, (UINT_PTR) hScriptMenu, "&Scripts");
+		DrawMenuBar (hwnd);
+	}
+
+	/* Execute command-line .lua script */
+	{
+		char * ext = argvline + strlen (argvline);
+		while (ext > argvline && *(ext - 1) != '.' && *(ext - 1) != '/' && *(ext - 1) != '\\') ext--;
+		if (!strcmpi (ext, "lua") && argvline[0]) {
+			char scriptpath[512];
+			sprintf (scriptpath, "%s%s", defpname, argvline);
+			/* Remove filename from defpname for script path */
+			{ char * sl = strrchr (scriptpath, '\\'); if (!sl) sl = strrchr (scriptpath, '/'); if (sl) *(sl + 1) = 0; }
+			LuaRunScript (argvline);
+			argvline[0] = 0;
+		}
+	}
+
 	while (GetMessage(&msg, NULL, 0, 0)) {
 		if (TranslateAccelerator( hwnd, haccel, (LPMSG)&msg ) == 0) {
 			TranslateMessage(&msg);
@@ -1259,6 +1299,7 @@ char * iniinfo, * inipos;
 		}
 	}
 
+	LuaShutdown ();
 	APCleanup ();
 	FreeAll ();
 	return (int)msg.wParam;

@@ -23,19 +23,28 @@ DXLIBS  =
 CDEFINES =
 endif
 
-CFILES  = mapfunc.c fmp14.c mapwin.c maped.c blocked.c mapdia.c mapcust.c import.c objedit.c $(ANIMSRC)
+# Lua 5.0.3 (statically linked)
+LUADIR  = lua-5.0.3/src
+LUADIR2 = lua-5.0.3/src/lib
+LUA_CFILES = $(filter-out $(LUADIR)/ltests.c, $(wildcard $(LUADIR)/*.c))
+LUA_CFILES += $(filter-out $(LUADIR2)/loadlib.c, $(wildcard $(LUADIR2)/*.c))
+LUA_OFILES = $(LUA_CFILES:.c=.o)
+LUA_CFLAGS = -O2 -Wall -Wextra -std=gnu99 -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -I$(LUADIR)/../include
+
+CFILES  = mapfunc.c fmp14.c mapwin.c maped.c blocked.c mapdia.c mapcust.c import.c objedit.c luabind.c $(ANIMSRC)
 OFILES  = $(CFILES:.c=.o)
 DFILES  = $(CFILES:.c=.d)
 
 CFLAGS  = -O2 -Wall -Wextra -std=gnu99
 CFLAGS  += $(CDEFINES) -D_WIN32_WINNT=0x0601 -DWINVER=0x0601
+CFLAGS  += -I$(LUADIR)/../include
 LDFLAGS = -mwindows
 LIBS    = -lcomdlg32 -lgdi32 -luser32 -lkernel32 -lcomctl32 $(DXLIBS)
 
 # --------------------------------------------------------------------
 
-$(PROGRAM): $(OFILES) mapwinrc.o
-	$(CC) $(LDFLAGS) -o $@ $(OFILES) mapwinrc.o $(LIBS)
+$(PROGRAM): $(OFILES) $(LUA_OFILES) mapwinrc.o
+	$(CC) $(LDFLAGS) -o $@ $(OFILES) $(LUA_OFILES) mapwinrc.o $(LIBS)
 
 mapwinrc.o: mapwin.rc mapdefs.h MAPWIN.ICO
 	$(WINDRES) mapwin.rc -o mapwinrc.o
@@ -44,6 +53,9 @@ mapwinrc.o: mapwin.rc mapdefs.h MAPWIN.ICO
 MAPWIN.ICO:
 	@if [ ! -f mapwin.ico ] && [ -f MAPWIN.ICO ]; then cp MAPWIN.ICO mapwin.ico; fi
 
+$(LUADIR)/%.o: $(LUADIR)/%.c
+	$(CC) $(LUA_CFLAGS) -MMD -MP -o $@ -c $<
+
 %.o: %.c
 	$(CC) $(CFLAGS) -MMD -MP -o $@ -c $<
 
@@ -51,4 +63,4 @@ MAPWIN.ICO:
 
 .PHONY: clean
 clean:
-	rm -f *.o *.d *.exe mapwinrc.o
+	rm -f *.o *.d *.exe mapwinrc.o $(LUADIR)/*.o $(LUADIR)/*.d
