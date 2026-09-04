@@ -86,6 +86,8 @@ extern unsigned char trans8bit, transred, transgreen, transblue;
 extern unsigned char trans16hi, trans16low;
 
 static int editnum, pgfxnum, editpoint, pickwhat, totalmapmem, hexordec;
+static int propedit_haspos = 0; /* remember Block Properties pos across reopen */
+static RECT propedit_rc;
 static short int newmapwidth, newmapheight, newmapdepth, newblockwidth, newblockheight;
 static int newblockgapx, newblockgapy, newblockstaggerx, newblockstaggery, newmaptype;
 static short int newframes[33];
@@ -460,6 +462,9 @@ BLKSTR * myblkstrpt;
 
 	switch (msg) {
 		case WM_INITDIALOG:
+			if (propedit_haspos)
+				SetWindowPos (hwndDlg, NULL, propedit_rc.left, propedit_rc.top,
+					0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 			sprintf (mytext, "Block Structure %d", editnum);
 			SetDlgItemText(hwndDlg, IDC_PROPNUM, mytext);
 			/* user-settable dialogue labels (blockdialoguelabels= in mapwin.ini) */
@@ -611,12 +616,15 @@ BLKSTR * myblkstrpt;
 				SendMessage (hwndDlg, WM_CLOSE, 0, 2L);
 				break;
 			case IDC_PROPUNUSED2:
-				DIAFillUsers (hwndDlg);
-				SendMessage (hwndDlg, WM_CLOSE, 0, 7L);
-				break;
 			case IDC_PROPUNUSED3:
+				/* Flip H/V flags: redraw the previews in place instead of
+				 * closing + reopening the dialog (which reset its position) */
 				DIAFillUsers (hwndDlg);
-				SendMessage (hwndDlg, WM_CLOSE, 0, 8L);
+				InvalidateRect (GetDlgItem (hwndDlg, IDC_PROPVIEW), NULL, TRUE);
+				InvalidateRect (GetDlgItem (hwndDlg, IDC_PROPBG), NULL, TRUE);
+				InvalidateRect (GetDlgItem (hwndDlg, IDC_PROPFG1), NULL, TRUE);
+				InvalidateRect (GetDlgItem (hwndDlg, IDC_PROPFG2), NULL, TRUE);
+				InvalidateRect (GetDlgItem (hwndDlg, IDC_PROPFG3), NULL, TRUE);
 				break;
 			case IDOK:
 				DIAFillUsers (hwndDlg);
@@ -625,6 +633,13 @@ BLKSTR * myblkstrpt;
 		}
 		break;
 		case WM_CLOSE:
+			if (lParam!=0 && IsWindowVisible (hwndDlg)) {
+				/* reopen follows (prev/next/pick): remember position */
+				GetWindowRect (hwndDlg, &propedit_rc);
+				propedit_haspos = 1;
+			} else if (lParam==0) {
+				propedit_haspos = 0;
+			}
 			EndDialog (hwndDlg, lParam);
 			break;
 		default:
