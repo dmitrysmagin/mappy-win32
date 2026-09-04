@@ -30,6 +30,13 @@ void BEInvalidate (void)
 	InvalidateRgn (bhwnd, NULL, FALSE);
 }
 
+/* Hide the scrollbar when no map is loaded (see MEUpdateScrollVis). */
+void BEUpdateScrollVis (void)
+{
+	if (bhwnd==NULL) return;
+	ShowScrollBar (bhwnd, SB_VERT, blockgfxpt!=NULL ? TRUE : FALSE);
+}
+
 void BEBlockNext (void)
 {
 	if (!(curbrsh>0 && curbrsh<9) && curanim==-1 && curstr<(numblockstr-1) && !betype)
@@ -350,7 +357,7 @@ WNDCLASS wndclass;
 		wndclass.hInstance = hInstance;
 		wndclass.hIcon = LoadIcon(hInstance, "MAPWINIC");
 		wndclass.hCursor = LoadCursor(NULL, (LPCSTR) IDC_ARROW);
-		wndclass.hbrBackground = NULL; //GetStockObject (GRAY_BRUSH);
+		wndclass.hbrBackground = (HBRUSH) GetStockObject (GRAY_BRUSH);
 		wndclass.lpszMenuName = NULL;
 		wndclass.lpszClassName = szBlockEdname;
 		RegisterClass(&wndclass);
@@ -366,6 +373,7 @@ WNDCLASS wndclass;
 								(rc.bottom)-(rc.top)-30-GetSystemMetrics(SM_CYCAPTION),
 								hwnd, (HMENU) 1001, hInstance, NULL);
 
+	BEUpdateScrollVis (); /* no map yet: hide scrollbar until one loads */
 	ShowWindow(bhwnd, SW_SHOW);
 	UpdateWindow(bhwnd);
 	return bhwnd;

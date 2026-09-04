@@ -1174,7 +1174,7 @@ WNDCLASS wndclass;
 		wndclass.hInstance = hInstance;
 		wndclass.hIcon = LoadIcon(hInstance, "MAPWINIC");
 		wndclass.hCursor = LoadCursor(NULL, (LPCSTR) IDC_ARROW);
-		wndclass.hbrBackground = NULL; GetStockObject (GRAY_BRUSH);
+		wndclass.hbrBackground = (HBRUSH) GetStockObject (GRAY_BRUSH);
 		wndclass.lpszMenuName = NULL;
 		wndclass.lpszClassName = szMapEdname;
 		RegisterClass(&wndclass);
@@ -1189,7 +1189,16 @@ WNDCLASS wndclass;
 								(rc.bottom)-(rc.top)-30-GetSystemMetrics(SM_CYCAPTION),
 								hwnd, (HMENU) 1000, hInstance, NULL);
 
+	MEUpdateScrollVis (); /* no map yet: hide scrollbars until one loads */
 	ShowWindow(mhwnd, SW_SHOW);
 	UpdateWindow(mhwnd);
 	return mhwnd;
+}
+
+/* Hide scrollbars when no map is loaded (avoids zero-range scrollbar
+ * artifacts, e.g. white strip when maximized with nothing open). */
+void MEUpdateScrollVis (void)
+{
+	if (mhwnd==NULL) return;
+	ShowScrollBar (mhwnd, SB_BOTH, mappt!=NULL ? TRUE : FALSE);
 }

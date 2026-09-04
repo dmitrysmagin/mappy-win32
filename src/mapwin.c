@@ -194,6 +194,8 @@ void Rejig (void)
 		RejigBrshMenu (curbrsh);
 		RejigLayerMenu (curlayer);
 	}
+	MEUpdateScrollVis ();
+	BEUpdateScrollVis ();
 	if (tbarname[0]) {
 		SetWindowText(hwnd, tbarname);
 	} else {

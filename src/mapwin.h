@@ -82,6 +82,7 @@ void MEPickBlock (void);
 void MEFillMap (int);
 void MEDestroyUndoBuffs (void);
 void MEUndo (void);
+void MEUpdateScrollVis (void);
 HWND CreateMapEditorWindow (HWND);
 /* blocked.c prototypes */
 void BEResizeWind (int, int);
@@ -92,6 +93,7 @@ void BEPasteBlock (void);
 void BEBlockNext (void);
 void BEBlockPrev (void);
 void BEInvalidate (void);
+void BEUpdateScrollVis (void);
 void BESetScrollRange (void);
 HWND CreateBlockEditorWindow (HWND);
 /* import.c prototypes */
