@@ -1,5 +1,6 @@
 # Makefile for Mappy Win32 (modernized, MinGW64) - lives in src/
-# Usage:
+# From repo root: make / make clean / make WITH_DX=1
+# From this directory:
 #   mingw32-make            # default: no DirectX preview (uses animstub.c)
 #   mingw32-make WITH_DX=1  # DirectX anim preview (uses animprev.c, -lddraw -ldxguid)
 #   mingw32-make clean
