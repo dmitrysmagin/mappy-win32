@@ -40,6 +40,13 @@ int wlayout = 0;
 
 static int meoldbx, meoldby, mebrushx, mebrushy, mebrushx2, mebrushy2;
 
+/* Graphic editor mode (when Graph tab selected in Block Editor) */
+extern short int betype;
+extern short int curgfxsel;
+extern short int numblockgfx;
+extern unsigned char * cmappt;
+#define BETYPE_GRAPH 2
+
 /* Tier-2: line/drag/path tools */
 static int linemode = 0;		/* 1=line tool active */
 static int linecx, linecy;		/* line start (map coords) */
@@ -893,6 +900,261 @@ static void MEDragFinish (void)
 	SetCursor(LoadCursor(NULL, IDC_ARROW));
 }
 
+/* ---- Graphic editor mode (Graph tab) ---- */
+
+static int GE_gfxcol = 0;
+static int GE_thickness = 1;
+
+static int GE_FindBlockForGraphic (int gfx)
+{
+	int i;
+	BLKSTR * blk;
+	for (i = 0; i < numblockstr; i++) {
+		blk = (BLKSTR *) (blockstrpt + i * SOBSTR);
+		if ((int)blk->bgoff == gfx * blockwidth * blockheight * ((blockdepth+1)/8))
+			return i;
+	}
+	return -1;
+}
+
+static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
+{
+	RECT rc;
+	int pw, ph, tilepx, tilepy, tilesize;
+	HDC fromhdc;
+	HBITMAP temphbm, hbmpold;
+	unsigned char * tb;
+	BITMAPINFOHEADER bih;
+	char txt[64];
+
+	GetClientRect (phwnd, &rc);
+	pw = rc.right - rc.left;
+	ph = rc.bottom - rc.top;
+
+	/* Background: dark grey */
+	{ RECT brc = rc; FillRect (myhdc, &brc, (HBRUSH)GetStockObject(DKGRAY_BRUSH)); }
+
+	if (blockgfxpt == NULL || numblockgfx <= 0) {
+		SetBkColor (myhdc, RGB(0x44,0x44,0x44));
+		SetTextColor (myhdc, RGB(255,255,255));
+		TextOut (myhdc, 8, 8, "No graphics loaded", 18);
+		return;
+	}
+	if (curgfxsel < 0) curgfxsel = 0;
+	if (curgfxsel >= numblockgfx) curgfxsel = numblockgfx - 1;
+
+	/* Tile preview: fill left portion of window */
+	tilesize = ph - 80;
+	if (tilesize < blockwidth) tilesize = blockwidth;
+	if (tilesize > pw - 200) tilesize = pw - 200;
+	tilepx = 8;
+	tilepy = 8;
+
+	tb = malloc (blockwidth * blockheight * 3);
+	if (tb == NULL) return;
+	memset (tb, 0, blockwidth * blockheight * 3);
+	BlockGfxto24 (curgfxsel, tb, 0, 0, blockwidth * 3);
+
+	fromhdc = CreateCompatibleDC (myhdc);
+	memset (&bih, 0, sizeof(bih));
+	bih.biSize = sizeof(bih);
+	bih.biWidth = blockwidth;
+	bih.biHeight = -blockheight;
+	bih.biPlanes = 1;
+	bih.biBitCount = 24;
+	bih.biCompression = BI_RGB;
+
+	temphbm = CreateDIBitmap (myhdc, &bih, CBM_INIT, tb, (BITMAPINFO*)&bih, DIB_RGB_COLORS);
+	hbmpold = SelectObject (fromhdc, temphbm);
+	StretchBlt (myhdc, tilepx, tilepy, tilesize, tilesize, fromhdc, 0, 0, blockwidth, blockheight, SRCCOPY);
+	SelectObject (fromhdc, hbmpold);
+	DeleteObject (temphbm);
+
+	/* Grid lines on tile preview */
+	{
+		HPEN hpen, hold;
+		int gx, gy;
+		hpen = CreatePen (PS_SOLID, 1, RGB(0x66,0x66,0x66));
+		hold = SelectObject (myhdc, hpen);
+		for (gx = 1; gx < blockwidth; gx++) {
+			int sx = tilepx + gx * tilesize / blockwidth;
+			MoveToEx (myhdc, sx, tilepy, NULL);
+			LineTo (myhdc, sx, tilepy + tilesize);
+		}
+		for (gy = 1; gy < blockheight; gy++) {
+			int sy = tilepy + gy * tilesize / blockheight;
+			MoveToEx (myhdc, tilepx, sy, NULL);
+			LineTo (myhdc, tilepx + tilesize, sy);
+		}
+		SelectObject (myhdc, hold);
+		DeleteObject (hpen);
+	}
+
+	free (tb);
+
+	/* Palette: top-right area */
+	{
+		int palx = tilepx + tilesize + 16;
+		int paly = 8;
+		int palsz = pw - palx - 8;
+		int cols, rows, cw, ch, cx, cy;
+		RECT prc;
+
+		if (palsz > 256) palsz = 256;
+		if (palsz > 16 * 12) palsz = 16 * 12;
+		cols = 16;
+		rows = (palsz / cols > 16) ? 16 : palsz / cols;
+		if (rows < 1) rows = 1;
+		cw = palsz / cols;
+		ch = cw;
+
+		SetBkColor (myhdc, RGB(0x44,0x44,0x44));
+		SetTextColor (myhdc, RGB(255,255,255));
+		sprintf (txt, "Palette (col %d/%d)", GE_gfxcol, (1 << blockdepth) - 1);
+		TextOut (myhdc, palx, paly, txt, strlen(txt));
+		paly += 16;
+
+		for (cy = 0; cy < rows; cy++) {
+			for (cx = 0; cx < cols; cx++) {
+				int ci = cy * cols + cx;
+				HBRUSH hbr;
+				prc.left = palx + cx * cw;
+				prc.top = paly + cy * ch;
+				prc.right = prc.left + cw;
+				prc.bottom = prc.top + ch;
+				if (cmappt != NULL)
+					hbr = CreateSolidBrush (RGB(cmappt[ci*3], cmappt[ci*3+1], cmappt[ci*3+2]));
+				else
+					hbr = CreateSolidBrush (RGB(ci, ci, ci));
+				FillRect (myhdc, &prc, hbr);
+				DeleteObject (hbr);
+				if (ci == GE_gfxcol) {
+					HPEN hpen2, hold2;
+					hpen2 = CreatePen (PS_SOLID, 2, RGB(255,255,255));
+					hold2 = SelectObject (myhdc, hpen2);
+					Rectangle (myhdc, prc.left, prc.top, prc.right, prc.bottom);
+					SelectObject (myhdc, hold2);
+					DeleteObject (hpen2);
+				}
+			}
+		}
+
+		/* RGB value display below palette */
+		{
+			int rx = palx, ry = paly + rows * ch + 8;
+			int r = 0, g = 0, b = 0;
+			if (cmappt != NULL) {
+				r = cmappt[GE_gfxcol * 3];
+				g = cmappt[GE_gfxcol * 3 + 1];
+				b = cmappt[GE_gfxcol * 3 + 2];
+			} else { r = g = b = GE_gfxcol; }
+			sprintf (txt, "RGB: %3d %3d %3d", r, g, b);
+			SetTextColor (myhdc, RGB(255,255,255));
+			TextOut (myhdc, rx, ry, txt, strlen(txt));
+			sprintf (txt, "$%02X $%02X $%02X", r, g, b);
+			TextOut (myhdc, rx, ry + 16, txt, strlen(txt));
+		}
+	}
+
+	/* Corner map preview: bottom-right area */
+	{
+		int cpx = tilepx + tilesize + 16;
+		int cpy = ph - 120;
+		int cpw = pw - cpx - 8;
+		int cph = 100;
+		if (cpw > 0 && cph > 0 && mappt != NULL) {
+			RECT cprc;
+			int mx, my, bsx, bsy;
+			cprc.left = cpx; cprc.top = cpy;
+			cprc.right = cpx + cpw; cprc.bottom = cpy + cph;
+			FillRect (myhdc, &cprc, (HBRUSH)GetStockObject(BLACK_BRUSH));
+			bsx = cpw / mapwidth;
+			bsy = cph / mapheight;
+			if (bsx < 1) bsx = 1;
+			if (bsy < 1) bsy = 1;
+			for (my = 0; my < mapheight; my++) {
+				for (mx = 0; mx < mapwidth; mx++) {
+					int blk = mappt[mx + my * mapwidth];
+					HBRUSH hbr;
+					COLORREF col;
+					if (blk >= 0 && blk < numblockstr) {
+						BLKSTR * bp = (BLKSTR *)(blockstrpt + blk * SOBSTR);
+						if (bp->bgoff == 0 && bp->fgoff == 0)
+							col = RGB(0x44, 0x44, 0x44);
+						else
+							col = RGB(0x88, 0xAA, 0x88);
+					} else {
+						col = RGB(0x44, 0x44, 0x66);
+					}
+					cprc.left = cpx + mx * bsx;
+					cprc.top = cpy + my * bsy;
+					cprc.right = cprc.left + bsx;
+					cprc.bottom = cprc.top + bsy;
+					hbr = CreateSolidBrush (col);
+					FillRect (myhdc, &cprc, hbr);
+					DeleteObject (hbr);
+				}
+			}
+		}
+	}
+
+	/* Tool buttons at bottom */
+	{
+		int bx = 8, by = ph - 30;
+		const char * tools[] = { "FLH", "FLV", "ROT", "CLR", "BLK", "REV" };
+		int toolw = 40, toolh = 20;
+		int t;
+		SetBkColor (myhdc, RGB(0xC0,0xC0,0xC0));
+		SetTextColor (myhdc, RGB(0,0,0));
+		for (t = 0; t < 6; t++) {
+			RECT trc;
+			trc.left = bx; trc.top = by;
+			trc.right = bx + toolw; trc.bottom = by + toolh;
+			DrawEdge (myhdc, &trc, EDGE_RAISED, BF_RECT);
+			TextOut (myhdc, bx + 4, by + 3, tools[t], strlen(tools[t]));
+			bx += toolw + 4;
+		}
+		/* Draw size selector */
+		bx += 16;
+		SetTextColor (myhdc, RGB(255,255,255));
+		SetBkColor (myhdc, RGB(0x44,0x44,0x44));
+		TextOut (myhdc, bx, by + 3, "Draw size:", 10);
+		bx += 64;
+		{
+			int ds;
+			for (ds = 1; ds <= 4; ds++) {
+				RECT trc;
+				trc.left = bx; trc.top = by;
+				trc.right = bx + 20; trc.bottom = by + toolh;
+				if (ds == GE_thickness) {
+					FillRect (myhdc, &trc, (HBRUSH)GetStockObject(WHITE_BRUSH));
+					SetTextColor (myhdc, RGB(0,0,0));
+				} else {
+					DrawEdge (myhdc, &trc, EDGE_RAISED, BF_RECT);
+					SetTextColor (myhdc, RGB(255,255,255));
+				}
+				{
+					char dsch[2] = { '0' + ds, 0 };
+					TextOut (myhdc, bx + 6, by + 3, dsch, 1);
+				}
+				bx += 22;
+			}
+		}
+	}
+
+	/* Status text */
+	{
+		int blk = GE_FindBlockForGraphic (curgfxsel);
+		SetBkColor (myhdc, RGB(0x44,0x44,0x44));
+		SetTextColor (myhdc, RGB(255,255,255));
+		if (blk >= 0)
+			sprintf (txt, "This graphic is used by block %d", blk);
+		else
+			sprintf (txt, "Graphic %d/%d (unused)", curgfxsel + 1, numblockgfx);
+		TextOut (myhdc, 8, ph - 12, txt, strlen(txt));
+	}
+}
+
 /* ---- End Tier-2 helpers ---- */
 
 LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -906,12 +1168,203 @@ PAINTSTRUCT ps;
 	case WM_PAINT:
 		myhdc = BeginPaint (hwnd, &ps);
 		if (blockgfxpt!=NULL) {
-			MEDrawMap (hwnd, myhdc);
+			if (betype == BETYPE_GRAPH)
+				MEDrawGraphicEditor (hwnd, myhdc);
+			else
+				MEDrawMap (hwnd, myhdc);
 		}
 		EndPaint (hwnd, &ps);
 //		ReleaseDC (hwnd, myhdc);
 		break;
 	case WM_LBUTTONDOWN:
+		if (betype == BETYPE_GRAPH) {
+			/* Graphic editor mode: handle tile drawing and palette */
+			RECT rc;
+			int pw, ph, tilepx, tilepy, tilesize, tileend;
+			int mx = LOWORD(lParam), my = HIWORD(lParam);
+			GetClientRect (hwnd, &rc);
+			pw = rc.right - rc.left;
+			ph = rc.bottom - rc.top;
+			tilesize = ph - 80;
+			if (tilesize < blockwidth) tilesize = blockwidth;
+			if (tilesize > pw - 200) tilesize = pw - 200;
+			tilepx = 8; tilepy = 8;
+			tileend = tilepx + tilesize;
+
+			/* Click on tile preview: draw pixel */
+			if (mx >= tilepx && mx < tileend && my >= tilepy && my < tilepy + tilesize) {
+				int px = (mx - tilepx) * blockwidth / tilesize;
+				int py = (my - tilepy) * blockheight / tilesize;
+				int bpp = (blockdepth + 1) / 8;
+				unsigned char * tile = (unsigned char *)blockgfxpt + curgfxsel * blockwidth * blockheight * bpp;
+				if (px >= 0 && px < blockwidth && py >= 0 && py < blockheight) {
+					if (blockdepth == 8)
+						tile[py * blockwidth + px] = (unsigned char)GE_gfxcol;
+					else {
+						int r, g, b;
+						if (cmappt) { r = cmappt[GE_gfxcol*3]; g = cmappt[GE_gfxcol*3+1]; b = cmappt[GE_gfxcol*3+2]; }
+						else { r = g = b = GE_gfxcol; }
+						tile[(py * blockwidth + px) * bpp + 0] = b;
+						tile[(py * blockwidth + px) * bpp + 1] = g;
+						tile[(py * blockwidth + px) * bpp + 2] = r;
+					}
+					mapaltered = 1;
+					InvalidateRect (hwnd, NULL, FALSE);
+					BEInvalidate ();
+				}
+			}
+			/* Click on palette: change colour */
+			{
+				int palx = tilepx + tilesize + 16;
+				int paly = 8 + 16;
+				int palsz = pw - palx - 8;
+				int cols = 16, cw, ch, rows;
+				if (palsz > 256) palsz = 256;
+				if (palsz > 16 * 12) palsz = 16 * 12;
+				cw = palsz / cols;
+				ch = cw;
+				rows = palsz / cols / cw;
+				if (rows > 16) rows = 16;
+				if (mx >= palx && my >= paly && mx < palx + cols * cw && my < paly + rows * ch) {
+					int ci = ((mx - palx) / cw) + ((my - paly) / ch) * cols;
+					if (ci >= 0 && ci < (1 << blockdepth)) {
+						GE_gfxcol = ci;
+						InvalidateRect (hwnd, NULL, FALSE);
+					}
+				}
+			}
+			/* Click on tool buttons */
+			{
+				int bx = 8, by = ph - 30;
+				int toolw = 40, toolh = 20;
+				int t;
+				if (my >= by && my < by + toolh) {
+					for (t = 0; t < 6; t++) {
+						if (mx >= bx && mx < bx + toolw) {
+							int bpp = (blockdepth + 1) / 8;
+							int tilebytes = blockwidth * blockheight * bpp;
+							unsigned char * src = (unsigned char *)blockgfxpt + curgfxsel * tilebytes;
+							MECopyToUndo ();
+							if (t == 0) {
+								/* FLH: flip horizontal */
+								int y;
+								for (y = 0; y < blockheight; y++) {
+									int x;
+									unsigned char * row = src + y * blockwidth * bpp;
+									for (x = 0; x < blockwidth / 2; x++) {
+										int lx = x, rx = blockwidth - 1 - x;
+										int k;
+										for (k = 0; k < bpp; k++) {
+											unsigned char tmp = row[lx * bpp + k];
+											row[lx * bpp + k] = row[rx * bpp + k];
+											row[rx * bpp + k] = tmp;
+										}
+									}
+								}
+							} else if (t == 1) {
+								/* FLV: flip vertical */
+								int y;
+								for (y = 0; y < blockheight / 2; y++) {
+									int ty = y, by2 = blockheight - 1 - y;
+									unsigned char * top = src + ty * blockwidth * bpp;
+									unsigned char * bot = src + by2 * blockwidth * bpp;
+									int rowbytes = blockwidth * bpp;
+									int k;
+									for (k = 0; k < rowbytes; k++) {
+										unsigned char tmp = top[k];
+										top[k] = bot[k];
+										bot[k] = tmp;
+									}
+								}
+							} else if (t == 2) {
+								/* ROT: rotate 90 degrees clockwise */
+								unsigned char * tmp = malloc (tilebytes);
+								if (tmp) {
+									int x, y;
+									for (y = 0; y < blockheight; y++) {
+										for (x = 0; x < blockwidth; x++) {
+											int k;
+											for (k = 0; k < bpp; k++) {
+												/* (x,y) -> (blockheight-1-y, x) */
+												int sx = (y * blockwidth + x) * bpp + k;
+												int dx = ((blockheight - 1 - y) + x * blockheight) * bpp + k;
+												tmp[dx] = src[sx];
+											}
+										}
+									}
+									memcpy (src, tmp, tilebytes);
+									free (tmp);
+								}
+							} else if (t == 3) {
+								/* CLR: clear tile */
+								memset (src, 0, tilebytes);
+							} else if (t == 4) {
+								/* BLK: block lookup */
+								{
+									int blk = GE_FindBlockForGraphic (curgfxsel);
+									if (blk >= 0) {
+										curstr = blk;
+										/* show message in status */
+										MessageBeep (0);
+									}
+								}
+							} else if (t == 5) {
+								/* REV: reverse pixel order (180 rotation) */
+								int y;
+								for (y = 0; y < blockheight / 2; y++) {
+									int ty = y, by2 = blockheight - 1 - y;
+									int x;
+									for (x = 0; x < blockwidth; x++) {
+										int k;
+										int lx = x, rx = blockwidth - 1 - x;
+										for (k = 0; k < bpp; k++) {
+											int sx = (ty * blockwidth + lx) * bpp + k;
+											int dx = (by2 * blockwidth + rx) * bpp + k;
+											unsigned char tmp = src[sx];
+											src[sx] = src[dx];
+											src[dx] = tmp;
+										}
+									}
+								}
+								if (blockheight % 2 == 1) {
+									int midy = blockheight / 2;
+									int x;
+									for (x = 0; x < blockwidth / 2; x++) {
+										int lx = x, rx = blockwidth - 1 - x;
+										int k;
+										for (k = 0; k < bpp; k++) {
+											int sx = (midy * blockwidth + lx) * bpp + k;
+											int dx = (midy * blockwidth + rx) * bpp + k;
+											unsigned char tmp = src[sx];
+											src[sx] = src[dx];
+											src[dx] = tmp;
+										}
+									}
+								}
+							}
+							mapaltered = 1;
+							InvalidateRect (hwnd, NULL, FALSE);
+							break;
+						}
+						bx += toolw + 4;
+					}
+				}
+				/* Click on draw size selector */
+				bx += 16 + 64;
+				if (my >= by && my < by + toolh) {
+					int ds;
+					for (ds = 1; ds <= 4; ds++) {
+						if (mx >= bx && mx < bx + 20) {
+							GE_thickness = ds;
+							InvalidateRect (hwnd, NULL, FALSE);
+							break;
+						}
+						bx += 22;
+					}
+				}
+			}
+			return 0;
+		}
 		if (mappt==NULL) return 0;
 		if (objplace) {
 			/* object placement: click places selected, ctrl+click duplicates */

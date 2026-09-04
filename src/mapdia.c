@@ -3229,13 +3229,14 @@ void RemoveDuplicateBlocks (void)
 						}
 					}
 				}
-			/* shift higher-indexed blocks down by overwriting */
-			memmove (blockstrpt + i * 32, blockstrpt + (i + 1) * 32,
-				(numblockstr - i - 1) * 32);
-			numblockstr--;
-			i--; /* re-check this index */
-			mapaltered = 1;
-			break;
+				/* shift higher-indexed blocks down by overwriting */
+				memmove (blockstrpt + i * 32, blockstrpt + (i + 1) * 32,
+					(numblockstr - i - 1) * 32);
+				numblockstr--;
+				i--; /* re-check this index */
+				mapaltered = 1;
+				break;
+			}
 		}
 	}
 }
@@ -3282,7 +3283,7 @@ BOOL CALLBACK DIAShowUserProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPa
 
 void DIAShowUser (HWND hwnd)
 {
-	DialogBox (hInstance, (LPCSTR) "D_SHOWUSER", hwnd, DIAShowUserProc);
+	DialogBox (hInstance, (LPCSTR) "D_SHOWUSER", hwnd, (DLGPROC)DIAShowUserProc);
 }
 
 /* ---- D_CUSTOMBTN: Custom Mouse Buttons ---- */
@@ -3338,7 +3339,7 @@ BOOL CALLBACK DIACustomBtnProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lP
 
 void DIACustomBtn (HWND hwnd)
 {
-	DialogBox (hInstance, (LPCSTR) "D_CUSTOMBTN", hwnd, DIACustomBtnProc);
+	DialogBox (hInstance, (LPCSTR) "D_CUSTOMBTN", hwnd, (DLGPROC)DIACustomBtnProc);
 }
 
 /* ---- D_LYRADJ: Layer Adjust ---- */
@@ -3386,7 +3387,7 @@ BOOL CALLBACK DIALayerAdjProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPa
 
 void DIALayerAdj (HWND hwnd)
 {
-	DialogBox (hInstance, (LPCSTR) "D_LYRADJ", hwnd, DIALayerAdjProc);
+	DialogBox (hInstance, (LPCSTR) "D_LYRADJ", hwnd, (DLGPROC)DIALayerAdjProc);
 }
 
 /* ---- D_REMOVE: Remove Unused/Duplicate ---- */
@@ -3433,7 +3434,7 @@ BOOL CALLBACK DIRemoveProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam
 
 void DIRemove (HWND hwnd)
 {
-	DialogBox (hInstance, (LPCSTR) "D_REMOVE", hwnd, DIRemoveProc);
+	DialogBox (hInstance, (LPCSTR) "D_REMOVE", hwnd, (DLGPROC)DIRemoveProc);
 }
-}
+
 

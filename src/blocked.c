@@ -25,10 +25,10 @@
 
 static HWND bhwnd = NULL;
 static HWND hbtn[BETYPE_COUNT] = { NULL };
-static short int beyoff, betype = BETYPE_STILL, bebpr = 1;
-static short int curgfxsel = -1;   /* selected graphic index (Graph mode) */
-static short int curbrushsel = -1; /* selected brush index (Brushes mode) */
-static short int curobjsel = -1;   /* selected object index (Objects mode) */
+short int beyoff = 0, betype = BETYPE_STILL, bebpr = 1;
+short int curgfxsel = -1;   /* selected graphic index (Graph mode) */
+short int curbrushsel = -1; /* selected brush index (Brushes mode) */
+short int curobjsel = -1;   /* selected object index (Objects mode) */
 static char szBlockEdname[] = "Block Editor";
 extern HINSTANCE hInstance;
 extern short int blockwidth, blockheight, blockdepth, gridon, zoomon;

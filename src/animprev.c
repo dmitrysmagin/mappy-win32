@@ -1032,14 +1032,24 @@ short int * tempmappt;
 
 void StopDD (void)
 {
+	FreeTileSurfaces ();
+	if (lpddpal)
+	{
+		IDirectDrawPalette_Release (lpddpal);
+		lpddpal = NULL;
+	}
+	if (lpDDSBack)
+	{
+		IDirectDrawSurface2_Release (lpDDSBack);
+		lpDDSBack = NULL;
+	}
+	if (lpDDSPrimary)
+	{
+		IDirectDrawSurface2_Release (lpDDSPrimary);
+		lpDDSPrimary = NULL;
+	}
 	if (lpDD)
 	{
-		if(lpDDSPrimary)
-		{
-			IDirectDrawSurface2_Release (lpDDSPrimary);
-			lpDDSPrimary = NULL;
-		}
-
 		IDirectDraw2_Release (lpDD);
 		lpDD = NULL;
 	}
@@ -1353,6 +1363,14 @@ DLGPROC dlgprc;
 
 void APCleanup (void)
 {
+	gamerunning = 0;
+	gameactive = 0;
+	StopDD ();
+	if (aphwnd != NULL)
+	{
+		DestroyWindow (aphwnd);
+		aphwnd = NULL;
+	}
 }
 
 void APDisplayMode (char * modestr)
