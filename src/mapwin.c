@@ -956,6 +956,12 @@ FILE * marfpt;
 				MEPickBlock ();
 				InvalidateAll ();
 				break;
+			default:
+				if (LOWORD(wParam) >= 7000 && LOWORD(wParam) < 7000 + numluascript) {
+					int si = LOWORD(wParam) - 7000;
+					if (luascriptmenu[si][0]) LuaRunScript (luascriptmenu[si]);
+				}
+				break;
 		}
 		break;
 	case WM_SIZE:

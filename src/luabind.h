@@ -13,7 +13,7 @@ int  LuaRunScript (const char * filename);
 int  LuaRunString (const char * code);
 
 /* Menu integration */
-#define MAXLUAMENU 16
+#define MAXLUAMENU 32
 extern char luascriptmenu[MAXLUAMENU][260];
 extern int  numluascript;
 
