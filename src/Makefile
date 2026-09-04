@@ -23,7 +23,7 @@ DXLIBS  =
 CDEFINES =
 endif
 
-CFILES  = mapfunc.c fmp14.c mapwin.c maped.c blocked.c mapdia.c mapcust.c import.c $(ANIMSRC)
+CFILES  = mapfunc.c fmp14.c mapwin.c maped.c blocked.c mapdia.c mapcust.c import.c objedit.c $(ANIMSRC)
 OFILES  = $(CFILES:.c=.o)
 DFILES  = $(CFILES:.c=.d)
 

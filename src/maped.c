@@ -70,6 +70,7 @@ extern int zoomdiv, tbarinfo, panelzoom, zmstyle, wnesmode, rotatedtiles;
 extern int mb_l, mb_m, mb_r, mb_x1, mb_x2;
 extern int key1, key2, key3, keyi, keyk, keym;
 extern int keyF[10];
+extern int objplace;
 
 #include "fmp.h"
 #include "fmp14.h"
@@ -595,7 +596,7 @@ RECT rc;
 		}
 
 		if (showuser>=1 && showuser<=8) {
-			/* show user field / flags overlaying tiles */
+			/* show user field / flags overlaying tiles (objects win) */
 			char utxt[24]; int vx, vy, ti, tj; short int bv; BLKSTR * bp;
 			SetBkMode (myhdc, TRANSPARENT);
 			SetTextColor (myhdc, RGB (255, 255, 0));
@@ -603,6 +604,10 @@ RECT rc;
 				for (ti=0;ti<k;ti++) {
 					vx = xmapoffset+ti; vy = ymapoffset+tj;
 					if (vx<0 || vy<0 || vx>=mapwidth || vy>=mapheight) continue;
+					if (OE_ObjOverlayText (vx, vy, utxt, sizeof (utxt))) {
+						TextOut (myhdc, ZX(ti*blockgapx), ZX(tj*blockgapy), utxt, strlen (utxt));
+						continue;
+					}
 					bv = mappt[vx+vy*mapwidth];
 					if (bv<0 || bv>=numblockstr) continue;
 					bp = (BLKSTR *) (blockstrpt + (((int) bv)*sizeof(BLKSTR)));
@@ -619,6 +624,12 @@ RECT rc;
 					TextOut (myhdc, ZX(ti*blockgapx), ZX(tj*blockgapy), utxt, strlen (utxt));
 				}
 			}
+		}
+
+		{
+			RECT oeclient;
+			GetClientRect (phwnd, &oeclient);
+			OE_DrawObjects (myhdc, &oeclient);
 		}
 
 		DeleteDC (fromhdc);
@@ -892,6 +903,26 @@ PAINTSTRUCT ps;
 		break;
 	case WM_LBUTTONDOWN:
 		if (mappt==NULL) return 0;
+		if (objplace) {
+			/* object placement: click places selected, ctrl+click duplicates */
+			int mpx = ZD (LOWORD(lParam)) + xmapoffset * blockwidth;
+			int mpy = ZD (HIWORD(lParam)) + ymapoffset * blockheight;
+			if (GetKeyState (VK_CONTROL) < 0) {
+				const F14Obj * src = F14_GetObject (F14_CurObject ());
+				if (src != NULL) {
+					int ni = F14_NewObject ();
+					if (ni >= 0) {
+						F14_SetObject (ni, src);
+						F14_SetCurObject (ni);
+					}
+				}
+			}
+			MECopyToUndo ();
+			OE_PlaceSelected (mpx, mpy, GetKeyState (VK_SHIFT) < 0);
+			mapaltered = 1;
+			InvalidateRgn (mhwnd, NULL, FALSE);
+			return 0;
+		}
 		if (MBDoAction (mb_l, hwnd, lParam)) return 0;
 		xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
 		yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
@@ -1126,8 +1157,17 @@ PAINTSTRUCT ps;
 			case 'L': /* line tool */
 				if (linemode) linemode = 0; else { linemode = 1; pathmode = 0; }
 				break;
-			case 'P': /* lay-path tool */
-				if (pathmode) { pathmode = 0; } else { pathmode = 1; linemode = 0; }
+			case 'P': /* lay-path tool (or pick object in place mode) */
+				if (objplace) {
+					int mpx = meoldbx * blockwidth + blockwidth / 2;
+					int mpy = meoldby * blockheight + blockheight / 2;
+					int pi = OE_PickObject (mpx, mpy);
+					if (pi >= 0) {
+						F14_SetCurObject (pi);
+						InvalidateRgn (mhwnd, NULL, FALSE);
+					}
+				}
+				else if (pathmode) { pathmode = 0; } else { pathmode = 1; linemode = 0; }
 				break;
 			case 'D': /* drag-map */
 				if (!dragmode) {

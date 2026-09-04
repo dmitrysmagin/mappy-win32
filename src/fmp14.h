@@ -94,6 +94,7 @@ void F14_LayerNameSet(int i, const char *s);  /* grows list with "" fill */
 
 int F14_NumObjects(void);
 int F14_CurObject(void);
+void F14_SetCurObject(int i);
 const F14Obj *F14_GetObject(int i);
 void F14_SetObject(int i, const F14Obj *o);
 int F14_NewObject(void);             /* append zeroed, returns index or -1 */
@@ -102,6 +103,7 @@ void F14_DeleteObject(int i);
 int F14_NumImages(void);
 const char *F14_ImageName(int i);
 int F14_AddImage(const char *fname);
+void F14_DeleteImage(int i);
 
 /* NOTE: NLYR (100-layer container) and layers 9..99 are intentionally NOT
  * decoded here: no sample map contains NLYR and its container layout cannot

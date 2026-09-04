@@ -2757,22 +2757,22 @@ DLGPROC dlgprc;
 /* ---- Export textfile (1.3.26 C text export; GBA/Lua variants are Stage 3).
  * textexportopts chars: 0 CONST,1 CMAP,2 ANIBLKSTR,3 MAPARRAY,4 BLKGFX,
  * 5 MA2D,6 MA1D,7 MAALL,8 MASINGLE,9 MERGEFLIP,10 16COL,12 CMAPGBA,
- * 15 RESOLVEBG,17 USEPREFIX. ---- */
-static int txf[18];
+ * 15 RESOLVEBG,17 USEPREFIX,18 OBJSTR. ---- */
+static int txf[24];
 static char txprefix[64];
 
 BOOL CALLBACK DIAExportTextProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i;
-static const int ids[14] = {
+static const int ids[15] = {
 	IDC_TXTCONST, IDC_TXTCMAP, IDC_TXTANIBLK, IDC_TXTMAPARR, IDC_TXTBLKGFX,
 	IDC_TXTMA2D, IDC_TXTMA1D, IDC_TXTMAALL, IDC_TXTMASINGLE, IDC_TXTMERGEFLIP,
-	IDC_TXT16COL, IDC_TXTCMAPGBA, IDC_TXTRESOLVEBG, IDC_TXTUSEPREFIX };
-static const int opti[14] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 17 };
+	IDC_TXT16COL, IDC_TXTCMAPGBA, IDC_TXTRESOLVEBG, IDC_TXTUSEPREFIX, IDC_TXTOBJSTR };
+static const int opti[15] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 17, 18 };
 
 	switch (msg) {
 		case WM_INITDIALOG:
-			for (i=0;i<14;i++)
+			for (i=0;i<15;i++)
 				CheckDlgButton (hwndDlg, ids[i], textexportopts[opti[i]]=='1' ? 1 : 0);
 			SetWindowText (GetDlgItem (hwndDlg, IDC_TXTPREFIX), "mappy");
 			break;
@@ -2780,7 +2780,7 @@ static const int opti[14] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 17 };
 		switch (LOWORD(wParam))
 		{
 			case IDOK:
-				for (i=0;i<14;i++) {
+				for (i=0;i<15;i++) {
 					txf[opti[i]] = IsDlgButtonChecked (hwndDlg, ids[i]) ? 1 : 0;
 					textexportopts[opti[i]] = txf[opti[i]] ? '1' : '0';
 				}
@@ -3010,6 +3010,10 @@ short int nlayers;
 				else fprintf (fpt, "0x%02X, ", palpt[j]);
 			}
 		}
+	}
+
+	if (txf[18]) {
+		OE_ExportObjStr (fpt, pre, txf[0]);
 	}
 
 	fclose (fpt);

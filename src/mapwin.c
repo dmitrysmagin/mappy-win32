@@ -78,6 +78,14 @@ char blocklabels[16][64] = {
 	"User data:", "U1", "U2", "U3", "U4", "U5", "U6", "U7",
 	"tl", "tr", "bl", "br", "bg transp", "flag 1", "flag 2", "flag 3"
 };	/* block properties dialogue labels */
+char objlabels[16][64] = {
+	"Object data:", "U1", "U2", "U3", "U4", "U5", "U6", "U7",
+	"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"
+};	/* object properties dialogue labels */
+int objplace = 0;		/* object placement mode (map clicks place) */
+int objshow = 1;		/* draw objects on map */
+int sortobjects = 0;		/* draw objects sorted by Y */
+int objlayeruser = 0;		/* user field holding object layer (0 = off) */
 
 void InvalidateAll (void)
 {
@@ -233,6 +241,9 @@ FILE * marfpt;
 			if (zoomon==2) CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_CHECKED);
 			if (zoomon==4) CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_CHECKED);
 			CheckMenuItem (hMenu, CM_BRUSHGRABNT, MF_UNCHECKED);
+			if (objshow) CheckMenuItem (hMenu, CM_OBJSHOW, MF_CHECKED);
+			else CheckMenuItem (hMenu, CM_OBJSHOW, MF_UNCHECKED);
+			CheckMenuItem (hMenu, CM_OBJPLACE, MF_UNCHECKED);
 		}
 		SendMessage (hwnd, WM_COMMAND, 99, 0L);
 		break;
@@ -490,6 +501,25 @@ FILE * marfpt;
 					if (DIAExport (hwnd, mapfilename))
 						MessageBox (hwnd, "Some elements were not exported correctly!", "Exporter", MB_OK|MB_ICONEXCLAMATION);
 					} else MessageBox (hwnd, "Can't export, map's name failed sanity check (doesn't end in .FMP, see above)", mapfilename, MB_OK|MB_ICONEXCLAMATION);
+				break;
+			case CM_OBJMGR:
+				DIAObjectMgr (hwnd);
+				InvalidateAll ();
+				break;
+			case CM_OBJPLACE:
+				objplace = 1-objplace;
+				if (objplace) CheckMenuItem (hMenu, CM_OBJPLACE, MF_CHECKED);
+				else CheckMenuItem (hMenu, CM_OBJPLACE, MF_UNCHECKED);
+				break;
+			case CM_OBJSHOW:
+				objshow = 1-objshow;
+				if (objshow) CheckMenuItem (hMenu, CM_OBJSHOW, MF_CHECKED);
+				else CheckMenuItem (hMenu, CM_OBJSHOW, MF_UNCHECKED);
+				InvalidateAll ();
+				break;
+			case CM_GRAPHEDIT:
+				DIAGraphEdit (hwnd);
+				InvalidateAll ();
 				break;
 			case CM_FILEEXTTXT:
 				if (mappt==NULL || mapfilename[0]==0) {
@@ -802,7 +832,8 @@ FILE * marfpt;
 				strcpy (szFile, "Mappy for Win32, V1.3.11\n(C)2002 Robin Burrows <mappy@tilemap.co.uk>\n"
 					"http://www.tilemap.co.uk\nor\n"
 					"http://www.geocities.com/rburrowsgc/robmpy.htm\n\n"
-					"Keys in Map Editor: L=line tool, P=lay-path, D/middle-button=drag map, ESC=cancels.\n");
+					"Keys in Map Editor: L=line tool, P=lay-path, D/middle-button=drag map, ESC=cancels, E=edit block.\n"
+					"Objects menu: manager (areas/labels), place mode (click places, ctrl+click duplicates, p picks).");
 				MessageBox (hwnd, szFile, "MappyWin32: About", MB_OK|MB_ICONINFORMATION);
 				break;
 			case CM_TOOLGRID:
@@ -1156,6 +1187,9 @@ char * iniinfo, * inipos;
 				if (!strncmp (inipos, "keyi", 4)) { i = GetEquals(inipos); keyi = atoi (inipos+i); }
 				if (!strncmp (inipos, "keyk", 4)) { i = GetEquals(inipos); keyk = atoi (inipos+i); }
 				if (!strncmp (inipos, "keym", 4)) { i = GetEquals(inipos); keym = atoi (inipos+i); }
+				if (!strncmp (inipos, "objectdialoguelabels", 20)) { i = GetEquals(inipos); { int bl = 0, bc = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && bl<16) { if (inipos[i]==';') { objlabels[bl][bc]=0; bl++; bc = 0; } else if (bc<63) { objlabels[bl][bc++] = inipos[i]; } i++; } if (bl<16) objlabels[bl][bc]=0; } }
+				if (!strncmp (inipos, "sortobjects", 11)) { i = GetEquals(inipos); sortobjects = atoi (inipos+i); }
+				if (!strncmp (inipos, "objlayeruser", 12)) { i = GetEquals(inipos); objlayeruser = atoi (inipos+i); }
 				if (!strncmp (inipos, "tbarname", 8)) { i = GetEquals(inipos); { int q = 0; if (inipos[i]=='"') i++; while (inipos[i] && inipos[i]!='"' && q<62) { tbarname[q++] = inipos[i]; i++; } tbarname[q]=0; } }
 			}
 			while (inipos<(iniinfo+flength)) { if (*inipos==0x0a) break; inipos++; } inipos++;

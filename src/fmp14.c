@@ -392,6 +392,13 @@ int F14_SaveOBDT(FILE *f, int is_lsb)
 
 int F14_NumObjects(void) { return obs.have_obdt ? obs.numobj : 0; }
 int F14_CurObject(void) { return obs.have_obdt ? obs.curobj : 0; }
+void F14_SetCurObject(int i)
+{
+	if (!obs.have_obdt) return;
+	if (i<0) i = 0;
+	if (i>=obs.numobj) i = obs.numobj-1;
+	obs.curobj = i;
+}
 const F14Obj *F14_GetObject(int i)
 {
 	if (!obs.have_obdt || i < 0 || i >= obs.numobj) return NULL;
@@ -435,6 +442,14 @@ int F14_AddImage(const char *fname)
 	strncpy(obs.images[obs.numimg], fname, F14_MAXIMGNAMELEN - 1);
 	obs.images[obs.numimg][F14_MAXIMGNAMELEN - 1] = 0;
 	return obs.numimg++;
+}
+void F14_DeleteImage(int i)
+{
+	int k;
+	if (i < 0 || i >= obs.numimg) return;
+	for (k = i; k + 1 < obs.numimg; k++)
+		memcpy(obs.images[k], obs.images[k + 1], F14_MAXIMGNAMELEN);
+	obs.numimg--;
 }
 
 /* ---------------- lifecycle ---------------- */

@@ -99,6 +99,16 @@ HWND CreateBlockEditorWindow (HWND);
 /* import.c prototypes */
 int IMImportBlocks (char *, int);
 int IMLoadImage24 (char *, unsigned char **, int *, int *);
+/* objedit.c prototypes (Pro object/area/label + graph editors) */
+void DIAObjectProps (HWND, int);
+void DIAObjectMgr (HWND);
+void DIAObjFname (HWND);
+void DIAGraphEdit (HWND);
+void OE_DrawObjects (HDC, RECT *);
+int OE_PickObject (int, int);
+void OE_PlaceSelected (int, int, int);
+int OE_ObjOverlayText (int, int, char *, int);
+void OE_ExportObjStr (FILE *, const char *, int);
 /* animprev.cpp prototypes */
 void APDisplayMode (char *);
 void APSetup (HWND, int);
