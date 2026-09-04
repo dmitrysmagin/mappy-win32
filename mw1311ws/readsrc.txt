@@ -1,0 +1,118 @@
+MappyWin32 source V1.3.11s released 27/6/2002
+MappyWin32 source V1.3.4s released 11/12/2001
+
+Released because I'm sure more people would benefit from it
+than try to rip me off or profit from it...
+
+DISCLAIMER:
+These sources and other materials are provided 'as is' with no
+guarantee or warranty, you use them at your own risk and agree 
+that the author is in no way responsible or liable for anything 
+that may happen directly or indirectly as a result of using them.
+This includes anything you distribute. By using any of this
+material you are accepting this disclaimer.
+
+AGREEMENT
+You may use any of the files in this archive as you like, with 
+these exceptions:
+
+You must not distribute any of the source without this textfile
+
+You must not distribute a modified version of the editor calling
+it 'Mappy' 'mapwin' or any derivation like that (you must alter
+the source to use a different name).
+
+Any derived files must not change these terms
+
+You must not change the FMP file format except:
+ If you use a different extension (ie not .FMP)
+ If the changes are additional chunks which does not affect the
+ normal version of Mappy
+
+You must credit me somewhere noticeable in the derived work (under 
+'help' or 'about') and the documentation like this:
+Based on the sources of Mappy V1.3.10s by Robin Burrows <rburrows@bigfoot.com>
+Mappy is a free 2D map editor and playback libraries are available from these sites:
+http://www.tilemap.co.uk
+http://www.geocities.com/SiliconValley/Vista/7336/robmpy.htm
+
+The PCX decoder was based on the source from allegro.
+
+Basically, these sources are a gift, don't use them for evil :)
+
+
+--------------
+This archive should include:
+animprev.c
+animstub.txt
+blocked.c
+import.c
+mapcust.c
+mapdia.c
+maped.c
+mapwin.c
+mapfunc.c (this file is not windows dependant, useful for 
+           developing on another platform, but watch endianness)
+
+mapwin.rc (resource file)
+mapwin.ico
+
+mapwin.h
+mapdefs.h
+
+mapwin.ini
+mapwin.htm
+test.fmp
+readsrc.txt
+
+---------------
+Compiling
+
+The makefile is for mingw32, if you have mingw installed,
+you can just type 'make'. If you want to get mingw32, the fast free
+compiler, it is best to get it using the instructions in the readme.mgw
+file of the Allegro distribution (3.9.34 or later) as this allows you
+to use DirectX. Download Allegro (3.9.34 or later) and read the readme.mgw file.
+Allegro is at http://alleg.sourceforge.net
+
+You'll probably get a lot of warnings no matter which compiler you
+use, however you can ignore anything like:
+Conversion may lose significant digits
+'blah' is declared but not used
+Comparing signed/unsigned values
+Converting from (void *) without cast
+Passing negative value in LPARAM
+redefinition of HMONITOR
+
+Mingw32
+Type make in the directory you unzipped the source to. If you have
+problems, try adding the following line to the top of ddraw.h:
+#undef WINNT
+ddraw.h can be found somewhere like mingw32\i386-mingw32msvc\include
+
+or simply rename animprev.c to animprev.txt and animstub.txt to animstub.c
+
+Borland C++4.51
+Should be easy, as this is the compiler I used to write it.
+1 Make a new Win32 GUI project
+2 rename animprev.c to animprev.txt and animstub.txt to animstub.c
+3 Add the mapwin.rc file and all the .c files
+4 Compile 'n' run
+
+Microsoft Visual C++ 4.0 (or higher?)
+Fairly easy,
+1 Select File: New: Project Workspace: Application
+2 Insert: Files into project: (select mapwin.rc and all .c files)
+3 Add ddraw.lib and dxguid.lib to project
+4 Change to release, hit F7 (or build the project)
+5 run it
+Note how, unlike some companies, I have altered my source to work
+under a compiler other than my own. I could have left it as it was,
+unable to compile with Visual C++ but as I am not trying to force
+people to use a certain compiler.
+
+1.3.11a: fixed 'inline' error in animprev.c
+
+------------
+Now go and make a great game and tell me about it,
+Robin Burrows <mappy@tilemap.co.uk>

@@ -1,0 +1,848 @@
+/* mapwin.c */
+/* Main Windows startup and message handler section */
+
+#define  STRICT
+#include <windows.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "mapwin.h"
+
+HINSTANCE hInstance;
+HWND hwnd;
+char defpname[256];
+static HMENU hMenu = NULL;
+static char szAppname[] = "Mappy - Win32";
+static char argvline[256];
+static int curlayer = 0;
+
+extern unsigned char transred, transgreen, transblue, trans8bit;
+extern char * blockstrpt, *blockgfxpt;
+extern char * altgfxpt;
+extern short int * mappt;
+extern char mapfilename[256];
+extern int mapaltered, megetabrush, onion, oniondark;
+extern short int mapwidth, mapheight, blockwidth, blockheight, blockdepth, xmapoffset, ymapoffset;
+extern int maptype, blockstaggerx, blockstaggery, isopillars, flippedtiles, isoreveal, clickmask, picklayer, picklx, pickly;
+extern short int numblockstr, numblockgfx;
+extern short int gridon, zoomon;
+extern short int curbrsh, curanim, pastebrushnt;
+extern short int *brshpt[MAXBRSH];
+
+/* in mapcust.c */
+extern short int mcblkdefwidth, mcblkdefheight;
+extern short int mcmapdefwidth, mcmapdefheight;
+extern int mcblkstaggerx, mcblkstaggery, mcblkclickmask;
+extern char * mcdname;
+
+/* various */
+extern int imskip;
+extern int csvadjust;
+extern int wlayout;
+
+void InvalidateAll (void)
+{
+	InvalidateRgn (hwnd, NULL, FALSE);
+}
+
+void RejigBrshMenu (int brshnum)
+{
+int i;
+
+	for (i=0;i<MAXBRSH;i++) {
+		ModifyMenu (hMenu, CM_BRUSH1+i, MF_BYCOMMAND | MF_STRING, CM_BRUSH1+i, GetBrushName(i));
+		CheckMenuItem (hMenu, CM_BRUSH1+i, MF_UNCHECKED);
+	}
+
+	if (brshnum>0 && brshnum<=MAXBRSH) {
+		CheckMenuItem (hMenu, CM_BRUSH1+(brshnum-1), MF_CHECKED);
+		BEInvalidate ();
+	}
+}
+
+void RejigLayerMenu (int lyernum)
+{
+	if (mappt==NULL) return;
+	if (ChangeLayer (lyernum)<0) {
+		MessageBox (hwnd, "Can't change to this layer, doesn't exist", "Map Editor: Layers", MB_OK|MB_ICONEXCLAMATION);
+		curlayer = 0;
+		InvalidateAll();
+		return;
+	}
+	CheckMenuItem (hMenu, CM_LAYER0, MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_LAYER1, MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_LAYER2, MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_LAYER3, MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_LAYER4, MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_LAYER5, MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_LAYER6, MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_LAYER7, MF_UNCHECKED);
+
+	switch (lyernum)
+	{
+		case 0:
+			CheckMenuItem (hMenu, CM_LAYER0, MF_CHECKED);
+			break;
+		case 1:
+			CheckMenuItem (hMenu, CM_LAYER1, MF_CHECKED);
+			break;
+		case 2:
+			CheckMenuItem (hMenu, CM_LAYER2, MF_CHECKED);
+			break;
+		case 3:
+			CheckMenuItem (hMenu, CM_LAYER3, MF_CHECKED);
+			break;
+		case 4:
+			CheckMenuItem (hMenu, CM_LAYER4, MF_CHECKED);
+			break;
+		case 5:
+			CheckMenuItem (hMenu, CM_LAYER5, MF_CHECKED);
+			break;
+		case 6:
+			CheckMenuItem (hMenu, CM_LAYER6, MF_CHECKED);
+			break;
+		case 7:
+			CheckMenuItem (hMenu, CM_LAYER7, MF_CHECKED);
+			break;
+	}
+	MEDestroyUndoBuffs();
+	InvalidateAll ();
+}
+
+void Rejig (void)
+{
+	if (mappt!=NULL) {
+		MESetScrollRange (mapwidth-1, mapheight-1, xmapoffset, ymapoffset);
+		BESetScrollRange ();
+		RejigBrshMenu (curbrsh);
+		RejigLayerMenu (curlayer);
+	}
+	InvalidateAll ();
+}
+
+LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+//char dropname[256];
+//HDC myhdc;
+//PAINTSTRUCT ps;
+int i, oldnumblockgfx;
+short int j;
+HCURSOR hCurSave;
+OPENFILENAME ofn;
+char szFilter[128];
+char szFile[256];
+char szFileTitle[256];
+char szInitDir[256];
+FILE * marfpt;
+
+	switch (message) {
+	case WM_CREATE:
+		if (hMenu == NULL) {
+			hMenu = LoadMenu(hInstance, "MAPMENU");
+			SetMenu(hwnd, hMenu);
+			if (gridon) CheckMenuItem (hMenu, CM_TOOLGRID, MF_CHECKED);
+			else CheckMenuItem (hMenu, CM_TOOLGRID, MF_UNCHECKED);
+			CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_UNCHECKED);
+			CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_UNCHECKED);
+			CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_UNCHECKED);
+			if (zoomon==1) CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_CHECKED);
+			if (zoomon==2) CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_CHECKED);
+			if (zoomon==4) CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_CHECKED);
+			CheckMenuItem (hMenu, CM_BRUSHGRABNT, MF_UNCHECKED);
+		}
+		SendMessage (hwnd, WM_COMMAND, 99, 0L);
+		break;
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+			case 99:
+				if (argvline[0]!=0) {
+					strcpy (mapfilename, argvline);
+					LoadProject (); curlayer = 0; Rejig ();
+					argvline[0]=0;
+				}
+				break;
+			case CM_ARROWUP:
+				if (mappt==NULL) break;
+				if (ymapoffset>0) ymapoffset--;
+				if ((blockstaggerx || blockstaggery) && ymapoffset&1) ymapoffset--;
+				MESetScrollRange (mapwidth-1, mapheight-1, xmapoffset, ymapoffset);
+				InvalidateAll ();
+				break;
+			case CM_ARROWDOWN:
+				if (mappt==NULL) break;
+				if (ymapoffset<(mapheight-2)) ymapoffset++;
+				if ((blockstaggerx || blockstaggery) && ymapoffset&1) ymapoffset++;
+				MESetScrollRange (mapwidth-1, mapheight-1, xmapoffset, ymapoffset);
+				InvalidateAll ();
+				break;
+			case CM_ARROWLEFT:
+				if (mappt==NULL) break;
+				if (xmapoffset>0) xmapoffset--;
+				MESetScrollRange (mapwidth-1, mapheight-1, xmapoffset, ymapoffset);
+				InvalidateAll ();
+				break;
+			case CM_ARROWRIGHT:
+				if (mappt==NULL) break;
+				if (xmapoffset<(mapwidth-1)) xmapoffset++;
+				MESetScrollRange (mapwidth-1, mapheight-1, xmapoffset, ymapoffset);
+				InvalidateAll ();
+				break;
+			case CM_FILENEW:
+				if (mapaltered) { if (MessageBox (hwnd, "Warning:\nCurrent map has been altered but not saved, make new map anyway?",
+					"Map Editor", MB_OKCANCEL | MB_ICONQUESTION)==IDOK) { if (DIANewProject (hwnd)!=-1) { MEDestroyUndoBuffs(); curlayer = 0; onion = 0; oniondark = 0; mapaltered = 0; Rejig (); } } }
+				else { if (DIANewProject (hwnd)!=-1) { MEDestroyUndoBuffs(); curlayer = 0; onion = 0; oniondark = 0; Rejig (); } }
+				break;
+			case CM_FILEOPEN:
+				szFile[0] = 0; szFileTitle[0] = 0; szInitDir[0] = 0;
+				memset (szFilter, 0, sizeof (szFilter));
+				strcpy (szFilter, "Map files (*.FMP, *.MAP)|*.fmp;*.map");
+				szFilter[24] = 0;
+				memset(&ofn, 0, sizeof(OPENFILENAME));
+
+				ofn.lStructSize = sizeof(OPENFILENAME);
+				ofn.hwndOwner = hwnd;
+				ofn.lpstrFilter = szFilter;
+				ofn.nFilterIndex = 1;
+				ofn.lpstrFile= szFile;
+				ofn.nMaxFile = sizeof(szFile);
+				ofn.lpstrFileTitle = szFileTitle;
+				ofn.nMaxFileTitle = sizeof(szFileTitle);
+				ofn.lpstrInitialDir = szInitDir;
+				ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+
+				if (GetOpenFileName(&ofn)) {
+					if (mapaltered) { if (MessageBox (hwnd, "Warning:\nCurrent map has been altered but not saved, load anyway?",
+						"Map Editor", MB_OKCANCEL | MB_ICONQUESTION)==IDCANCEL) break;
+					}
+					strcpy (mapfilename, szFile); MEDestroyUndoBuffs();
+					if (!strcmp ((mapfilename+strlen(mapfilename))-4, ".map") ||
+						!strcmp ((mapfilename+strlen(mapfilename))-4, ".MAP") ||
+						!strcmp ((mapfilename+strlen(mapfilename))-4, ".Map")) {
+						MapCustomLoad (mapfilename, hwnd);
+					}
+					else LoadProject ();
+					curlayer = 0; onion = 0; oniondark = 0; Rejig ();
+				}
+				break;
+			case CM_FILESAVE:
+				if (mapfilename[0] && mappt!=NULL) {
+				if (!strcmp ((mapfilename+strlen(mapfilename))-4, ".map") ||
+					!strcmp ((mapfilename+strlen(mapfilename))-4, ".MAP") ||
+					!strcmp ((mapfilename+strlen(mapfilename))-4, ".Map")) {
+					if (MapCustomSave (mapfilename))
+					MessageBox (hwnd, "Eeek, error saving map!", "Map Editor", MB_OK | MB_ICONEXCLAMATION);
+					else mapaltered = 0;
+				} else {
+					if (numblockstr > 1024 && maptype < 1) {
+						MessageBox (hwnd, "FMP0.5 only supports upto 1024 blocks, either reduce the number of blocks, or select a higher version in MapTools>MapProperties", "Map Editor", MB_OK | MB_ICONINFORMATION);
+                  break;
+					}
+					if (SaveProject ()) {
+						MessageBox (hwnd, "Eeek, error saving map, you should copy your .BAK file and rename it as a new map (like oldmap.fmp) NOW", "Map Editor", MB_OK | MB_ICONEXCLAMATION);
+					}
+					else mapaltered = 0;
+				}
+				Rejig(); break; }
+/* Do not split SAVE/SAVEAS cases! Save runs into SaveAs if no filename */
+			case CM_FILESAVEAS:
+				if (mappt==NULL) { MessageBox (hwnd, "No, map to save!", "Map Editor", MB_OK | MB_ICONEXCLAMATION); break; }
+				szFile[0] = 0; szFileTitle[0] = 0; szInitDir[0] = 0;
+				memset (szFilter, 0, sizeof (szFilter));
+				strcpy (szFilter, "Map files (*.FMP, *.MAP)|*.fmp;*.map");
+				szFilter[24] = 0;
+				memset(&ofn, 0, sizeof(OPENFILENAME));
+
+				ofn.lStructSize = sizeof(OPENFILENAME);
+				ofn.hwndOwner = hwnd;
+				ofn.lpstrFilter = szFilter;
+				ofn.nFilterIndex = 1;
+				ofn.lpstrFile= szFile;
+				ofn.nMaxFile = sizeof(szFile);
+				ofn.lpstrFileTitle = szFileTitle;
+				ofn.nMaxFileTitle = sizeof(szFileTitle);
+				ofn.lpstrInitialDir = szInitDir;
+				ofn.Flags = OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+
+				if (GetSaveFileName(&ofn)) {
+					strcpy (mapfilename, szFile);
+					i = strlen (mapfilename); while (i) { if (mapfilename[i]=='.') break; i--; }
+					if (!strcmp (mapfilename+i, ".MAP") || !strcmp (mapfilename+i, ".map") ||
+						!strcmp (mapfilename+i, ".Map")) {
+						if ((MessageBox (hwnd, ".MAP files are simple maps, only BG layer is preserved with no properties\n"
+							"See 'Using Mappy as a simple .map editor' in the help file' for more information\n"
+							"Go ahead and save as a .MAP file?\n", ".MAP format information",
+							MB_ICONINFORMATION | MB_OKCANCEL)) == IDCANCEL) break;
+						if (MapCustomSave (mapfilename))
+							MessageBox (hwnd, "Eeek, error saving map!", "Map Editor", MB_OK | MB_ICONEXCLAMATION);
+						else mapaltered = 0;
+						break;
+					}
+					if (strcmp (mapfilename+i, ".FMP") && strcmp (mapfilename+i, ".fmp")) strcat (mapfilename, ".FMP");
+					if (numblockstr > 1024 && maptype < 1) {
+						MessageBox (hwnd, "FMP0.5 only supports upto 1024 blocks, either reduce the number of blocks, or select a higher version in MapTools>MapProperties", "Map Editor", MB_OK | MB_ICONINFORMATION);
+						break;
+					}
+					if (SaveProject ()) MessageBox (hwnd, "Eeek, error saving map, you should copy your .BAK file and rename it as a new map (like oldmap.fmp) NOW", "Map Editor", MB_OK | MB_ICONEXCLAMATION);
+					else mapaltered = 0;
+				}
+            Rejig();
+				break;
+			case CM_FILEIMPORT:
+				if (mappt==NULL) break;
+				szFile[0] = 0; szFileTitle[0] = 0; szInitDir[0] = 0;
+				memset (szFilter, 0, sizeof (szFilter));
+				strcpy (szFilter, "Image/map array files (*.BMP;*.PCX;*.MAR)|*.bmp;*.pcx;*.mar");
+				szFilter[41] = 0;
+				memset(&ofn, 0, sizeof(OPENFILENAME));
+
+				ofn.lStructSize = sizeof(OPENFILENAME);
+				ofn.hwndOwner = hwnd;
+				ofn.lpstrFilter = szFilter;
+				ofn.nFilterIndex = 1;
+				ofn.lpstrFile= szFile;
+				ofn.nMaxFile = sizeof(szFile);
+				ofn.lpstrFileTitle = szFileTitle;
+				ofn.nMaxFileTitle = sizeof(szFileTitle);
+				ofn.lpstrInitialDir = szInitDir;
+				ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+
+				if (GetOpenFileName(&ofn)) {
+					MEDestroyUndoBuffs();
+					if (!strcmp ((szFile+strlen(szFile))-4, ".MAR") || !strcmp ((szFile+strlen(szFile))-4, ".mar"))
+					{
+						marfpt = fopen (szFile, "rb");
+						if (marfpt==NULL) { MessageBox (hwnd, "Error importing map array, aborted", "Importer", MB_OK|MB_ICONEXCLAMATION); break; }
+						fseek (marfpt, 0, SEEK_END);
+						i = (int) ftell (marfpt);
+						if (i!=(mapwidth*mapheight*2)) { fclose (marfpt); MessageBox (hwnd, "Error importing map array (wrong size!), aborted", "Importer", MB_OK|MB_ICONEXCLAMATION); break; }
+						fseek (marfpt, 0, SEEK_SET);
+						if (fread (mappt, 1, i, marfpt)!=i) { fclose (marfpt); MessageBox (hwnd, "Error while importing map array", "Importer", MB_OK|MB_ICONEXCLAMATION); break; }
+						fclose (marfpt);
+						j = 0; for (i=0;i<(mapwidth*mapheight);i++) { if (mappt[i]&0xF) j = 1; }
+						for (i=0;i<(mapwidth*mapheight);i++) { if (j) { if (mappt[i] < 0) mappt[i] *= 16; } else { if (mappt[i] > 0) mappt[i] /= 32; } }
+					} else {
+					if (altgfxpt != NULL) { free (altgfxpt); altgfxpt = NULL; }
+					if (MessageBox (hwnd, "Make all imported graphics into NEW block structures?", "Importer", MB_YESNO|MB_ICONQUESTION)==IDYES) i=-1; else i=0;
+					oldnumblockgfx = numblockgfx;
+					if (i==0) if (MessageBox (hwnd, "Replace (update) existing graphics?", "Importer", MB_YESNO|MB_ICONQUESTION)==IDYES) numblockgfx = 1;
+					hCurSave = SetCursor(LoadCursor(NULL, IDC_WAIT));
+					if (IMImportBlocks (szFile, i)) {
+						MessageBox (hwnd, "There was an error importing blocks, see the helpfile section on importing\n"
+							"Likely causes:\nBMP file is compressed\nBMP file is not the correct colour depth", "Import", MB_OK|MB_ICONEXCLAMATION);
+						numblockgfx = oldnumblockgfx;
+					}
+					if (numblockgfx < oldnumblockgfx && i == 0) {
+						MessageBox (hwnd, "Warning: Number of block graphics has decreased, some block structures may have lost their graphics", "Import", MB_OK|MB_ICONEXCLAMATION);
+                  CorrectBlockStructures ();
+					}
+					if (numblockgfx > oldnumblockgfx && i == 0) {
+						if (MessageBox (hwnd, "Number of block graphics has increased, make new block structures for new graphics?",
+							"Import", MB_ICONQUESTION|MB_YESNO)==IDYES) {
+							while (oldnumblockgfx < numblockgfx) {
+								memset (blockstrpt+(numblockstr*SOBSTR), 0, SOBSTR);
+								*((long int *) (blockstrpt+(numblockstr*SOBSTR))) = oldnumblockgfx*blockwidth*blockheight*((blockdepth+1)/8);
+								numblockstr++;
+								oldnumblockgfx++;
+							}
+						}
+					}
+					if ((blockstaggerx || blockstaggery) && clickmask == 0 && numblockstr > 0) {
+						MessageBox (hwnd, "Your clickmask has been set to '1' this can be changed in MapTools>Map Properties", "Import", MB_OK|MB_ICONINFORMATION);
+						clickmask = 1;
+					}
+					SetCursor (hCurSave); Rejig ();
+					}
+				}
+				mapaltered = 1;
+				InvalidateAll ();
+				break;
+			case CM_FILEIMPORTAT:
+				if (mappt==NULL) break;
+				if (numblockgfx==1) { MessageBox (hwnd, "This is for importing a range of block graphics over existing graphics. Please use 'File: Import' menu option instead", "Import", MB_OK|MB_ICONINFORMATION); break; }
+				i = DIAImportNumber (hwnd);
+				if ((i>>16)<0 || (i>>16)>(numblockgfx)) { MessageBox (hwnd, "Invalid Range", "Import", MB_OK|MB_ICONEXCLAMATION); break; }
+				szFile[0] = 0; szFileTitle[0] = 0; szInitDir[0] = 0;
+				memset (szFilter, 0, sizeof (szFilter));
+				strcpy (szFilter, "Image files (*.BMP;*.PCX)|*.bmp;*.pcx");
+				szFilter[25] = 0;
+				memset(&ofn, 0, sizeof(OPENFILENAME));
+
+				ofn.lStructSize = sizeof(OPENFILENAME);
+				ofn.hwndOwner = hwnd;
+				ofn.lpstrFilter = szFilter;
+				ofn.nFilterIndex = 1;
+				ofn.lpstrFile= szFile;
+				ofn.nMaxFile = sizeof(szFile);
+				ofn.lpstrFileTitle = szFileTitle;
+				ofn.nMaxFileTitle = sizeof(szFileTitle);
+				ofn.lpstrInitialDir = szInitDir;
+				ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+
+				if (GetOpenFileName(&ofn)) {
+					MEDestroyUndoBuffs();
+					if (altgfxpt != NULL) { free (altgfxpt); altgfxpt = NULL; }
+					hCurSave = SetCursor(LoadCursor(NULL, IDC_WAIT));
+					j = numblockgfx;
+					numblockgfx = (short int) (i>>16);
+					if (IMImportBlocks (szFile, (i&0xFFFF))) MessageBox (hwnd, "There was an error importing blocks, see the helpfile section on importing\n"
+						"Likely causes:\nBMP file is compressed\nBMP file is not the correct colour depth", "Import", MB_OK|MB_ICONEXCLAMATION);
+					if (numblockgfx<j) numblockgfx = j;
+					SetCursor (hCurSave); Rejig ();
+				}
+				mapaltered = 1;
+				InvalidateAll ();
+				break;
+			case CM_FILEEXPORT:
+				if (mappt==NULL || mapfilename[0]==0) {
+					MessageBox (hwnd, "No map to export from, or map has not been named ('Save As')", "Exporter", MB_OK|MB_ICONEXCLAMATION);
+					break;
+				}
+				if (!strcmp (mapfilename+strlen(mapfilename)-4, ".FMP") ||
+					!strcmp (mapfilename+strlen(mapfilename)-4, ".fmp")) {
+					if (DIAExport (hwnd, mapfilename))
+						MessageBox (hwnd, "Some elements were not exported correctly!", "Exporter", MB_OK|MB_ICONEXCLAMATION);
+					} else MessageBox (hwnd, "Can't export, map's name failed sanity check (doesn't end in .FMP, see above)", mapfilename, MB_OK|MB_ICONEXCLAMATION);
+				break;
+			case CM_FILEEXIT:
+				if (mapaltered)
+				{ if (MessageBox (NULL, "Warning:\nCurrent map has been altered but not saved, quit anyway?",
+					"Map Editor", MB_OKCANCEL | MB_ICONQUESTION)==IDOK) { MEDestroyUndoBuffs(); PostQuitMessage(0); }
+				} else {
+					MEDestroyUndoBuffs();
+					PostQuitMessage(0);
+				}
+				break;
+			case CM_EDITNEW:
+				if (mappt==NULL) break;
+				BENewBlock ();
+				MEDestroyUndoBuffs();
+				mapaltered = 1;
+				break;
+			case CM_EDITCUT:
+				if (mappt==NULL) break;
+				BECutBlock ();
+				MEDestroyUndoBuffs();
+				mapaltered = 1;
+				InvalidateAll ();
+				break;
+			case CM_EDITCOPY:
+				if (mappt==NULL) break;
+				BECopyBlock ();
+				break;
+			case CM_EDITPASTE:
+				if (mappt==NULL) break;
+				BEPasteBlock ();
+				MEDestroyUndoBuffs();
+				mapaltered = 1;
+				InvalidateAll ();
+				break;
+			case CM_EDITRESIZE:
+				if (mappt==NULL) break;
+				DIAResizeMap (hwnd);
+				MEDestroyUndoBuffs();
+				mapaltered = 1;
+				Rejig ();
+				break;
+			case CM_EDITUNDO:
+				if (mappt==NULL) break;
+				MEUndo ();
+				InvalidateAll ();
+				break;
+			case CM_TOOLFILL:
+				if (mappt==NULL) break;
+				MEFillMap (0);
+				mapaltered = 1;
+				InvalidateAll ();
+				break;
+			case CM_TOOLFILLRANDOM:
+				if (mappt==NULL) break;
+				MEFillMap (1);
+				mapaltered = 1;
+				InvalidateAll ();
+				break;
+			case CM_TOOLRANGE:
+				if (blockstrpt==NULL) break;
+				DIARangeEditBlocks (hwnd);
+				mapaltered = 1;
+				InvalidateAll ();
+				break;
+			case CM_TOOLREMOVEANIMS:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Really delete unused animations?\n(you will lose any brushes that exist)", "Delete Anims", MB_ICONQUESTION|MB_YESNO)==IDYES) {
+					DestroyAllBrushes ();
+					DestroyUnusedAnims ();
+				}
+				mapaltered = 1;
+				Rejig ();
+				break;
+			case CM_TOOLREMOVEBLOCKS:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Really delete unused blocks?\n(you will lose any brushes that exist)", "Delete Blocks", MB_ICONQUESTION|MB_YESNO)==IDYES) {
+					DestroyAllBrushes ();
+					DestroyUnusedBlocks ();
+				}
+				mapaltered = 1;
+				Rejig ();
+				break;
+			case CM_TOOLREMOVEGRAPHICS:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Really delete unused graphics?\n(you will lose any brushes that exist)", "Delete Anims", MB_ICONQUESTION|MB_YESNO)==IDYES) {
+					DestroyAllBrushes ();
+					DestroyUnusedGraphics ();
+				}
+				mapaltered = 1;
+				Rejig ();
+				break;
+			case CM_TOOLINFO:
+				if (mappt!=NULL) DIAEditInfo (hwnd);
+				InvalidateAll ();
+				break;
+			case CM_TOOLANIMSETUP:
+//				MessageBox (hwnd, "Unable to start preview (not in Borland version)", "Anim Preview", MB_OK); break;
+				i = blockdepth;
+				if (i<8) i = 8;
+				if (i==15) i = 16;
+				APSetup (hwnd, i);
+				break;
+			case CM_TOOLANIMPREVIEW:
+//				MessageBox (hwnd, "Unable to start preview (not in Borland version)", "Anim Preview", MB_OK); break;
+//				if (blockstaggerx || blockstaggery) { MessageBox (hwnd, "Unable to start preview (not in BETA version for non-rect blocks)", "Anim Preview", MB_OK); break; }
+				if (mappt!=NULL) { if (APStart ()) MessageBox (hwnd, "Unable to start preview (see helpfile)", "Anim Preview", MB_OK); }
+				break;
+			case CM_BRUSHGRAB:
+				if (mappt==NULL) break;
+				if (curbrsh < 1 || curbrsh > MAXBRSH) {
+					MessageBox (hwnd, "Please select a brush first...", "Brush Grab", MB_ICONINFORMATION|MB_OK);
+					break;
+				}
+				megetabrush = 1;
+				break;
+			case CM_BRUSHGRABNT:
+				if (mappt==NULL) break;
+				if (pastebrushnt) {
+					CheckMenuItem (hMenu, CM_BRUSHGRABNT, MF_UNCHECKED);
+					pastebrushnt = 0;
+				} else {
+					CheckMenuItem (hMenu, CM_BRUSHGRABNT, MF_CHECKED);
+					pastebrushnt = 1;
+				}
+				break;
+			case CM_BRUSHGRABBS:
+				if (mappt==NULL) break;
+				DIAGrabBrushBS (hwnd);
+				break;
+			case CM_BRUSHDESTROY:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Really delete all brushes?", "Delete Brushes", MB_ICONQUESTION|MB_YESNO)==IDYES) {
+					DestroyAllBrushes ();
+				}
+				break;
+			case CM_BRUSHRENAME:
+				if (curbrsh >=1 && curbrsh <= MAXBRSH && brshpt[curbrsh-1] != NULL) {
+					DIAGetBrushName (hwnd, GetBrushName(curbrsh-1));
+					Rejig ();
+				} else {
+					MessageBox (hwnd, "Please select a grabbed brush first...", "Brush Rename", MB_ICONINFORMATION|MB_OK);
+				}
+				break;
+			case CM_BRUSH1: curbrsh = 1; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH2: curbrsh = 2; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH3: curbrsh = 3; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH4: curbrsh = 4; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH5: curbrsh = 5; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH6: curbrsh = 6; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH7: curbrsh = 7; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH8: curbrsh = 8; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH9: curbrsh = 9; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH10: curbrsh = 10; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH11: curbrsh = 11; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH12: curbrsh = 12; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH13: curbrsh = 13; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH14: curbrsh = 14; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH15: curbrsh = 15; RejigBrshMenu (curbrsh);	break;
+			case CM_BRUSH16: curbrsh = 16; RejigBrshMenu (curbrsh);	break;
+			case CM_LAYER0:
+				curlayer = 0; RejigLayerMenu (curlayer);
+				break;
+			case CM_LAYER1:
+				curlayer = 1; RejigLayerMenu (curlayer);
+				break;
+			case CM_LAYER2:
+				curlayer = 2; RejigLayerMenu (curlayer);
+				break;
+			case CM_LAYER3:
+				curlayer = 3; RejigLayerMenu (curlayer);
+				break;
+			case CM_LAYER4:
+				curlayer = 4; RejigLayerMenu (curlayer);
+				break;
+			case CM_LAYER5:
+				curlayer = 5; RejigLayerMenu (curlayer);
+				break;
+			case CM_LAYER6:
+				curlayer = 6; RejigLayerMenu (curlayer);
+				break;
+			case CM_LAYER7:
+				curlayer = 7; RejigLayerMenu (curlayer);
+				break;
+			case CM_LAYERADD:
+				if (mappt==NULL) break;
+				i = CreateMapLayer(); if (i==-1) {
+					MessageBox (hwnd, "Can't create new layer (max 8 layers?)", "Map Editor: Layers", MB_OK|MB_ICONINFORMATION);
+				} else {
+					curlayer = i; RejigLayerMenu (curlayer); InvalidateAll();
+				}
+				break;
+			case CM_LAYERDELETE:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Are you sure you want to delete current layer?",
+					"Map Editor: Layers", MB_OKCANCEL|MB_ICONQUESTION)!=IDOK) break;
+				i = DeleteMapLayer(); if (i==-1) {
+					MessageBox (hwnd, "Can't delete this layer (last layer?)", "Map Editor: Layers", MB_OK|MB_ICONINFORMATION);
+				} else {
+					curlayer = i; RejigLayerMenu (curlayer); InvalidateAll();
+				}
+				break;
+			case CM_LAYERONION:
+				if (mappt==NULL) break;
+//				if (blockstaggerx || blockstaggery) { MessageBox (hwnd, "Unable to onionskin (only on non-staggered maps)", "Onionskin", MB_OK); break; }
+				DIALayerOnion (hwnd);
+				InvalidateAll ();
+				break;
+			case CM_LAYERCLEAR:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Are you sure you want to completely clear this layer (make all map array fields block 0)?",
+					"Map Editor: Layers", MB_OKCANCEL|MB_ICONQUESTION)==IDOK) {
+					memset (mappt, 0, mapwidth*mapheight*2);
+					InvalidateAll();
+				}
+				break;
+			case CM_LAYERSLIDE:
+				if (mappt==NULL) break;
+				DIALayerSlide (hwnd);
+				InvalidateAll();
+				break;
+			case CM_HELPCONTENTS:
+				sprintf (szFile, "%sMAPWIN.HTM", defpname);
+				ShellExecute(NULL, "open", szFile, NULL, NULL, SW_SHOW);
+				break;
+			case CM_HELPABOUT:
+				strcpy (szFile, "Mappy for Win32, V1.3.11\n(C)2002 Robin Burrows <mappy@tilemap.co.uk>\n"
+					"http://www.tilemap.co.uk\nor\n"
+					"http://www.geocities.com/rburrowsgc/robmpy.htm\n");
+				MessageBox (hwnd, szFile, "MappyWin32: About", MB_OK|MB_ICONINFORMATION);
+				break;
+			case CM_TOOLGRID:
+				gridon--;
+				if (gridon < 0) gridon = 2;
+				if (gridon) CheckMenuItem (hMenu, CM_TOOLGRID, MF_CHECKED);
+				else CheckMenuItem (hMenu, CM_TOOLGRID, MF_UNCHECKED);
+				InvalidateAll ();
+				break;
+			case CM_TOOLZOOM1:
+				zoomon = 1;
+				CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_CHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_UNCHECKED);
+				Rejig ();
+				break;
+			case CM_TOOLZOOM2:
+				zoomon = 2;
+				CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_CHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_UNCHECKED);
+				Rejig ();
+				break;
+			case CM_TOOLZOOM4:
+				zoomon = 4;
+				CheckMenuItem (hMenu, CM_TOOLZOOM1, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM2, MF_UNCHECKED);
+				CheckMenuItem (hMenu, CM_TOOLZOOM4, MF_CHECKED);
+				Rejig ();
+				break;
+			case CM_TOOLPILLARS:
+				isopillars = 1-isopillars;
+				if (isopillars) CheckMenuItem (hMenu, CM_TOOLPILLARS, MF_CHECKED);
+				else CheckMenuItem (hMenu, CM_TOOLPILLARS, MF_UNCHECKED);
+				InvalidateAll ();
+				break;
+			case CM_TOOLREVEAL:
+				isoreveal = 1-isoreveal;
+				if (isoreveal) CheckMenuItem (hMenu, CM_TOOLREVEAL, MF_CHECKED);
+				else CheckMenuItem (hMenu, CM_TOOLREVEAL, MF_UNCHECKED);
+				InvalidateAll ();
+				break;
+			case CM_BLOCKNEXT:
+				if (mappt==NULL) break;
+				BEBlockNext ();
+				break;
+			case CM_BLOCKPREV:
+				if (mappt==NULL) break;
+				BEBlockPrev ();
+				break;
+			case CM_PICKLAYER:
+				if (mappt==NULL) break;
+				PickLayer ();
+				InvalidateAll ();
+				break;
+			case CM_PICKBLOCK:
+				if (mappt==NULL) break;
+				MEPickBlock ();
+				InvalidateAll ();
+				break;
+		}
+		break;
+	case WM_SIZE:
+		MEResizeWind (LOWORD(lParam), HIWORD(lParam));
+		BEResizeWind (LOWORD(lParam), HIWORD(lParam));
+		break;
+	case WM_DROPFILES:
+/*
+		DragQueryFile ((HDROP) wParam, 0, dropname, 256);
+		DragFinish ((HDROP) wParam);
+		SetWindowText (hwnd, szAppname);
+		if (!decodeDYUV (dropname)) SetWindowText (hwnd, dropname);
+		InvalidateRgn (hwnd, NULL, FALSE);
+*/
+		break;
+	case WM_CLOSE:
+		if (mapaltered)
+			{ if (MessageBox (NULL, "Warning:\nCurrent map has been altered but not saved, quit anyway?",
+				"Map Editor", MB_OKCANCEL | MB_ICONQUESTION)==IDOK) { MEDestroyUndoBuffs(); PostQuitMessage(0); }
+			} else {
+				MEDestroyUndoBuffs();
+				PostQuitMessage(0);
+			}
+		break;
+	case WM_DESTROY:
+		PostQuitMessage(0);
+		break;
+	default:
+		return DefWindowProc(hwnd, message, wParam, lParam);
+	}
+	return 0;
+}
+
+int GetEquals (char * strpt)
+{
+int i;
+
+	i = 0; while (strpt[i] != '=') i++; i++;
+	while (strpt[i] == ' ') i++;
+	return i;
+}
+
+int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, LPSTR lpszCmdParam, int nCmdShow)
+{
+int i, defwidth, defheight, flength;
+MSG msg;
+WNDCLASS wndclass;
+HACCEL haccel;
+FILE * fpt;
+char * iniinfo, * inipos;
+
+//	MessageBox (NULL, "Warning:\nThis is VERY alpha status for testing only, expect a lot of bugs etc, use V1.22 for a stable version. Do not use on important maps",
+//		"Map Editor", MB_OK | MB_ICONEXCLAMATION);
+
+	GetModuleFileName (hInstance, defpname, 254);
+	i=strlen (defpname); while (i) { if (defpname[i]=='\\' || defpname[i]=='/') break; i--; }
+	if (i>0) defpname[i+1] = 0;
+
+	argvline[0] = 0;
+	if (lpszCmdParam!=NULL && (strlen(argvline)<256)) {
+	if (lpszCmdParam[0] == '"') { strcpy (argvline, lpszCmdParam+1);
+		argvline[strlen(argvline)-1] = 0; } else { strcpy (argvline, lpszCmdParam); } }
+
+	hInstance = hInst;
+
+	defwidth = 640; defheight = 480; gridon = 0; zoomon = 1; picklayer = 1;
+	picklx = 0; pickly = 0; csvadjust = -1; flippedtiles = 0; wlayout = 0;
+	transred = 255; transgreen = 0; transblue = 255; trans8bit = 0;
+	i = strlen (defpname); strcpy (defpname+i, "MAPWIN.INI");
+	fpt = fopen (defpname, "rb");
+	defpname[i] = 0;
+	if (fpt != NULL) {
+		iniinfo = malloc (4096);
+		if (iniinfo!=NULL) {
+		memset (iniinfo, 0, 4096);
+		flength = fread (iniinfo, 1, 4096, fpt);
+
+			inipos = iniinfo;
+			while (inipos<(iniinfo+flength)) {
+			if (inipos[0]!=';') {
+				if (!strncmp (inipos, "width", 5)) { i = GetEquals(inipos); defwidth = atoi (inipos+i); }
+				if (!strncmp (inipos, "height", 6)) { i = GetEquals(inipos); defheight = atoi (inipos+i); }
+				if (!strncmp (inipos, "wlayout", 7)) { i = GetEquals(inipos); if (inipos[i]=='0') wlayout = 0; if (inipos[i]=='1') wlayout = 1; }
+				if (!strncmp (inipos, "grid", 4)) { i = GetEquals(inipos); if (inipos[i]=='1') gridon = 1; if (inipos[i]=='2') gridon = 2; }
+				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='1') zoomon = 1; }
+				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='2') zoomon = 2; }
+				if (!strncmp (inipos, "zoom", 4)) { i = GetEquals(inipos); if (inipos[i]=='4') zoomon = 4; }
+				if (!strncmp (inipos, "picklayer", 9)) { i = GetEquals(inipos); picklayer = atoi (inipos+i); }
+				if (!strncmp (inipos, "flippedtiles", 12)) { i = GetEquals(inipos); flippedtiles = atoi (inipos+i); }
+				if (!strncmp (inipos, "transred", 8)) { i = GetEquals(inipos); transred = atoi (inipos+i); }
+				if (!strncmp (inipos, "transgreen", 10)) { i = GetEquals(inipos); transgreen = atoi (inipos+i); }
+				if (!strncmp (inipos, "transblue", 9)) { i = GetEquals(inipos); transblue = atoi (inipos+i); }
+				if (!strncmp (inipos, "trans8bit", 9)) { i = GetEquals(inipos); trans8bit = atoi (inipos+i); }
+				if (!strncmp (inipos, "apmode", 6)) { i = GetEquals(inipos); APDisplayMode (inipos+i); }
+				if (!strncmp (inipos, "importskip", 10)) { i = GetEquals(inipos); imskip = atoi (inipos+i); }
+				if (!strncmp (inipos, "csvadjust", 9)) { i = GetEquals(inipos); csvadjust = atoi (inipos+i); }
+				if (!strncmp (inipos, "maptype", 7)) { i = GetEquals(inipos); MapCustomSetFormat (inipos+i); }
+				if (!strncmp (inipos, "mapdefw", 7)) { i = GetEquals(inipos); mcmapdefwidth = atoi (inipos+i); }
+				if (!strncmp (inipos, "mapdefh", 7)) { i = GetEquals(inipos); mcmapdefheight = atoi (inipos+i); }
+				if (!strncmp (inipos, "mapdefbw", 8)) { i = GetEquals(inipos); mcblkdefwidth = atoi (inipos+i); }
+				if (!strncmp (inipos, "mapdefbh", 8)) { i = GetEquals(inipos); mcblkdefheight = atoi (inipos+i); }
+				if (!strncmp (inipos, "mapdefBMP", 9)) { i = GetEquals(inipos); MapCustSetDefBMPName (inipos+i); }
+				if (!strncmp (inipos, "mapstaggerx", 11)) { i = GetEquals(inipos); mcblkstaggerx = atoi (inipos+i); }
+				if (!strncmp (inipos, "mapstaggery", 11)) { i = GetEquals(inipos); mcblkstaggery = atoi (inipos+i); }
+				if (!strncmp (inipos, "mapclickmask", 12)) { i = GetEquals(inipos); mcblkclickmask = atoi (inipos+i); }
+			}
+			while (inipos<(iniinfo+flength)) { if (*inipos==0x0a) break; inipos++; } inipos++;
+		}
+		free (iniinfo);
+		}
+		fclose (fpt);
+	}
+
+	FreeAll ();
+
+	if (!hPrevInstance) {
+		memset (&wndclass, 0, sizeof(WNDCLASS));
+		wndclass.style = CS_HREDRAW | CS_VREDRAW | CS_BYTEALIGNCLIENT;
+		wndclass.lpfnWndProc = WndProc;
+		wndclass.hInstance = hInstance;
+		wndclass.hIcon = LoadIcon(hInstance, "MAPWINIC");
+		wndclass.hCursor = LoadCursor(NULL, (LPCSTR) IDC_ARROW);
+		wndclass.hbrBackground = GetStockObject (GRAY_BRUSH);
+		wndclass.lpszMenuName = NULL;
+		wndclass.lpszClassName = szAppname;
+		RegisterClass(&wndclass);
+	} else exit (-1);
+
+	haccel = LoadAccelerators (hInstance, "MAPACCEL");
+
+	hwnd = CreateWindow  (szAppname, szAppname,
+								WS_OVERLAPPEDWINDOW,
+								(GetSystemMetrics (SM_CXSCREEN))/2-(defwidth/2),
+								(GetSystemMetrics (SM_CYSCREEN))/2-(defheight/2),
+								defwidth, defheight,
+								NULL, NULL, hInstance, NULL);
+
+	ShowWindow (hwnd, nCmdShow);
+	UpdateWindow (hwnd);
+
+	CreateMapEditorWindow (hwnd);
+	CreateBlockEditorWindow (hwnd);
+	CreateAnimPreviewWindow (hwnd);
+	Rejig ();
+
+	while (GetMessage(&msg, NULL, 0, 0)) {
+		if (TranslateAccelerator( hwnd, haccel, (LPMSG)&msg ) == 0) {
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+	}
+
+	APCleanup ();
+	FreeAll ();
+	return msg.wParam;
+}

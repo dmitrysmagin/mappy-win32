@@ -1,0 +1,47 @@
+1.3.11b changes:
+fixed 'inline' problem with MSVC in animprev.c (again!)
+fixed brshname problem with MSVC in mapwin.c
+
+1.3.11a changes:
+fixed 'inline' problem with MSVC in animprev.c
+fixed bad column of pixels in 8bit ?scrn.bmp export
+
+1.3.11 changes:
+
+used MemProof (www.automatedqa.com) to find and fix resource leaks:
+	Added a couple of ReleaseDC() calls
+	Removed -fomit-frame-pointer (caused exceptions in memproof, though was probably ok)
+File Export ?scrn.bmp will now produce an 8bit BMP file for 8bit maps
+
+1.3.10 changes:
+
+new wlayout in mapwin.ini, when '1' block ed window is on left, map ed on right
+fixed PCX import (again), last graphics line wasn't imported
+Exporting a CSV now produces enough data for GBA developers (more docs soon)
+You can now 'screenshot' the entire current layer in export (inc onionskin)
+Some bugs fixed, some added ;)
+
+1.3.9 changes:
+
+Fixed logical update rate in anim preview
+Added simpler 'New Map' dialogue
+Changed URL and email in About box
+Added TEST2.FMP map
+Included blprop.gif which gives labels and iso/flip info
+New grid style (to revert to old style, change 'grid = 2' in mapwin.ini)
+(This now means changing grid in menu or Ctrl+g toggles between 3 styles)
+
+New import style (to revert to old style, change 'importskip = 1' in mapwin.ini)
+(This is the most intuitive I can think of, 1st block is skipped if black, all
+blocks thereon are imported until all following blocks are black)
+
+You can now use flipped tiles (change 'flippedtiles = 1' in mapwin.ini)
+IMPORTANT: You must set 'flippedtiles = 0' to work with isometric pillar maps,
+flipped tiles are also unsupported by the playback libraries and anim preview
+and are mainly for GameBoy developers, there is also no way to export the flip
+info yet (it is in the FMP though), if you are a GameBoy developer please suggest
+a good format to save to.
+
+As I'm nearing V1.4, it is now very important to report bugs, please do or they
+go unnoticed: bugs@tilemap.co.uk
+

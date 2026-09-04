@@ -1,0 +1,200 @@
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<html>
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="GENERATOR" content="Mozilla/4.72 [en] (X11; I; Linux 2.2.14 i686) [Netscape]">
+   <meta name="ProgId" content="FrontPage.Editor.Document">
+   <title>Neue Seite 1</title>
+</head>
+<body>
+&nbsp;
+<table BORDER=0 CELLPADDING=6 >
+<tr>
+<td BGCOLOR="#C0C0C0">
+<center><b><font face="Arial">CDXMappy - documentation</font></b></center>
+</td>
+</tr>
+
+<tr>
+<td BGCOLOR="#EDEDED">
+<hr>
+<center>
+<p>This is the documentation for the SDLMappy class, designed for SDL (<a href="http://www.cdx.sk">www.###</a>).
+<br>It is based on original documentation of CDXMappy.</center>
+
+<hr>
+<p>SDLMappy handles .FMP files created by Mappy Win32 Editor, (C) <a href="mailto:rburrows@bigfoot.com">Robin
+Burrows.</a> The current official Mappy Homepage is: <a href="http://www.geocities.com/SiliconValley/Vista/7336/robmpy.htm">http://www.geocities.com/SiliconValley/Vista/7336/robmpy.htm</a>,
+with mirrors at <a href="http://www.rbsite.freeserve.co.uk/robmpy.htm">http://www.rbsite.freeserve.co.uk/robmpy.htm</a>
+and (if all else fails) <a href="http://surf.to/mappy">http://surf.to/mappy</a>
+<p>SDLMappy is based on original sources from Robin Burrows, was ported
+and modified for CDX by Ioannis Karagiorgos and then ported and modified
+for SDL by <a href="mailto:edorul@caramail.com">Regis Quercioli</a>.&nbsp;
+<h3>
+<i>Known problems:</i></h3>
+
+<ul>
+<li>
+<b>8 bits modes:</b></li>
+
+<br>Displaying maps in 8-bit modes is not supported!
+<li>
+<b>SetColorKey:</b></li>
+
+<br>SetColorKey is not implemented in SDLMappy, the default ColorKey for
+transparency is the one of the first block (block n&deg;0 - and this block
+must be blank).
+<li>
+<b>MapDrawFG:</b></li>
+
+<br>MapDrawFG is not implemented in SDLMappy, because I don't understand
+its purpose...
+<p>
+<hr>
+<center>
+<h3>
+Tutorial</h3></center>
+
+<hr>
+<p>Here is a little code tutorial on how to use SDLMappy in your projects:&nbsp;
+<h3>
+<i>Initializing</i></h3>
+First of all you have to create your SDLMappy object:&nbsp;
+<p>&nbsp;&nbsp;&nbsp; SDLMappy * Map = new SDLMappy;
+<p>Next, load your map:&nbsp;
+<p>&nbsp;&nbsp;&nbsp; if( Map->LoadMap("Map.fmp" , 0 , 0 , 320 , 200 )&nbsp;
+== -1 )
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; printf("Could not load map.fmp!"
+);&nbsp;
+<p>When the map loading fails, it returns -1. LoadMap wants to have the
+filename of the map, the x/y coordinates of the map on the screen (where
+drawing will start, upper-left hand corner -- usually 0,0) and the visible
+map dimensions (width/height).&nbsp;
+<p>If you want a parallax surface, call&nbsp;
+<p>&nbsp;&nbsp; if( Map->CreateParallax( "parallax.bmp" ) == SDL_FALSE
+)
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; printf( "Could not load
+parallax bitmap parallax.bmp" );&nbsp;
+<p><b><i>Unlike CDXMappy the parallax surface size don't need to be a multiple
+of the map block size (its dimensions can be totally indifferent) !!!&nbsp;</i></b>
+<p>If your Map is using animated tiles then you have to initialize the
+animations:&nbsp;
+<p>&nbsp;&nbsp;&nbsp; Map->MapInitAnims( );&nbsp;
+<p>Thats all there has to be done for initialization.&nbsp;
+<h3>
+<i>Drawing</i></h3>
+Here are the functions needed to draw the map.&nbsp;
+<p>If you are using animated tiles, first call Map->MapUpdateAnims( );&nbsp;
+<p>&nbsp;&nbsp;&nbsp; Then, call Map->MapMoveTo( x , y ) to move the map
+at the desired <i>pixel</i> position.&nbsp;
+<p>If you are using a parallax surface, you have to draw it first, for
+example:&nbsp;
+<p>&nbsp;&nbsp;&nbsp; if( Map->DrawParallax( SDLSurface * Surface ) ==
+-1 )
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Map->RestoreParallax();&nbsp;
+<p>&nbsp;&nbsp;&nbsp; Map->MapDrawBG( SDLSurface * Surface ) draws the
+background layer
+<br>&nbsp;&nbsp;&nbsp; Map->MapDrawBGT( SDLSurface * Surface ) draws the
+background layer transparently (using the default color key)&nbsp;
+<br>&nbsp;
+<p>
+<hr>
+<h3>
+<i>Map Methods</i></h3>
+
+<hr>
+<p><b>int LoadMap (char * Filename , int x , int y , int Width , int Height);</b>
+<blockquote>Loads the map with the path and name specified into memory
+so it can be used. This function <b>must</b> be used before calling other
+Mappy functions.&nbsp;
+<p>Returns 0 on success, -1 on failure.&nbsp;
+<p>x/y are the output position of the map on the screen.
+<br>Width/Height are the visible size of the map on the screen
+<br><b>CAUTION:&nbsp; loading a high/true colour map on an 8bit screen
+takes a painfully long time.</b></blockquote>
+
+<p><b>void MapInitAnims (void);</b>
+<blockquote>Resets animations to their initial values.&nbsp;</blockquote>
+
+<p><br><b>void MapUpdateAnims (void);</b>
+<blockquote>Increments animations. Generally used once during an update
+loop before drawing.&nbsp;</blockquote>
+
+<p><br><b>int MapDrawBG (SDLSurface* s);</b>
+<blockquote>MapDrawBG draws the background layer without transparency,
+so it will completely overwrite the specified area.&nbsp;</blockquote>
+<p><b>int MapDrawBGT (SDLSurface* s);</b>
+<blockquote>MapDrawBGT draws the background layer with transparency. Any
+block whose tile is tile 0, or pixels of the transparent color in all blocks,
+won't overwrite be drawn.&nbsp;</blockquote>
+<p><b>int MapChangeLayer (int layernumber);</b>
+<blockquote>This changes to a different map layer, returns -1 if failed,
+or the new layer number (0 to 7) if successful.&nbsp;</blockquote>
+<p><b>int MapGetTile (int x, int y);</b>
+<blockquote>Returns the content of a block at position x,y. The x and y
+paramaters are the offset from the left and top of the map in <b>BLOCKS</b>,
+NOT pixels.&nbsp;
+<p>If return value is positive, the cell contains a block. If return value
+is negative, the cell contains animation.&nbsp;</blockquote>
+<p><b>BLKSTR * MapGetBlock (int x, int y);</b>
+<blockquote>Returns a BLKSTR pointer, useful for collision detection and
+examining a block structure. Note: the x and y paramaters are the offset
+from the left and top of the map in <b>BLOCKS</b>, NOT pixels. Example:&nbsp;
+<p>BLKSTR * myblkstr;
+<br>myblkstr = MapGetBlock (xoffinblocks, yoffinblocks);
+<br>if (myblkstr->tl) { top left collision is set for this block }&nbsp;</blockquote>
+<p><b>MapSetBlock (int x, int y, int strvalue);</b>
+<blockquote>The x and y paramaters are the offset from the left and top
+of the map in <b>BLOCKS</b>, NOT pixels. If strvalue is positive, the cell
+is set to that block structure. If strvalue is negative the cell is set
+to that anim structure - 1 (ie if you want to put anim 3 in, strvalue would
+be -4).&nbsp;</blockquote>
+<p><b>WORD GetMapBPP( void );</b>
+<blockquote>This call returns the color depth of the current map.&nbsp;</blockquote>
+<p><b>WORD GetMapWidth( void );</b>
+<blockquote>This call returns the width of the map in pixels.&nbsp;</blockquote>
+<p><b>WORD GetMapHeight( void );</b>
+<blockquote>This call returns the height of the map in pixels.&nbsp;</blockquote>
+<p><b>WORD GetMapWidthInBlocks( void );</b>
+<blockquote>This call returns the width of the map in blocks.&nbsp;</blockquote>
+<p><b>WORD GetMapHeightInBlocks( void );</b>
+<blockquote>This call returns the height of the map in blocks.&nbsp;</blockquote>
+<p><b>WORD GetMapBlockWidth( void );</b>
+<blockquote>Thie call returns the width of one map block, in pixels.&nbsp;</blockquote>
+<p><b>WORD GetMapBlockHeight( void );</b>
+<blockquote>Thie call returns the height of one map block, in pixels.&nbsp;</blockquote>
+<p><b>void MapMoveTo( int x , int y );</b>
+<blockquote>This call moves the map output to offset x,y. It takes into
+account invalid coordinates, and will modify them accordingly so as to
+not scroll off the edges of the map and cause a crash.&nbsp;</blockquote>
+<p><b>int MapGetXPosition( void );</b>
+<blockquote>This call returns the current X offset of the map, in pixels,
+from the upper-left hand corner.&nbsp;</blockquote>
+<p><b>int MapGetYPosition( void );</b>
+<blockquote>This call returns the current Y offset of the map, in pixels,
+from the upper-left hand corner.&nbsp;</blockquote>
+<p><b>int DrawParallax( CDXSurface * Surface );</b>
+<blockquote>This call draws the parallax surface on the selected surface.</blockquote>
+<p><b>BOOL CreateParallax( void );</b>
+<blockquote>This call creates and load a parallax surface from bitmap file
+Filename
+<br>Return value = TRUE if it was successful, otherwise FALSE.</blockquote>
+
+<p><br>
+<hr>
+<p>If you have problems with CDXMappy, please e-mail <a href="mailto:edorul@caramail.com">me</a>
+<br>If you have problems/questions about how Mappy works or the Mappy editor,
+please contact the author <a href="mailto:rburrows@bigfoot.com">Robin Burrows</a>
+or look at the Mappy Homepage. The current official Mappy Homepage is:
+<a href="http://www.geocities.com/SiliconValley/Vista/7336/robmpy.htm">http://www.geocities.com/SiliconValley/Vista/7336/robmpy.htm</a>,
+with mirrors at <a href="http://www.rbsite.freeserve.co.uk/robmpy.htm">http://www.rbsite.freeserve.co.uk/robmpy.htm</a>
+and (if all else fails) <a href="http://surf.to/mappy">http://surf.to/mappy</a></ul>
+
+<div class="MsoNormal" style="margin-bottom:6.0pt">September 2000 , <a href="mailto:edorul@caramail.com">Regis
+Quercioli</a></div>
+&nbsp;</td>
+</tr>
+</table>
+
+</body>
+</html>
