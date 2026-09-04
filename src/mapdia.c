@@ -3229,15 +3229,211 @@ void RemoveDuplicateBlocks (void)
 						}
 					}
 				}
-				/* shift higher-indexed blocks down by overwriting */
-				memmove (blockstrpt + i * 32, blockstrpt + (i + 1) * 32,
-					(numblockstr - i - 1) * 32);
-				numblockstr--;
-				i--; /* re-check this index */
-				mapaltered = 1;
-				break;
-			}
+			/* shift higher-indexed blocks down by overwriting */
+			memmove (blockstrpt + i * 32, blockstrpt + (i + 1) * 32,
+				(numblockstr - i - 1) * 32);
+			numblockstr--;
+			i--; /* re-check this index */
+			mapaltered = 1;
+			break;
 		}
 	}
+}
+
+/* ---- D_SHOWUSER: Show User Data Overlay ---- */
+
+static const char * showuser_labels[] = {
+	"Off", "User 1", "User 2", "User 3", "User 4",
+	"User 5", "User 6", "User 7", "Flags"
+};
+#define SHOWUSER_COUNT 9
+
+BOOL CALLBACK DIAShowUserProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	int i;
+	extern int showuser;
+
+	switch (msg) {
+	case WM_INITDIALOG:
+		for (i = 0; i < SHOWUSER_COUNT; i++)
+			SendDlgItemMessage (hwndDlg, IDC_SHOWUSERFIELD, CB_ADDSTRING, 0, (LPARAM) showuser_labels[i]);
+		SendDlgItemMessage (hwndDlg, IDC_SHOWUSERFIELD, CB_SETCURSEL, showuser, 0);
+		{
+			char hex[16];
+			sprintf (hex, "%06X", showuser);
+			SetWindowText (GetDlgItem (hwndDlg, IDC_SHOWUSERHEX), hex);
+		}
+		return TRUE;
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDOK:
+			i = SendDlgItemMessage (hwndDlg, IDC_SHOWUSERFIELD, CB_GETCURSEL, 0, 0);
+			if (i >= 0 && i < SHOWUSER_COUNT) showuser = i;
+			EndDialog (hwndDlg, 1);
+			return TRUE;
+		case IDCANCEL:
+			EndDialog (hwndDlg, 0);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
+void DIAShowUser (HWND hwnd)
+{
+	DialogBox (hInstance, (LPCSTR) "D_SHOWUSER", hwnd, DIAShowUserProc);
+}
+
+/* ---- D_CUSTOMBTN: Custom Mouse Buttons ---- */
+
+static const char * btn_actions[] = {
+	"None", "Current block", "Block 0", "Drag map 1", "Drag map 2",
+	"Placer.lua", "Pick block", "Lay path", "Fill", "Line", "Area.lua"
+};
+#define BTN_ACTION_COUNT 11
+
+extern int mb_l, mb_m, mb_r, mb_x1, mb_x2, mb_x3, mb_x4;
+
+BOOL CALLBACK DIACustomBtnProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	int i, sel;
+	int ids[7] = { IDC_CUSTBTN0, IDC_CUSTBTN1, IDC_CUSTBTN2, IDC_CUSTBTN3,
+		IDC_CUSTBTN4, IDC_CUSTBTN5, IDC_CUSTBTN6 };
+	int vals[7];
+
+	switch (msg) {
+	case WM_INITDIALOG:
+		vals[0] = mb_l; vals[1] = mb_r; vals[2] = mb_m;
+		vals[3] = mb_x1; vals[4] = mb_x2; vals[5] = mb_x3; vals[6] = mb_x4;
+		for (i = 0; i < 7; i++) {
+			int j;
+			for (j = 0; j < BTN_ACTION_COUNT; j++)
+				SendDlgItemMessage (hwndDlg, ids[i], CB_ADDSTRING, 0, (LPARAM) btn_actions[j]);
+			sel = vals[i];
+			if (sel < 0 || sel >= BTN_ACTION_COUNT) sel = 0;
+			SendDlgItemMessage (hwndDlg, ids[i], CB_SETCURSEL, sel, 0);
+		}
+		return TRUE;
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDOK:
+			for (i = 0; i < 7; i++) {
+				sel = SendDlgItemMessage (hwndDlg, ids[i], CB_GETCURSEL, 0, 0);
+				if (sel < 0 || sel >= BTN_ACTION_COUNT) sel = 0;
+				vals[i] = sel;
+			}
+			mb_l = vals[0]; mb_r = vals[1]; mb_m = vals[2];
+			mb_x1 = vals[3]; mb_x2 = vals[4]; mb_x3 = vals[5]; mb_x4 = vals[6];
+			EndDialog (hwndDlg, 1);
+			return TRUE;
+		case IDCANCEL:
+			EndDialog (hwndDlg, 0);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
+void DIACustomBtn (HWND hwnd)
+{
+	DialogBox (hInstance, (LPCSTR) "D_CUSTOMBTN", hwnd, DIACustomBtnProc);
+}
+
+/* ---- D_LYRADJ: Layer Adjust ---- */
+
+BOOL CALLBACK DIALayerAdjProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	extern short int * mappt;
+	extern short int mapwidth, mapheight;
+
+	switch (msg) {
+	case WM_INITDIALOG:
+		SetWindowText (GetDlgItem (hwndDlg, IDC_LYRADJVAL), "0");
+		return TRUE;
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDOK:
+			{
+				char txt[32];
+				int adj, x, y;
+				GetWindowText (GetDlgItem (hwndDlg, IDC_LYRADJVAL), txt, sizeof(txt));
+				adj = atoi (txt);
+				if (mappt != NULL && adj != 0) {
+					short int maxblk = numblockstr > 0 ? numblockstr - 1 : 0;
+					for (y = 0; y < mapheight; y++) {
+						for (x = 0; x < mapwidth; x++) {
+							int v = mappt[x + y * mapwidth] + adj;
+							if (v < 0) v = 0;
+							if (v > maxblk) v = maxblk;
+							mappt[x + y * mapwidth] = (short int) v;
+						}
+					}
+					mapaltered = 1;
+				}
+			}
+			EndDialog (hwndDlg, 1);
+			return TRUE;
+		case IDCANCEL:
+			EndDialog (hwndDlg, 0);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
+void DIALayerAdj (HWND hwnd)
+{
+	DialogBox (hInstance, (LPCSTR) "D_LYRADJ", hwnd, DIALayerAdjProc);
+}
+
+/* ---- D_REMOVE: Remove Unused/Duplicate ---- */
+
+extern void DestroyUnusedAnims (void);
+extern void DestroyUnusedBlocks (void);
+extern void DestroyUnusedGraphics (void);
+extern void RemoveDuplicateGraphics (void);
+extern void RemoveDuplicateBlocks (void);
+
+BOOL CALLBACK DIRemoveProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg) {
+	case WM_INITDIALOG:
+		CheckDlgButton (hwndDlg, IDC_REMOVEANIM, 1);
+		CheckDlgButton (hwndDlg, IDC_REMOVEBLOCK, 1);
+		CheckDlgButton (hwndDlg, IDC_REMOVEGFX, 1);
+		CheckDlgButton (hwndDlg, IDC_REMOVEDUPBLK, 1);
+		CheckDlgButton (hwndDlg, IDC_REMOVEDUPGFX, 1);
+		return TRUE;
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDOK:
+			if (MessageBox (hwndDlg, "Really delete selected unused/duplicate items?",
+				"Delete Unused/Duplicate", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+				SetCursor (LoadCursor (NULL, IDC_WAIT));
+				if (IsDlgButtonChecked (hwndDlg, IDC_REMOVEANIM)) DestroyUnusedAnims ();
+				if (IsDlgButtonChecked (hwndDlg, IDC_REMOVEBLOCK)) DestroyUnusedBlocks ();
+				if (IsDlgButtonChecked (hwndDlg, IDC_REMOVEGFX)) DestroyUnusedGraphics ();
+				if (IsDlgButtonChecked (hwndDlg, IDC_REMOVEDUPBLK)) RemoveDuplicateBlocks ();
+				if (IsDlgButtonChecked (hwndDlg, IDC_REMOVEDUPGFX)) RemoveDuplicateGraphics ();
+				SetCursor (LoadCursor (NULL, IDC_ARROW));
+			}
+			EndDialog (hwndDlg, 1);
+			return TRUE;
+		case IDCANCEL:
+			EndDialog (hwndDlg, 0);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
+void DIRemove (HWND hwnd)
+{
+	DialogBox (hInstance, (LPCSTR) "D_REMOVE", hwnd, DIRemoveProc);
+}
 }
 

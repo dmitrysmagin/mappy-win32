@@ -72,6 +72,10 @@ void DIARangeEditBlocks (HWND);
 int DIAEditAnimProperties (HWND, int);
 void DIAGrabBrushBS (HWND);
 void DIAGetBrushName (HWND, char *);
+void DIAShowUser (HWND);
+void DIACustomBtn (HWND);
+void DIALayerAdj (HWND);
+void DIRemove (HWND);
 /* mapwin.c prototypes */
 void InvalidateAll (void);
 void RejigBrshMenu (int);

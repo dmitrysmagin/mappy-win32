@@ -528,6 +528,21 @@ FILE * marfpt;
 				DIAGraphEdit (hwnd);
 				InvalidateAll ();
 				break;
+			case CM_SHOWUSER:
+				DIAShowUser (hwnd);
+				InvalidateAll ();
+				break;
+			case CM_CUSTOMBTN:
+				DIACustomBtn (hwnd);
+				break;
+			case CM_LYRADJ:
+				DIALayerAdj (hwnd);
+				InvalidateAll ();
+				break;
+			case CM_REMOVE:
+				DIRemove (hwnd);
+				InvalidateAll ();
+				break;
 			case CM_FILEEXTTXT:
 				if (mappt==NULL || mapfilename[0]==0) {
 					MessageBox (hwnd, "No map to export from, or map has not been named ('Save As')", "Exporter", MB_OK|MB_ICONEXCLAMATION);
