@@ -969,12 +969,13 @@ FILE * marfpt;
 				}
 				break;
 			case CM_HELPCONTENTS:
-				sprintf (szFile, "%sMAPWIN.HTM", defpname);
-				ShellExecute(NULL, "open", szFile, NULL, NULL, SW_SHOW);
-				break;
 			case CM_HELPINI:
-				sprintf (szFile, "%sMAPWIN.INI", defpname);
-				ShellExecute(NULL, "open", szFile, NULL, NULL, SW_SHOW);
+				{
+					char helpfile[280];
+					snprintf (helpfile, sizeof (helpfile), "%s%s",
+						defpname, (LOWORD(wParam)==CM_HELPCONTENTS) ? "MAPWIN.HTM" : "MAPWIN.INI");
+					ShellExecute(NULL, "open", helpfile, NULL, NULL, SW_SHOW);
+				}
 				break;
 			case CM_HELPABOUT:
 				strcpy (szFile, "MappyWin32, V1.4.23\n"
@@ -1337,7 +1338,8 @@ char * iniinfo, * inipos;
 	defwidth = 640; defheight = 480; gridon = 0; zoomon = 1; picklayer = 1;
 	picklx = 0; pickly = 0; csvadjust = 0; flippedtiles = 0; wlayout = 0;
 	transred = 255; transgreen = 0; transblue = 255; trans8bit = 0;
-	i = strlen (defpname); strcpy (defpname+i, "MAPWIN.INI");
+	i = strlen (defpname);
+	if (i + 11 <= (int) sizeof (defpname)) strcpy (defpname+i, "MAPWIN.INI");
 	fpt = fopen (defpname, "rb");
 	defpname[i] = 0;
 	if (fpt != NULL) {

@@ -145,10 +145,12 @@ extern char objlabels[16][64];
 extern HWND hwnd;
 extern HINSTANCE hInstance;
 
-static FILE *dbglog = NULL;
-static void dbglog_init (void)
+static void dbglog_line (const char * filename)
 {
-	if (!dbglog) dbglog = fopen ("lua_test.log", "a");
+	FILE * f = fopen ("lua_test.log", "a");
+	if (f == NULL) return;
+	fprintf (f, "LuaRunScript: %s\n", filename ? filename : "");
+	fclose (f);
 }
 
 static lua_State *L = NULL;
@@ -1877,12 +1879,11 @@ static int run_file (const char *filename)
 int LuaRunScript (const char *filename)
 {
 	char full[MAX_PATH * 2];
-	dbglog_init ();
-	if (dbglog) { fprintf (dbglog, "LuaRunScript: %s\n", filename ? filename : ""); fflush (dbglog); }
+	dbglog_line (filename);
 	if (filename == NULL || filename[0] == 0) return -1;
 	if (is_abs_path (filename)) return run_file (filename);
 	if (mapwinpath[0]) {
-		sprintf (full, "%s%s", mapwinpath, filename);
+		snprintf (full, sizeof (full), "%s%s", mapwinpath, filename);
 		if (run_file (full) == 0) return 0;
 	}
 	return run_file (filename);

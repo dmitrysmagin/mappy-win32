@@ -139,7 +139,9 @@ RGBQUAD rgbq;
 	bih.biWidth = sw; bih.biHeight = -sh;
 	bih.biPlanes = 1; bih.biBitCount = 24; bih.biCompression = BI_RGB;
 	mdc = CreateCompatibleDC (hdc);
+	if (mdc == NULL) return;
 	hbm = CreateDIBitmap (hdc, &bih, CBM_INIT, topdown, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+	if (hbm == NULL) { DeleteDC (mdc); return; }
 	hold = SelectObject (mdc, hbm);
 	StretchBlt (hdc, dx, dy, dw, dh, mdc, 0, 0, sw, sh, SRCCOPY);
 	SelectObject (mdc, hold);
@@ -166,7 +168,9 @@ int x, y;
 	bih.biWidth = dw; bih.biHeight = -dh;
 	bih.biPlanes = 1; bih.biBitCount = 24; bih.biCompression = BI_RGB;
 	mdc = CreateCompatibleDC (hdc);
+	if (mdc == NULL) { free (dst); return; }
 	hbm = CreateCompatibleBitmap (hdc, dw, dh);
+	if (hbm == NULL) { DeleteDC (mdc); free (dst); return; }
 	hold = SelectObject (mdc, hbm);
 	BitBlt (mdc, 0, 0, dw, dh, hdc, dx, dy, SRCCOPY);
 	memset (&bi, 0, sizeof (bi));

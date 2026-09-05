@@ -371,6 +371,7 @@ int tabht = TAB_H;
 		memset (destmempt, 0x44, k*l*(blockheight+2)*3);
 
 		fromhdc = CreateCompatibleDC (myhdc);
+		if (fromhdc==NULL) { free (destmempt); return; }
 
 		memset (&bih, 0, sizeof(BITMAPINFOHEADER));
 		memset (&rgbq, 0, sizeof(RGBQUAD));
@@ -449,6 +450,7 @@ int tabht = TAB_H;
 
 		temphbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 			destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+		if (temphbm==NULL) { DeleteDC (fromhdc); free (destmempt); return; }
 
 		hbmpold = SelectObject(fromhdc, temphbm);
 		if (BEZoom()==1)

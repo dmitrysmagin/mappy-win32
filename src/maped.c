@@ -454,6 +454,7 @@ RGBQUAD rgbq;
 		myhdc = GetDC (hwnd);
 		if (myhdc==NULL) { free (destmempt); return; }
 		fromhdc = CreateCompatibleDC (myhdc);
+		if (fromhdc==NULL) { ReleaseDC (hwnd, myhdc); free (destmempt); return; }
 
 		memset (&bih, 0, sizeof(BITMAPINFOHEADER));
 		memset (&rgbq, 0, sizeof(RGBQUAD));
@@ -468,6 +469,7 @@ RGBQUAD rgbq;
 
 		temphbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 			destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+		if (temphbm==NULL) { DeleteDC (fromhdc); ReleaseDC (hwnd, myhdc); free (destmempt); return; }
 
 		hbmpold = SelectObject(fromhdc, temphbm);
 		if (zoomon==1 && zoomdiv==1) {
@@ -551,6 +553,7 @@ RECT rc;
 		if (destmempt==NULL) return;
 
 		fromhdc = CreateCompatibleDC (myhdc);
+		if (fromhdc==NULL) { free (destmempt); return; }
 
 		memset (&bih, 0, sizeof(BITMAPINFOHEADER));
 		memset (&rgbq, 0, sizeof(RGBQUAD));
@@ -602,6 +605,7 @@ RECT rc;
 
 		temphbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 			destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+		if (temphbm==NULL) { DeleteDC (fromhdc); free (destmempt); return; }
 
 		hbmpold = SelectObject(fromhdc, temphbm);
 		if (zoomon==1 && zoomdiv==1)
@@ -733,6 +737,7 @@ DWORD blttype;
 		myhdc = GetDC (hwnd);
 		if (myhdc==NULL) { free (destmempt); return; }
 		fromhdc = CreateCompatibleDC (myhdc);
+		if (fromhdc==NULL) { ReleaseDC (hwnd, myhdc); free (destmempt); return; }
 
 		memset (&bih, 0, sizeof(BITMAPINFOHEADER));
 		memset (&rgbq, 0, sizeof(RGBQUAD));
@@ -756,6 +761,7 @@ DWORD blttype;
 
 			temphbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 				destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+			if (temphbm==NULL) { DeleteDC (fromhdc); ReleaseDC (hwnd, myhdc); free (destmempt); return; }
 			x = ZX((meoldbx-xmapoffset)*blockwidth);
 			y = ZX((meoldby-ymapoffset)*blockheight);
 			hbmpold = SelectObject(fromhdc, temphbm);
@@ -826,6 +832,7 @@ DWORD blttype;
 
 		temphbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 			destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+		if (temphbm==NULL) { DeleteDC (fromhdc); ReleaseDC (hwnd, myhdc); free (destmempt); return; }
 
 		hbmpold = SelectObject(fromhdc, temphbm);
 
@@ -1361,7 +1368,9 @@ static void GEDrawMapPreview (HDC hdc, const GELayout * L)
 	bih.biCompression = BI_RGB;
 
 	fromhdc = CreateCompatibleDC (hdc);
+	if (fromhdc==NULL) { free (buf); return; }
 	temphbm = CreateDIBitmap (hdc, &bih, CBM_INIT, buf, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+	if (temphbm==NULL) { DeleteDC (fromhdc); free (buf); return; }
 	hbmpold = SelectObject (fromhdc, temphbm);
 	StretchBlt (hdc, L->previewx, L->previewy, L->previeww, L->previewh,
 		fromhdc, 0, 0, bw, bh, SRCCOPY);
@@ -1597,6 +1606,7 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 	BlockGfxto24 (curgfxsel, tb, 0, 0, pitch);
 
 	fromhdc = CreateCompatibleDC (myhdc);
+	if (fromhdc==NULL) { free (tb); return; }
 	memset (&bih, 0, sizeof (bih));
 	bih.biSize = sizeof (bih);
 	bih.biWidth = blockwidth;
@@ -1605,6 +1615,7 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 	bih.biBitCount = 24;
 	bih.biCompression = BI_RGB;
 	temphbm = CreateDIBitmap (myhdc, &bih, CBM_INIT, tb, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+	if (temphbm==NULL) { DeleteDC (fromhdc); free (tb); return; }
 	hbmpold = SelectObject (fromhdc, temphbm);
 	StretchBlt (myhdc, L->tilex, L->tiley, L->tilew, L->tileh,
 		fromhdc, 0, 0, blockwidth, blockheight, SRCCOPY);
