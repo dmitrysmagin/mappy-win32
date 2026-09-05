@@ -6,6 +6,10 @@
 #include "mapwin.h"
 #include "luabind.h"
 
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
+#endif
+
 typedef struct {	/* Structure for data blocks */
 long int bgoff, fgoff;	/* offsets from start of graphic blocks */
 long int fgoff2, fgoff3; /* more overlay blocks */
@@ -33,7 +37,20 @@ long int anendoff;	/* Points to end of blkstr offsets list */
 } ANISTR;
 
 static HWND mhwnd = NULL;
+static HWND ghwnd = NULL;
+static HWND ge_toolbtn[7] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL };
+static HWND ge_dsbtn[4] = { NULL, NULL, NULL, NULL };
+static HWND ge_dslbl = NULL, ge_status = NULL;
+static HFONT ge_font = NULL;
 static char szMapEdname[] = "Map Editor";
+static char szGraphEdname[] = "Graphic Editor";
+#define IDC_GETOOL0	2200
+#define IDC_GETHICK1	2211
+#define IDC_GEDRAWLBL	2220
+#define IDC_GESTATUS	2221
+#define GETOOL_COUNT	7
+static int GE_thickness = 1;
+static int GE_FindBlockForGraphic (int gfx);
 static int painton = 0, gettingbrush = 0;
 static short int * undobuff1, * undobuff2;
 int megetabrush = 0, onion = 0, oniondark = 0, onionlower = 0;
@@ -86,12 +103,18 @@ extern int panelpro, prographbg, sortobjects;
 #include "fmp14.h"
 
 
+static void MEPlaceLeftPane (HWND whwnd, int wide, int high)
+{
+	if (whwnd == NULL) return;
+	if (wlayout == 0) MoveWindow (whwnd, 0, 0, wide-(wide/5), high, TRUE);
+	if (wlayout == 1) MoveWindow (whwnd, wide/5, 0, wide-(wide/5), high, TRUE);
+	if (wlayout == -1) MoveWindow (whwnd, 0, 0, wide, high, TRUE);
+}
+
 void MEResizeWind (int wide, int high)
 {
-	if (mhwnd == NULL) return;
-	if (wlayout == 0) MoveWindow (mhwnd, 0, 0, wide-(wide/5), high, TRUE);
-	if (wlayout == 1) MoveWindow (mhwnd, wide/5, 0, wide-(wide/5), high, TRUE);
-	if (wlayout == -1) MoveWindow (mhwnd, 0, 0, wide, high, TRUE);
+	MEPlaceLeftPane (mhwnd, wide, high);
+	MEPlaceLeftPane (ghwnd, wide, high);
 }
 
 void MESetScrollRange (int xrng, int yrng, int xpos, int ypos)
@@ -150,6 +173,181 @@ void MECopyUndoToLayer (short int *dst)
 HWND MEGetHWND (void)
 {
 	return mhwnd;
+}
+
+HWND GEGetHWND (void)
+{
+	return ghwnd;
+}
+
+static void GEInvalidate (void)
+{
+	if (ghwnd != NULL) InvalidateRect (ghwnd, NULL, FALSE);
+}
+
+static int GEGetDpi (HWND hwnd)
+{
+	HDC hdc;
+	int dpi;
+	if (hwnd == NULL) return 96;
+	hdc = GetDC (hwnd);
+	if (hdc == NULL) return 96;
+	dpi = GetDeviceCaps (hdc, LOGPIXELSY);
+	ReleaseDC (hwnd, hdc);
+	if (dpi < 96) dpi = 96;
+	return dpi;
+}
+
+static int GEToolbarHeight (HWND hwnd)
+{
+	int dpi = GEGetDpi (hwnd);
+	return MulDiv (24, dpi, 96) + MulDiv (18, dpi, 96) + MulDiv (12, dpi, 96);
+}
+
+static void GEEnsureUiFont (HWND hwnd)
+{
+	NONCLIENTMETRICS ncm;
+	HFONT created;
+	int i;
+
+	memset (&ncm, 0, sizeof (ncm));
+	ncm.cbSize = sizeof (ncm);
+	if (!SystemParametersInfo (SPI_GETNONCLIENTMETRICS, sizeof (ncm), &ncm, 0)) {
+		ncm.cbSize = sizeof (ncm) - sizeof (int);
+		if (!SystemParametersInfo (SPI_GETNONCLIENTMETRICS, ncm.cbSize, &ncm, 0))
+			return;
+	}
+	created = CreateFontIndirect (&ncm.lfMessageFont);
+	if (created == NULL) return;
+	if (ge_font != NULL) DeleteObject (ge_font);
+	ge_font = created;
+	if (ge_dslbl) SendMessage (ge_dslbl, WM_SETFONT, (WPARAM) ge_font, TRUE);
+	if (ge_status) SendMessage (ge_status, WM_SETFONT, (WPARAM) ge_font, TRUE);
+	for (i = 0; i < GETOOL_COUNT; i++)
+		if (ge_toolbtn[i]) SendMessage (ge_toolbtn[i], WM_SETFONT, (WPARAM) ge_font, TRUE);
+	for (i = 0; i < 4; i++)
+		if (ge_dsbtn[i]) SendMessage (ge_dsbtn[i], WM_SETFONT, (WPARAM) ge_font, TRUE);
+	(void) hwnd;
+}
+
+static void GEUpdateToolbar (void)
+{
+	int i;
+	for (i = 0; i < 4; i++) {
+		if (ge_dsbtn[i] != NULL)
+			SendMessage (ge_dsbtn[i], BM_SETCHECK,
+				(GE_thickness == i + 1) ? BST_CHECKED : BST_UNCHECKED, 0);
+	}
+}
+
+static void GEUpdateStatus (void)
+{
+	char txt[96];
+	int blk;
+	if (ge_status == NULL) return;
+	blk = GE_FindBlockForGraphic (curgfxsel);
+	if (blk >= 0)
+		sprintf (txt, "This graphic is used by block %d", blk);
+	else
+		sprintf (txt, "This graphic is not used by any block (click BLK to make one)");
+	SetWindowText (ge_status, txt);
+}
+
+static void GELayoutToolbar (HWND hwnd)
+{
+	RECT rc;
+	int dpi, pw, ph, btnw, btnh, dsw, gap, margin, statush, x, y, i, need, dslblw;
+
+	if (hwnd == NULL) return;
+	GetClientRect (hwnd, &rc);
+	pw = rc.right - rc.left;
+	ph = rc.bottom - rc.top;
+	dpi = GEGetDpi (hwnd);
+	btnw = MulDiv (44, dpi, 96);
+	btnh = MulDiv (24, dpi, 96);
+	dsw = MulDiv (28, dpi, 96);
+	gap = MulDiv (4, dpi, 96);
+	margin = MulDiv (8, dpi, 96);
+	statush = MulDiv (18, dpi, 96);
+	dslblw = MulDiv (72, dpi, 96);
+	need = GETOOL_COUNT * (btnw + gap) + gap * 2 + dslblw + 4 * (dsw + gap) + margin * 2;
+	if (need > pw && pw > margin * 2) {
+		int scale = pw - margin * 2;
+		btnw = btnw * scale / need;
+		dsw = dsw * scale / need;
+		dslblw = dslblw * scale / need;
+		if (btnw < 28) btnw = 28;
+		if (dsw < 20) dsw = 20;
+	}
+	y = ph - statush - gap - btnh - MulDiv (4, dpi, 96);
+	if (y < 0) y = 0;
+	x = margin;
+	for (i = 0; i < GETOOL_COUNT; i++) {
+		if (ge_toolbtn[i])
+			MoveWindow (ge_toolbtn[i], x, y, btnw, btnh, TRUE);
+		x += btnw + gap;
+	}
+	x += gap;
+	if (ge_dslbl)
+		MoveWindow (ge_dslbl, x, y + (btnh - statush) / 2, dslblw, statush, TRUE);
+	x += dslblw + gap;
+	for (i = 0; i < 4; i++) {
+		if (ge_dsbtn[i])
+			MoveWindow (ge_dsbtn[i], x, y, dsw, btnh, TRUE);
+		x += dsw + gap;
+	}
+	if (ge_status)
+		MoveWindow (ge_status, margin, ph - statush - 2, pw - margin * 2, statush, TRUE);
+}
+
+static void GECreateToolbar (HWND parent)
+{
+	static const char * tools[] = { "FLH", "FLV", "ROT", "CLR", "MSK", "BLK", "REV" };
+	int i;
+	char dsch[2];
+
+	for (i = 0; i < GETOOL_COUNT; i++) {
+		ge_toolbtn[i] = CreateWindow ("button", tools[i],
+			WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+			0, 0, 44, 24, parent, (HMENU)(INT_PTR)(IDC_GETOOL0 + i),
+			hInstance, NULL);
+	}
+	ge_dslbl = CreateWindow ("static", "Draw size:",
+		WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+		0, 0, 72, 18, parent, (HMENU)(INT_PTR) IDC_GEDRAWLBL, hInstance, NULL);
+	dsch[1] = 0;
+	for (i = 0; i < 4; i++) {
+		dsch[0] = (char) ('1' + i);
+		ge_dsbtn[i] = CreateWindow ("button", dsch,
+			WS_CHILD | WS_VISIBLE | BS_PUSHLIKE | BS_CHECKBOX,
+			0, 0, 28, 24, parent, (HMENU)(INT_PTR)(IDC_GETHICK1 + i),
+			hInstance, NULL);
+	}
+	ge_status = CreateWindow ("static", "",
+		WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+		0, 0, 200, 18, parent, (HMENU)(INT_PTR) IDC_GESTATUS, hInstance, NULL);
+	GEEnsureUiFont (parent);
+	GEUpdateToolbar ();
+	GELayoutToolbar (parent);
+	GEUpdateStatus ();
+}
+
+void GEShowMode (int show)
+{
+	if (show) {
+		if (mhwnd) ShowWindow (mhwnd, SW_HIDE);
+		if (ghwnd) {
+			ShowWindow (ghwnd, SW_SHOW);
+			GELayoutToolbar (ghwnd);
+			GEUpdateToolbar ();
+			GEUpdateStatus ();
+			InvalidateRect (ghwnd, NULL, FALSE);
+			SetFocus (ghwnd);
+		}
+	} else {
+		if (ghwnd) ShowWindow (ghwnd, SW_HIDE);
+		if (mhwnd) ShowWindow (mhwnd, SW_SHOW);
+	}
 }
 
 int MEClickmask (int x, int y, int xory)
@@ -1001,7 +1199,6 @@ typedef struct {
 } GELayout;
 
 static int GE_gfxcol = 0;
-static int GE_thickness = 1;
 static int GE_paint = 0;		/* dragging on the tile */
 static int GE_bar = -1;			/* 0=R 1=G 2=B while dragging a bar */
 static int GE_palop = 0;		/* 1=CPY 2=EXG 3=SPR 4=pick-from-tile */
@@ -1037,7 +1234,7 @@ static void GEComputeLayout (HWND hwnd, GELayout * L)
 	if (L->pw < 80) L->pw = 80;
 	if (L->ph < 80) L->ph = 80;
 
-	toolstrip = 48;
+	toolstrip = GEToolbarHeight (hwnd);
 	L->showpanel = (panelpro != 0);
 	if (panelpro == 2) { L->palcols = 32; L->palrows = 8; }
 	else { L->palcols = 16; L->palrows = 16; }
@@ -1206,7 +1403,7 @@ void GEUndo (void)
 		free (tmp);
 	}
 	mapaltered = 1;
-	if (mhwnd) InvalidateRect (mhwnd, NULL, FALSE);
+	GEInvalidate ();
 	BEInvalidate ();
 }
 
@@ -1736,59 +1933,7 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 	GEDrawMapPreview (myhdc, cl);
 	}
 
-	{
-		const char * tools[] = { "FLH", "FLV", "ROT", "CLR", "MSK", "BLK", "REV" };
-		int ti;
-		for (ti = 0; ti < L->ntools; ti++) {
-			RECT trc;
-			trc.left = L->toolx + ti * (L->toolw + 4);
-			trc.top = L->tooly;
-			trc.right = trc.left + L->toolw;
-			trc.bottom = L->tooly + L->toolh;
-			DrawEdge (myhdc, &trc, EDGE_RAISED, BF_RECT);
-			SetBkColor (myhdc, RGB (0, 0, 0));
-			SetTextColor (myhdc, RGB (255, 255, 255));
-			TextOut (myhdc, trc.left + 6, L->tooly + 2, tools[ti], 3);
-		}
-	}
-
-	{
-		int ds;
-		SetBkColor (myhdc, RGB (0, 0, 0));
-		SetTextColor (myhdc, RGB (255, 255, 255));
-		TextOut (myhdc, L->dsx, L->tooly - 14, "Draw size:", 10);
-		for (ds = 1; ds <= 4; ds++) {
-			RECT drc;
-			drc.left = L->dsx + (ds - 1) * 24;
-			drc.top = L->dsy;
-			drc.right = drc.left + 22;
-			drc.bottom = L->dsy + L->toolh;
-			if (ds == GE_thickness) {
-				FillRect (myhdc, &drc, (HBRUSH) GetStockObject (WHITE_BRUSH));
-				SetBkColor (myhdc, RGB (255, 255, 255));
-				SetTextColor (myhdc, RGB (0, 0, 0));
-			} else {
-				DrawEdge (myhdc, &drc, EDGE_RAISED, BF_RECT);
-				SetBkColor (myhdc, RGB (0, 0, 0));
-				SetTextColor (myhdc, RGB (255, 255, 255));
-			}
-			{
-				char dsch[2] = { (char) ('0' + ds), 0 };
-				TextOut (myhdc, drc.left + 7, L->dsy + 2, dsch, 1);
-			}
-		}
-	}
-
-	{
-		int blk = GE_FindBlockForGraphic (curgfxsel);
-		SetBkColor (myhdc, RGB (0, 0, 0));
-		SetTextColor (myhdc, RGB (0xC0, 0xC0, 0xC0));
-		if (blk >= 0)
-			sprintf (txt, "This graphic is used by block %d", blk);
-		else
-			sprintf (txt, "This graphic is not used by any block (click BLK to make one)");
-		TextOut (myhdc, 8, L->statusy, txt, (int) strlen (txt));
-	}
+	GEUpdateStatus ();
 }
 
 static int GETileXY (int mx, int my, int * px, int * py)
@@ -1850,7 +1995,7 @@ static int GEDoTileAction (HWND hwnd, int act, int px, int py)
 
 static int GEOnLButtonDown (HWND hwnd, int mx, int my)
 {
-	int px, py, ch, t, ds, bw;
+	int px, py, ch, bw;
 	GEComputeLayout (hwnd, &gelay);
 	GE_mx = mx; GE_my = my;
 
@@ -1908,29 +2053,6 @@ static int GEOnLButtonDown (HWND hwnd, int mx, int my)
 			SetCapture (hwnd);
 			InvalidateRect (hwnd, NULL, FALSE);
 			return 1;
-		}
-	}
-
-	if (my >= gelay.tooly && my < gelay.tooly + gelay.toolh) {
-		for (t = 0; t < gelay.ntools; t++) {
-			int x0 = gelay.toolx + t * (gelay.toolw + 4);
-			if (mx >= x0 && mx < x0 + gelay.toolw) {
-				GEDoTool (t);
-				InvalidateRect (hwnd, NULL, FALSE);
-				BEInvalidate ();
-				return 1;
-			}
-		}
-	}
-
-	if (my >= gelay.dsy && my < gelay.dsy + gelay.toolh) {
-		for (ds = 1; ds <= 4; ds++) {
-			int x0 = gelay.dsx + (ds - 1) * 24;
-			if (mx >= x0 && mx < x0 + 22) {
-				GE_thickness = ds;
-				InvalidateRect (hwnd, NULL, FALSE);
-				return 1;
-			}
 		}
 	}
 
@@ -2023,15 +2145,15 @@ int GESlide (int dx, int dy)
 	}
 	free (tmp);
 	mapaltered = 1;
-	if (mhwnd) InvalidateRect (mhwnd, NULL, FALSE);
+	GEInvalidate ();
 	BEInvalidate ();
 	return 1;
 }
 
 static int GEMouseTile (int * px, int * py)
 {
-	if (mhwnd == NULL) return 0;
-	GEComputeLayout (mhwnd, &gelay);
+	if (ghwnd == NULL) return 0;
+	GEComputeLayout (ghwnd, &gelay);
 	return GETileXY (GE_mx, GE_my, px, py);
 }
 
@@ -2043,7 +2165,7 @@ int GEAccelFill (void)
 	GEPushUndo ();
 	GEFill (px, py);
 	mapaltered = 1;
-	InvalidateRect (mhwnd, NULL, FALSE);
+	GEInvalidate ();
 	BEInvalidate ();
 	return 1;
 }
@@ -2054,7 +2176,7 @@ int GEAccelPick (void)
 	if (betype != BETYPE_GRAPH) return 0;
 	if (!GEMouseTile (&px, &py)) return 1;
 	GEPickAt (px, py, 0);
-	InvalidateRect (mhwnd, NULL, FALSE);
+	GEInvalidate ();
 	return 1;
 }
 
@@ -2066,7 +2188,7 @@ int GEAccelLine (void)
 	GEPushUndo ();
 	GELine (GE_lastpx, GE_lastpy, px, py);
 	mapaltered = 1;
-	InvalidateRect (mhwnd, NULL, FALSE);
+	GEInvalidate ();
 	BEInvalidate ();
 	return 1;
 }
@@ -2083,20 +2205,12 @@ PAINTSTRUCT ps;
 	switch (message) {
 	case WM_PAINT:
 		myhdc = BeginPaint (hwnd, &ps);
-		if (blockgfxpt!=NULL) {
-			if (betype == BETYPE_GRAPH)
-				MEDrawGraphicEditor (hwnd, myhdc);
-			else
-				MEDrawMap (hwnd, myhdc);
-		}
+		if (blockgfxpt!=NULL)
+			MEDrawMap (hwnd, myhdc);
 		EndPaint (hwnd, &ps);
 //		ReleaseDC (hwnd, myhdc);
 		break;
 	case WM_LBUTTONDOWN:
-		if (betype == BETYPE_GRAPH) {
-			GEOnLButtonDown (hwnd, (int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam));
-			return 0;
-		}
 		if (mappt==NULL) return 0;
 		if (objplace) {
 			/* object placement: click places selected, ctrl+click duplicates */
@@ -2169,10 +2283,6 @@ PAINTSTRUCT ps;
 		mebrushy = yblk; mebrushy2 = mebrushy; }
 /* deliberately run into mousemove */
 	case WM_MOUSEMOVE:
-		if (betype == BETYPE_GRAPH) {
-			GEOnMouseMove (hwnd, (int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam));
-			return 0;
-		}
 		if (mappt==NULL) return 0;
 		if (dragmode) {
 			MEDragMap (LOWORD(lParam), HIWORD(lParam));
@@ -2213,10 +2323,6 @@ PAINTSTRUCT ps;
 	case WM_ACTIVATE:
 //   	MessageBox (hwnd, "Killed!", "Focus", MB_OK);
 	case WM_LBUTTONUP:
-		if (betype == BETYPE_GRAPH) {
-			GEOnLButtonUp (hwnd);
-			return 0;
-		}
 		if (lua_mb_act == 10) {
 			xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
 			yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
@@ -2236,7 +2342,6 @@ PAINTSTRUCT ps;
 			if (curbrsh>0 && curbrsh<=MAXBRSH) InvalidateRgn (mhwnd, NULL, FALSE);
 		break;
 	case WM_RBUTTONUP:
-		if (betype == BETYPE_GRAPH) return 0;
 		if (mappt==NULL) break;
 		if (lua_mb_act == 10) {
 			xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
@@ -2262,10 +2367,6 @@ PAINTSTRUCT ps;
 		}
 		break;
 	case WM_RBUTTONDOWN:
-		if (betype == BETYPE_GRAPH) {
-			GEOnRButtonDown (hwnd, (int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam));
-			return 0;
-		}
 		if (mappt==NULL) break;
 		if (MBDoAction (mb_r, hwnd, lParam)) rmapped = 1;
 		break;
@@ -2368,17 +2469,6 @@ PAINTSTRUCT ps;
 		InvalidateRgn (mhwnd, NULL, FALSE);
 		break;
 	case WM_KEYDOWN:
-		if (betype == BETYPE_GRAPH) {
-			switch (LOWORD(wParam)) {
-				case 'L': GEAccelLine (); break;
-				case 'F': GEAccelFill (); break;
-				case 'P': GEAccelPick (); break;
-				case 'Z':
-					if (GetKeyState (VK_CONTROL) < 0) GEUndo ();
-					break;
-			}
-			return 0;
-		}
 		if (mappt==NULL) break;
 		if (LOWORD(wParam)>=VK_F1 && LOWORD(wParam)<=VK_F10) {
 			int fn = LOWORD(wParam)-VK_F1;
@@ -2471,6 +2561,116 @@ WNDCLASS wndclass;
 	ShowWindow(mhwnd, SW_SHOW);
 	UpdateWindow(mhwnd);
 	return mhwnd;
+}
+
+static LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	HDC myhdc;
+	PAINTSTRUCT ps;
+	int id;
+
+	switch (message) {
+	case WM_PAINT:
+		myhdc = BeginPaint (hwnd, &ps);
+		if (blockgfxpt != NULL)
+			MEDrawGraphicEditor (hwnd, myhdc);
+		EndPaint (hwnd, &ps);
+		break;
+	case WM_COMMAND:
+		id = (int) LOWORD (wParam);
+		if (id >= IDC_GETOOL0 && id < IDC_GETOOL0 + GETOOL_COUNT) {
+			GEDoTool (id - IDC_GETOOL0);
+			GEInvalidate ();
+			BEInvalidate ();
+			GEUpdateStatus ();
+			SetFocus (hwnd);
+			return 0;
+		}
+		if (id >= IDC_GETHICK1 && id < IDC_GETHICK1 + 4) {
+			GE_thickness = id - IDC_GETHICK1 + 1;
+			GEUpdateToolbar ();
+			SetFocus (hwnd);
+			return 0;
+		}
+		break;
+	case WM_LBUTTONDOWN:
+		SetFocus (hwnd);
+		GEOnLButtonDown (hwnd, (int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam));
+		return 0;
+	case WM_LBUTTONUP:
+		GEOnLButtonUp (hwnd);
+		return 0;
+	case WM_MOUSEMOVE:
+		GEOnMouseMove (hwnd, (int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam));
+		return 0;
+	case WM_RBUTTONDOWN:
+		SetFocus (hwnd);
+		GEOnRButtonDown (hwnd, (int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam));
+		return 0;
+	case WM_SIZE:
+		GELayoutToolbar (hwnd);
+		InvalidateRect (hwnd, NULL, FALSE);
+		break;
+	case WM_DPICHANGED:
+		GEEnsureUiFont (hwnd);
+		GELayoutToolbar (hwnd);
+		InvalidateRect (hwnd, NULL, FALSE);
+		break;
+	case WM_KEYDOWN:
+		switch (LOWORD(wParam)) {
+			case 'L': GEAccelLine (); break;
+			case 'F': GEAccelFill (); break;
+			case 'P': GEAccelPick (); break;
+			case 'Z':
+				if (GetKeyState (VK_CONTROL) < 0) GEUndo ();
+				break;
+		}
+		return 0;
+	case WM_DESTROY:
+		ghwnd = NULL;
+		if (ge_font != NULL) {
+			DeleteObject (ge_font);
+			ge_font = NULL;
+		}
+		break;
+	default:
+		return DefWindowProc (hwnd, message, wParam, lParam);
+	}
+	return 0;
+}
+
+HWND CreateGraphEditorWindow (HWND hwnd)
+{
+	int x;
+	RECT rc;
+	WNDCLASS wndclass;
+
+	if (ghwnd != NULL) return ghwnd;
+
+	memset (&wndclass, 0, sizeof(WNDCLASS));
+	wndclass.style = CS_HREDRAW | CS_VREDRAW | CS_BYTEALIGNCLIENT | CS_NOCLOSE;
+	wndclass.lpfnWndProc = GraphWndProc;
+	wndclass.hInstance = hInstance;
+	wndclass.hIcon = LoadIcon(hInstance, "MAPWINIC");
+	wndclass.hCursor = LoadCursor(NULL, (LPCSTR) IDC_ARROW);
+	wndclass.hbrBackground = (HBRUSH) GetStockObject (GRAY_BRUSH);
+	wndclass.lpszMenuName = NULL;
+	wndclass.lpszClassName = szGraphEdname;
+	RegisterClass(&wndclass);
+
+	GetWindowRect (hwnd, &rc);
+	if (wlayout == 0) x = 0; else x = 128;
+
+	ghwnd = CreateWindow (szGraphEdname, szGraphEdname,
+		WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_CAPTION | WS_CLIPSIBLINGS |
+		WS_CLIPCHILDREN | WS_THICKFRAME | WS_CHILDWINDOW,
+		x, 0, (rc.right)-(rc.left)-132,
+		(rc.bottom)-(rc.top)-30-GetSystemMetrics(SM_CYCAPTION),
+		hwnd, (HMENU) 1002, hInstance, NULL);
+
+	GECreateToolbar (ghwnd);
+	ShowWindow (ghwnd, SW_HIDE);
+	return ghwnd;
 }
 
 /* Hide scrollbars when no map is loaded (avoids zero-range scrollbar

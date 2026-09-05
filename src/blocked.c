@@ -497,8 +497,7 @@ static void BESetType (int newtype)
 	BESyncTabSel ();
 	BESetScrollRange ();
 	InvalidateRgn (bhwnd, NULL, FALSE);
-	/* Graph uses the left window as a tile canvas; Still (and other
-	 * tabs) put the full map back. */
+	GEShowMode (newtype == BETYPE_GRAPH);
 	InvalidateAll ();
 }
 

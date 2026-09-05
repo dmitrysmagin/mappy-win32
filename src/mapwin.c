@@ -99,6 +99,8 @@ extern short int betype;
 void InvalidateAll (void)
 {
 	InvalidateRgn (hwnd, NULL, FALSE);
+	if (MEGetHWND () != NULL) InvalidateRgn (MEGetHWND (), NULL, FALSE);
+	if (GEGetHWND () != NULL) InvalidateRgn (GEGetHWND (), NULL, FALSE);
 }
 
 static void DoBackup (void)
@@ -1482,6 +1484,7 @@ char * iniinfo, * inipos;
 	UpdateWindow (hwnd);
 
 	CreateMapEditorWindow (hwnd);
+	CreateGraphEditorWindow (hwnd);
 	CreateBlockEditorWindow (hwnd);
 	CreateAnimPreviewWindow (hwnd);
 	Rejig ();

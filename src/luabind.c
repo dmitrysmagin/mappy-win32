@@ -1685,7 +1685,7 @@ static int m_moveWindow (lua_State *LS)
 	int h = (int) lua_tonumber (LS, 5);
 	HWND hw = NULL;
 	if (which == 0) hw = MapGetMainHWND ();
-	else if (which == 1) hw = MEGetHWND ();
+	else if (which == 1) hw = (betype == 2 && GEGetHWND () != NULL) ? GEGetHWND () : MEGetHWND ();
 	else if (which == 2) hw = BEGetHWND ();
 	if (hw) MoveWindow (hw, x, y, w, h, TRUE);
 	return 0;
