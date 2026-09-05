@@ -121,6 +121,7 @@ void BEUpdateScrollVis (void);
 void BESetScrollRange (void);
 HWND CreateBlockEditorWindow (HWND);
 HWND BEGetHWND (void);
+void BESetWindowType (int);
 /* import.c prototypes */
 int IMImportBlocks (char *, int);
 void InsertBytes (char *, char *, int);

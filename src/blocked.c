@@ -1,11 +1,16 @@
 #define  STRICT
 #include <windows.h>
+#include <commctrl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "mapwin.h"
 #include "fmp14.h"
 #include "luabind.h"
+
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
+#endif
 
 #define BETYPE_STILL   0
 #define BETYPE_ANIM    1
@@ -14,18 +19,13 @@
 #define BETYPE_OBJECTS 4
 #define BETYPE_COUNT   5
 
-#define BTN_STILL   1000
-#define BTN_ANIM    1001
-#define BTN_GRAPH   1002
-#define BTN_BRUSHES 1003
-#define BTN_OBJECTS 1004
-#define BTN_FIRST   BTN_STILL
-#define BTN_LAST    BTN_OBJECTS
-
-#define TAB_H 20
+#define IDC_BEMODETAB 1000
+#define TAB_H 22
 
 static HWND bhwnd = NULL;
-static HWND hbtn[BETYPE_COUNT] = { NULL };
+static HWND htab = NULL;
+static HFONT be_font = NULL;
+static int be_tabh = TAB_H;
 short int beyoff = 0, betype = BETYPE_STILL, bebpr = 1;
 short int curgfxsel = -1;   /* selected graphic index (Graph mode) */
 short int curbrushsel = -1; /* selected brush index (Brushes mode) */
@@ -45,8 +45,13 @@ extern int wlayout;
 extern int sortblocks, sortobjects;
 extern int mwheelblks, thumbtrack;
 
-static void BECreateTabButtons (HWND parent);
-static void BEUpdateTabButtons (void);
+static int BEGetDpi (HWND hwnd);
+static int BETabStripHeight (void);
+static void BEEnsureUiFont (HWND hwnd);
+static void BELayoutTabs (HWND parent);
+static void BECreateTabControl (HWND parent);
+static void BESyncTabSel (void);
+static void BESetType (int newtype);
 
 void BEResizeWind (int wide, int high)
 {
@@ -355,7 +360,7 @@ unsigned char * destmempt;
 BITMAPINFOHEADER bih;
 RGBQUAD rgbq;
 RECT rc;
-int tabht = TAB_H;
+int tabht = BETabStripHeight ();
 
 		GetWindowRect (phwnd, &rc);
 		k = (rc.right)-(rc.left);
@@ -489,12 +494,17 @@ static void BESetType (int newtype)
 		curgfxsel = (short int) BEGfxFromStill ();
 		if (bebpr > 0) beyoff = (short int) (curgfxsel / bebpr);
 	}
-	BEUpdateTabButtons ();
+	BESyncTabSel ();
 	BESetScrollRange ();
 	InvalidateRgn (bhwnd, NULL, FALSE);
 	/* Graph uses the left window as a tile canvas; Still (and other
 	 * tabs) put the full map back. */
 	InvalidateAll ();
+}
+
+void BESetWindowType (int newtype)
+{
+	BESetType (newtype);
 }
 
 LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -512,14 +522,21 @@ PAINTSTRUCT ps;
 		}
 		EndPaint (hwnd, &ps);
 		break;
-	case WM_COMMAND:
-		switch (LOWORD(wParam)) {
-		case BTN_STILL:   BESetType (BETYPE_STILL); break;
-		case BTN_ANIM:    BESetType (BETYPE_ANIM); break;
-		case BTN_GRAPH:   BESetType (BETYPE_GRAPH); break;
-		case BTN_BRUSHES: BESetType (BETYPE_BRUSHES); break;
-		case BTN_OBJECTS: BESetType (BETYPE_OBJECTS); break;
+	case WM_NOTIFY:
+		if (lParam != 0 && ((NMHDR *) lParam)->idFrom == IDC_BEMODETAB &&
+			((NMHDR *) lParam)->code == TCN_SELCHANGE) {
+			int sel = (int) SendMessage (htab, TCM_GETCURSEL, 0, 0);
+			if (sel >= 0 && sel < BETYPE_COUNT)
+				BESetType (sel);
 		}
+		break;
+	case WM_SIZE:
+		BELayoutTabs (hwnd);
+		InvalidateRect (hwnd, NULL, FALSE);
+		break;
+	case WM_DPICHANGED:
+		BEEnsureUiFont (hwnd);
+		BELayoutTabs (hwnd);
 		break;
 	case WM_VSCROLL:
 		BERefreshSort ();
@@ -558,9 +575,9 @@ PAINTSTRUCT ps;
 		break;
 	case WM_LBUTTONUP:
 		if (LOWORD(lParam)>((blockwidth+2)*BEZoom()*bebpr)) break;
-		if (HIWORD(lParam) < TAB_H) break;
+		if (HIWORD(lParam) < BETabStripHeight ()) break;
 		{
-			int clicked = ((beyoff + ((HIWORD(lParam)-TAB_H)/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
+			int clicked = ((beyoff + ((HIWORD(lParam)-BETabStripHeight())/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
 			clicked = BEMapDisp (clicked);
 			switch (betype) {
 			case BETYPE_STILL:
@@ -623,9 +640,9 @@ PAINTSTRUCT ps;
 	case WM_LBUTTONDBLCLK:
 		if (blockstrpt == NULL) break;
 		if (LOWORD(lParam)>((blockwidth+2)*BEZoom()*bebpr)) break;
-		if (HIWORD(lParam) < TAB_H) break;
+		if (HIWORD(lParam) < BETabStripHeight ()) break;
 		{
-			int clicked = ((beyoff + ((HIWORD(lParam)-TAB_H)/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
+			int clicked = ((beyoff + ((HIWORD(lParam)-BETabStripHeight())/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
 			clicked = BEMapDisp (clicked);
 			switch (betype) {
 			case BETYPE_STILL:
@@ -672,6 +689,13 @@ PAINTSTRUCT ps;
 		}
 		InvalidateAll ();
 		break;
+	case WM_DESTROY:
+		htab = NULL;
+		if (be_font != NULL) {
+			DeleteObject (be_font);
+			be_font = NULL;
+		}
+		break;
 	case WM_MOUSEWHEEL:
 		if (blockgfxpt==NULL) break;
 		{
@@ -692,39 +716,114 @@ PAINTSTRUCT ps;
 	return 0;
 }
 
-static void BECreateTabButtons (HWND parent)
+static int BEGetDpi (HWND hwnd)
 {
-	int bw, bx, i;
-	RECT rc;
-	const char * labels[] = { "Still", "Anim", "Graph", "Brushes", "Objects" };
-	int ids[] = { BTN_STILL, BTN_ANIM, BTN_GRAPH, BTN_BRUSHES, BTN_OBJECTS };
-
-	GetWindowRect (parent, &rc);
-	bw = ((rc.right - rc.left) - 4) / BETYPE_COUNT;
-	if (bw < 20) bw = 20;
-
-	for (i = 0; i < BETYPE_COUNT; i++) {
-		bx = i * bw + 2;
-		hbtn[i] = CreateWindow ("button", labels[i],
-			WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-			bx, 0, bw, TAB_H,
-			parent, (HMENU)(INT_PTR)ids[i], hInstance, NULL);
-		SendMessage (hbtn[i], WM_SETFONT, (WPARAM)GetStockObject (DEFAULT_GUI_FONT), TRUE);
-	}
-	BEUpdateTabButtons ();
+	HDC hdc;
+	int dpi;
+	if (hwnd == NULL) return 96;
+	hdc = GetDC (hwnd);
+	if (hdc == NULL) return 96;
+	dpi = GetDeviceCaps (hdc, LOGPIXELSY);
+	ReleaseDC (hwnd, hdc);
+	if (dpi < 96) dpi = 96;
+	return dpi;
 }
 
-static void BEUpdateTabButtons (void)
+static int BETabStripHeight (void)
 {
-	int i;
-	for (i = 0; i < BETYPE_COUNT; i++) {
-		if (hbtn[i] != NULL) {
-			if (i == betype)
-				SendMessage (hbtn[i], BM_SETSTATE, TRUE, 0);
-			else
-				SendMessage (hbtn[i], BM_SETSTATE, FALSE, 0);
-		}
+	if (be_tabh < 1) return TAB_H;
+	return be_tabh;
+}
+
+static void BEEnsureUiFont (HWND hwnd)
+{
+	NONCLIENTMETRICS ncm;
+	HFONT created;
+
+	memset (&ncm, 0, sizeof (ncm));
+	ncm.cbSize = sizeof (ncm);
+	if (!SystemParametersInfo (SPI_GETNONCLIENTMETRICS, sizeof (ncm), &ncm, 0)) {
+		ncm.cbSize = sizeof (ncm) - sizeof (int);
+		if (!SystemParametersInfo (SPI_GETNONCLIENTMETRICS, ncm.cbSize, &ncm, 0))
+			return;
 	}
+	created = CreateFontIndirect (&ncm.lfMessageFont);
+	if (created == NULL) return;
+	if (be_font != NULL) DeleteObject (be_font);
+	be_font = created;
+	if (htab != NULL)
+		SendMessage (htab, WM_SETFONT, (WPARAM) be_font, TRUE);
+	(void) hwnd;
+}
+
+static void BESyncTabSel (void)
+{
+	if (htab == NULL) return;
+	if ((int) SendMessage (htab, TCM_GETCURSEL, 0, 0) != betype)
+		SendMessage (htab, TCM_SETCURSEL, (WPARAM) betype, 0);
+}
+
+static void BELayoutTabs (HWND parent)
+{
+	RECT crc, rc;
+	int w, dpi, hguess, pad, minstrip;
+
+	if (htab == NULL || parent == NULL) return;
+	GetClientRect (parent, &crc);
+	w = crc.right - crc.left;
+	if (w < 8) w = 8;
+	dpi = BEGetDpi (parent);
+	pad = MulDiv (6, dpi, 96);
+	SendMessage (htab, TCM_SETPADDING, 0, MAKELPARAM (pad, MulDiv (3, dpi, 96)));
+
+	/* Give the control enough height to wrap, then shrink to the strip. */
+	hguess = MulDiv (72, dpi, 96);
+	SetWindowPos (htab, HWND_TOP, 0, 0, w, hguess, SWP_NOACTIVATE);
+
+	rc.left = 0;
+	rc.top = 0;
+	rc.right = w;
+	rc.bottom = hguess;
+	SendMessage (htab, TCM_ADJUSTRECT, FALSE, (LPARAM) &rc);
+	be_tabh = rc.top;
+	minstrip = MulDiv (TAB_H, dpi, 96);
+	if (be_tabh < minstrip) be_tabh = minstrip;
+
+	SetWindowPos (htab, HWND_TOP, 0, 0, w, be_tabh, SWP_NOACTIVATE);
+
+	GetClientRect (htab, &rc);
+	SendMessage (htab, TCM_ADJUSTRECT, FALSE, (LPARAM) &rc);
+	if (rc.top > minstrip) be_tabh = rc.top;
+	SetWindowPos (htab, HWND_TOP, 0, 0, w, be_tabh, SWP_NOACTIVATE);
+}
+
+static void BECreateTabControl (HWND parent)
+{
+	static const char * labels[] = { "Still", "Anim", "Graph", "Brushes", "Objects" };
+	INITCOMMONCONTROLSEX icc;
+	TCITEM tie;
+	int i;
+
+	icc.dwSize = sizeof (icc);
+	icc.dwICC = ICC_TAB_CLASSES;
+	InitCommonControlsEx (&icc);
+
+	htab = CreateWindowEx (0, WC_TABCONTROL, "",
+		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS |
+		TCS_MULTILINE | TCS_HOTTRACK | TCS_RAGGEDRIGHT | TCS_FOCUSONBUTTONDOWN,
+		0, 0, 64, TAB_H,
+		parent, (HMENU)(INT_PTR) IDC_BEMODETAB, hInstance, NULL);
+	if (htab == NULL) return;
+
+	BEEnsureUiFont (parent);
+	memset (&tie, 0, sizeof (tie));
+	tie.mask = TCIF_TEXT;
+	for (i = 0; i < BETYPE_COUNT; i++) {
+		tie.pszText = (LPSTR) labels[i];
+		SendMessage (htab, TCM_INSERTITEM, (WPARAM) i, (LPARAM) &tie);
+	}
+	SendMessage (htab, TCM_SETCURSEL, (WPARAM) betype, 0);
+	BELayoutTabs (parent);
 }
 
 HWND CreateBlockEditorWindow (HWND hwnd)
@@ -752,12 +851,12 @@ WNDCLASS wndclass;
 	else x = 0;
 		bhwnd = CreateWindow (szBlockEdname, szBlockEdname,
 								WS_MAXIMIZEBOX	| WS_MINIMIZEBOX | WS_CAPTION | WS_CLIPSIBLINGS |
-								WS_THICKFRAME | WS_CHILDWINDOW | WS_VSCROLL,
+								WS_CLIPCHILDREN | WS_THICKFRAME | WS_CHILDWINDOW | WS_VSCROLL,
 								x, 0, 128,
 								(rc.bottom)-(rc.top)-30-GetSystemMetrics(SM_CYCAPTION),
 								hwnd, (HMENU) 1001, hInstance, NULL);
 
-	BECreateTabButtons (bhwnd);
+	BECreateTabControl (bhwnd);
 	BEUpdateScrollVis ();
 	ShowWindow(bhwnd, SW_SHOW);
 	UpdateWindow(bhwnd);

@@ -521,7 +521,7 @@ static int m_setValue (lua_State *LS)
 		case LV_TRANSRED: transred = (unsigned char) v; break;
 		case LV_TRANSGREEN: transgreen = (unsigned char) v; break;
 		case LV_TRANSBLUE: transblue = (unsigned char) v; break;
-		case LV_BEWINDOWTYPE: betype = (short) v; BEInvalidate (); break;
+		case LV_BEWINDOWTYPE: BESetWindowType (v); break;
 		case LV_BLOCKLABELS:
 			if (lua_isstring (LS, 2)) parse_labels (blocklabels, lua_tostring (LS, 2));
 			break;
