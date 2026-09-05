@@ -2204,7 +2204,7 @@ unsigned char tempred, tempgreen, tempblue;
 	bmlinept = bmdatapt + ((((((numblockgfx-1)-bskip)/bprow)+1)*blockheight)*i);
 	bmlinept -= i;
 	for (j=(((((numblockgfx-1)-bskip)/bprow)+1)*blockheight);j>0;j--) {
-		if (fwrite (bmlinept, 1, i, fpt)!=i) { free (bmdatapt); return -1; }
+		if (fwrite (bmlinept, 1, (size_t) i, fpt)!=(size_t) i) { free (bmdatapt); return -1; }
 		bmlinept -= i;
 	}
 	free (bmdatapt);
@@ -2337,9 +2337,9 @@ unsigned long int * darkenpt;
 				}
 				bmlinept[k] = (unsigned char) best;
 			}
-			if (fwrite (bmlinept+(blockstaggerx), 1, i, fpt)!=i) { free (bmdatapt); return -1; }
+			if (fwrite (bmlinept+(blockstaggerx), 1, (size_t) i, fpt)!=(size_t) i) { free (bmdatapt); return -1; }
 		} else {
-			if (fwrite (bmlinept+(blockstaggerx*3), 1, bwpitch, fpt)!=bwpitch) { free (bmdatapt); return -1; }
+			if (fwrite (bmlinept+(blockstaggerx*3), 1, (size_t) bwpitch, fpt)!=(size_t) bwpitch) { free (bmdatapt); return -1; }
 		}
 		bmlinept -= bwpitch;
 	}
@@ -2396,14 +2396,14 @@ unsigned char * palpt;
 		if (numblockstr <= 1024) {
 		for (j=0;j<(mapwidth*mapheight);j++) if (mappt[j] > 0) mappt[j] *= 32;
 		j = mapwidth*mapheight*2;
-		if (fwrite (mappt, 1, j, fpt)!=j) { fclose (fpt);
+		if (fwrite (mappt, 1, (size_t) j, fpt)!=(size_t) j) { fclose (fpt);
 			for (j=0;j<(mapwidth*mapheight);j++) if (mappt[j] > 0) mappt[j] /= 32;
 			return -1; }
 		for (j=0;j<(mapwidth*mapheight);j++) if (mappt[j] > 0) mappt[j] /= 32;
 		} else {
 		for (j=0;j<(mapwidth*mapheight);j++) if (mappt[j] < 0) mappt[j] /= 16;
 		j = mapwidth*mapheight*2;
-		if (fwrite (mappt, 1, j, fpt)!=j) { fclose (fpt);
+		if (fwrite (mappt, 1, (size_t) j, fpt)!=(size_t) j) { fclose (fpt);
 			for (j=0;j<(mapwidth*mapheight);j++) if (mappt[j] < 0) mappt[j] *= 16;
 			return -1; }
 		for (j=0;j<(mapwidth*mapheight);j++) if (mappt[j] < 0) mappt[j] *= 16;
@@ -2514,7 +2514,7 @@ unsigned char * palpt;
 		fpt = fopen (expname, "wb");
 		if (fpt==NULL) return -1;
 		j = blockwidth*blockheight*((blockdepth+1)/8)*numblockgfx;
-		if (fwrite (blockgfxpt, 1, j, fpt)!=j) { fclose (fpt); return -1; }
+		if (fwrite (blockgfxpt, 1, (size_t) j, fpt)!=(size_t) j) { fclose (fpt); return -1; }
 		fclose (fpt);
 	}
 	if (i&EXPRT_SCR) {
@@ -3014,6 +3014,7 @@ INT_PTR CALLBACK DIAResizeBlkProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM
 char txt[32];
 int neww, newh, newd;
 
+	UNUSED(lParam);
 	switch (msg) {
 		case WM_INITDIALOG:
 			sprintf (txt, "%d", (int) blockwidth);
@@ -3049,7 +3050,6 @@ int neww, newh, newd;
 				}
 				{
 					int sidx = SendDlgItemMessage (hwndDlg, IDC_RESBLKD, CB_GETCURSEL, 0, 0);
-					const char * depthstrs[] = { "8", "15", "16", "24", "32" };
 					int depths[] = { 8, 15, 16, 24, 32 };
 					newd = depths[sidx];
 				}
@@ -3121,7 +3121,7 @@ static int OE_GfxEq (int a, int b)
 
 void RemoveDuplicateGraphics (void)
 {
-	int n, i, j, compacted;
+	int i, j, compacted;
 	char * deleted;
 	int bytes_per_gfx;
 
@@ -3188,7 +3188,7 @@ static int OE_BlkEq (int a, int b)
 
 void RemoveDuplicateBlocks (void)
 {
-	int n, i, j;
+	int i, j;
 
 	if (blockstrpt == NULL || numblockstr <= 1) return;
 
@@ -3232,6 +3232,7 @@ INT_PTR CALLBACK DIAShowUserProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM 
 	int i;
 	extern int showuser;
 
+	UNUSED(lParam);
 	switch (msg) {
 	case WM_INITDIALOG:
 		for (i = 0; i < SHOWUSER_COUNT; i++)
@@ -3281,6 +3282,7 @@ INT_PTR CALLBACK DIACustomBtnProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM
 		IDC_CUSTBTN4, IDC_CUSTBTN5, IDC_CUSTBTN6 };
 	int vals[7];
 
+	UNUSED(lParam);
 	switch (msg) {
 	case WM_INITDIALOG:
 		vals[0] = mb_l; vals[1] = mb_r; vals[2] = mb_m;
@@ -3327,6 +3329,7 @@ INT_PTR CALLBACK DIALayerAdjProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM 
 	extern short int * mappt;
 	extern short int mapwidth, mapheight;
 
+	UNUSED(lParam);
 	switch (msg) {
 	case WM_INITDIALOG:
 		SetWindowText (GetDlgItem (hwndDlg, IDC_LYRADJVAL), "0");
@@ -3378,6 +3381,7 @@ extern void RemoveDuplicateBlocks (void);
 
 INT_PTR CALLBACK DIRemoveProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+	UNUSED(lParam);
 	switch (msg) {
 	case WM_INITDIALOG:
 		CheckDlgButton (hwndDlg, IDC_REMOVEANIM, 1);

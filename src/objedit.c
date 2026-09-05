@@ -692,6 +692,7 @@ INT_PTR CALLBACK DIAObjectMgrProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM
 {
 int sel, ni;
 
+	UNUSED(lParam);
 	switch (msg) {
 		case WM_INITDIALOG:
 			OE_MgrRefresh (hwndDlg);
@@ -813,6 +814,7 @@ INT_PTR CALLBACK DIAObjFnameProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM 
 {
 int sel, i;
 
+	UNUSED(lParam);
 	switch (msg) {
 		case WM_INITDIALOG:
 			OE_FnameRefresh (hwndDlg);

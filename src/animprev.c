@@ -1376,7 +1376,7 @@ char textbuf[80];
 
 void APSetup (HWND hwnd, int apthedepth)
 {
-
+	UNUSED(apthedepth);
 	DialogBox (hInstance, (LPCSTR) "D_APSETUP", hwnd, AsDlgProc(DIAAPSetupProc));
 }
 
@@ -1415,6 +1415,7 @@ HWND CreateAnimPreviewWindow (HWND hwnd)
 {
 WNDCLASS wndclass;
 
+	UNUSED(hwnd);
 	if (aphwnd != NULL) return aphwnd;
 
 		  wndclass.style = CS_HREDRAW | CS_VREDRAW | CS_BYTEALIGNCLIENT;

@@ -249,7 +249,7 @@ unsigned char savedpal[768];
 	fseek (fpt, 0, SEEK_SET);
 	fbuf = malloc (filesize);
 	if (fbuf==NULL) { fclose (fpt); return -1; }
-	if (fread (fbuf, 1, filesize, fpt)!=filesize) { fclose (fpt); free (fbuf); return -1; }
+	if (fread (fbuf, 1, (size_t) filesize, fpt)!=(size_t) filesize) { fclose (fpt); free (fbuf); return -1; }
 	fclose (fpt);
 
 	if (!strcmp (imname+strlen(imname)-4, ".png") ||
@@ -445,7 +445,7 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 
 	bmppt = malloc (filesize);
 	if (bmppt == NULL) { fclose (fpt); return -1; }
-	if (fread (bmppt, 1, filesize, fpt)!=filesize)
+	if (fread (bmppt, 1, (size_t) filesize, fpt)!=(size_t) filesize)
 	{ fclose (fpt); free (bmppt); return -1; }
 	fclose (fpt);
 

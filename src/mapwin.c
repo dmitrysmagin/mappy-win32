@@ -112,7 +112,7 @@ static void DoBackup (void)
 
 	if (!dobackups || !mapfilename[0]) return;
 	n = strlen(mapfilename);
-	if (n+4 >= sizeof(bakname)) return;
+	if ((size_t) n + 4 >= sizeof(bakname)) return;
 	strcpy(bakname, mapfilename);
 	strcat(bakname, ".BAK");
 	src = fopen(mapfilename, "rb");
@@ -493,7 +493,7 @@ FILE * marfpt;
 						i = (int) ftell (marfpt);
 						if (i!=(mapwidth*mapheight*2)) { fclose (marfpt); MessageBox (hwnd, "Error importing map array (wrong size!), aborted", "Importer", MB_OK|MB_ICONEXCLAMATION); break; }
 						fseek (marfpt, 0, SEEK_SET);
-						if (fread (mappt, 1, i, marfpt)!=i) { fclose (marfpt); MessageBox (hwnd, "Error while importing map array", "Importer", MB_OK|MB_ICONEXCLAMATION); break; }
+						if (fread (mappt, 1, (size_t) i, marfpt)!=(size_t) i) { fclose (marfpt); MessageBox (hwnd, "Error while importing map array", "Importer", MB_OK|MB_ICONEXCLAMATION); break; }
 						fclose (marfpt);
 						j = 0; for (i=0;i<(mapwidth*mapheight);i++) { if (mappt[i]&0xF) j = 1; }
 						for (i=0;i<(mapwidth*mapheight);i++) { if (j) { if (mappt[i] < 0) mappt[i] *= 16; } else { if (mappt[i] > 0) mappt[i] /= 32; } }
@@ -1262,7 +1262,7 @@ FILE * marfpt;
 					fseek (marfpt, 0, SEEK_END);
 					i = (int) ftell (marfpt);
 					fseek (marfpt, 0, SEEK_SET);
-					if (i==(mapwidth*mapheight*2) && fread (mappt, 1, i, marfpt)==i) mapaltered = 1;
+					if (i==(mapwidth*mapheight*2) && fread (mappt, 1, (size_t) i, marfpt)==(size_t) i) mapaltered = 1;
 					else MessageBox (hwnd, "Error importing map array (wrong size!).", "Importer", MB_OK|MB_ICONEXCLAMATION);
 					fclose (marfpt);
 				}

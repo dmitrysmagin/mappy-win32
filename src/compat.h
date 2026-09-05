@@ -21,6 +21,8 @@
  * -Wincompatible-pointer-types / -Wcast-function-type. */
 #define AsDlgProc(fn) ((DLGPROC)(void *)(fn))
 
+#define UNUSED(x) ((void)(x))
+
 /* Pointer alignment check without truncating to 32-bit int on Win64 */
 static inline int mappy_ptr_is_odd(const void *p) {
     return (((uintptr_t)p) & 1) ? 1 : 0;

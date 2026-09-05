@@ -30,7 +30,8 @@ LUADIR2 = lua-5.0.3/src/lib
 LUA_CFILES = $(filter-out $(LUADIR)/ltests.c, $(wildcard $(LUADIR)/*.c))
 LUA_CFILES += $(filter-out $(LUADIR2)/loadlib.c, $(wildcard $(LUADIR2)/*.c))
 LUA_OFILES = $(LUA_CFILES:.c=.o)
-LUA_CFLAGS = -O2 -Wall -Wextra -std=gnu99 -fno-lto -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -I$(LUADIR)/../include
+LUA_CFLAGS = -pipe -O2 -Wall -Wextra -std=gnu99 -fno-lto -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -I$(LUADIR)/../include
+LUA_CFLAGS += -Wno-implicit-fallthrough -Wno-address -Wno-type-limits -Wno-pointer-to-int-cast -Wno-unused-value
 
 CFILES  = mapfunc.c fmp14.c mapwin.c maped.c blocked.c mapdia.c mapcust.c import.c objedit.c luabind.c $(ANIMSRC)
 OFILES  = $(CFILES:.c=.o)

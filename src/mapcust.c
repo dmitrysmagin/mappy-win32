@@ -142,7 +142,7 @@ char szInitDir[256];
 
 		bmppt = malloc (arpos);
 		if (bmppt == NULL) { fclose (bmfpt); fclose (fpt); return -1; }
-		if (fread (bmppt, 1, arpos, bmfpt) != arpos) {
+		if (fread (bmppt, 1, (size_t) arpos, bmfpt) != (size_t) arpos) {
 			free (bmppt); fclose (bmfpt); fclose (fpt); return -1;
 		}
 		fclose (bmfpt);
@@ -178,13 +178,13 @@ char szInitDir[256];
 					memset (mapoutput, 0, sizeof (mapoutput));
 					if (modemsb == 1) {
 						if (fread (&mapoutput[4-(mapformat[i]-'0')],
-								1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+								1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 							fclose (fpt); return -1;
 						}
 						newmw = (short int) mapoutput[3];
 						newmw |= (((short int) mapoutput[2])<<8);
 					} else {
-						if (fread (mapoutput, 1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+						if (fread (mapoutput, 1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 							fclose (fpt); return -1;
 						}
 						newmw = (short int) mapoutput[0];
@@ -198,13 +198,13 @@ char szInitDir[256];
 					memset (mapoutput, 0, sizeof (mapoutput));
 					if (modemsb == 1) {
 						if (fread (&mapoutput[4-(mapformat[i]-'0')],
-								1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+								1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 							fclose (fpt); return -1;
 						}
 						newmh = (short int) mapoutput[3];
 						newmh |= (((short int) mapoutput[2])<<8);
 					} else {
-						if (fread (mapoutput, 1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+						if (fread (mapoutput, 1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 							fclose (fpt); return -1;
 						}
 						newmh = (short int) mapoutput[0];
@@ -268,7 +268,7 @@ char szInitDir[256];
 							if (mapformat[i] < '1' || mapformat[i] > '4')
 								return mc_fail_after_new (fpt);
 							if (fread (&mapoutput[4-(mapformat[i]-'0')],
-								1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+								1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 								return mc_fail_after_new (fpt);
 							}
 							k = ((int) mapoutput[3]);
@@ -287,7 +287,7 @@ char szInitDir[256];
 							if (mapformat[i] < '1' || mapformat[i] > '4')
 								return mc_fail_after_new (fpt);
 							if (fread (&mapoutput[0],
-								1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+								1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 								return mc_fail_after_new (fpt);
 							}
 							k = ((int) mapoutput[0]);
@@ -349,7 +349,7 @@ char * mcname;
 						mapoutput[0] = 0;
 						i++; if (mapformat[i] >= '1' && mapformat[i] <= '4') {
 							if (fwrite (&mapoutput[4-(mapformat[i]-'0')],
-									1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+									1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 								fclose (fpt); return -1;
 							}
 						}
@@ -359,7 +359,7 @@ char * mcname;
 						mapoutput[2] = 0;
 						mapoutput[3] = 0;
 						i++; if (mapformat[i] >= '1' && mapformat[i] <= '4') {
-							if (fwrite (mapoutput, 1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+							if (fwrite (mapoutput, 1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 								fclose (fpt); return -1;
 							}
 						}
@@ -374,7 +374,7 @@ char * mcname;
 						mapoutput[0] = (unsigned char) ((mapheight>>24) & 0xFF);
 						i++; if (mapformat[i] >= '1' && mapformat[i] <= '4') {
 							if (fwrite (&mapoutput[4-(mapformat[i]-'0')],
-									1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+									1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 								fclose (fpt); return -1;
 							}
 						}
@@ -384,7 +384,7 @@ char * mcname;
 						mapoutput[2] = (unsigned char) ((mapheight>>16) & 0xFF);
 						mapoutput[3] = (unsigned char) ((mapheight>>24) & 0xFF);
 						i++; if (mapformat[i] >= '1' && mapformat[i] <= '4') {
-							if (fwrite (mapoutput, 1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+							if (fwrite (mapoutput, 1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 								fclose (fpt); return -1;
 							}
 						}
@@ -419,7 +419,7 @@ char * mcname;
 							mapoutput[0] = (unsigned char) ((k>>24) & 0xFF);
 							if (mapformat[i] >= '1' && mapformat[i] <= '4') {
 								if (fwrite (&mapoutput[4-(mapformat[i]-'0')],
-									1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+									1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 									fclose (fpt); return -1;
 								}
 							}
@@ -440,7 +440,7 @@ char * mcname;
 							mapoutput[3] = (unsigned char) ((k>>24) & 0xFF);
 							if (mapformat[i] >= '1' && mapformat[i] <= '4') {
 								if (fwrite (&mapoutput[0],
-									1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+									1, (size_t)(mapformat[i]-'0'), fpt) != (size_t)(mapformat[i]-'0')) {
 									fclose (fpt); return -1;
 								}
 							}

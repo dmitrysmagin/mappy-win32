@@ -238,7 +238,7 @@ char * animbufferpt;
 //pragma warn -sig
 int logit (char * str, ...)
 {
-
+	UNUSED(str);
 	return 0;
 /*
 va_list argptr;
@@ -572,10 +572,16 @@ ANISTR * myanpt;
 	} } myanpt--; }
 }
 
-int MapGetchksz (unsigned char * locpt)
+int MapGetchksz (const void * locpt)
 {
-	return ((((int) (locpt[0]))<<24)|(((int) (locpt[1]))<<16)|
-		(((int) (locpt[2]))<<8)|((int) (locpt[3])));
+	const unsigned char * p = (const unsigned char *) locpt;
+	return ((((int) (p[0]))<<24)|(((int) (p[1]))<<16)|
+		(((int) (p[2]))<<8)|((int) (p[3])));
+}
+
+static int chunk_is (const unsigned char * p, const char * id, size_t n)
+{
+	return memcmp (p, id, n) == 0;
 }
 
 void MapPutshort (unsigned char * locpt, int shrt)
@@ -995,7 +1001,7 @@ int DecodeBGFX (unsigned char * mdatpt)
 int DecodeNOVC (unsigned char * mdatpt)
 {
 	logit ("NOVC: %d bytes.\n", MapGetchksz (mdatpt+4));
-	if (MapGetchksz (mdatpt+4) < 70) strcpy (novctext, mdatpt+8);
+	if (MapGetchksz (mdatpt+4) < 70) strcpy (novctext, (const char *) (mdatpt+8));
 	return 0;
 }
 
@@ -1274,15 +1280,15 @@ int held_ngfx = 0;
 		}
 
 		chkdn = 0;
-		if (!strncmp (fmappospt, "ATHR", 4)) { chkdn = 1; DecodeATHR (fmappospt); }
-		if (!strncmp (fmappospt, "MPHD", 4)) { chkdn = 1; DecodeMPHD (fmappospt); }
-		if (!strncmp (fmappospt, "EDHD", 4)) { chkdn = 1; DecodeEDHD (fmappospt); }
-		if (!strncmp (fmappospt, "EPHD", 4)) { chkdn = 1; if (F14_DecodeEPHD (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
-		if (!strncmp (fmappospt, "TSTR", 4)) { chkdn = 1; if (F14_DecodeTSTR (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
-		if (!strncmp (fmappospt, "LSTR", 4)) { chkdn = 1; if (F14_DecodeLSTR (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
-		if (!strncmp (fmappospt, "OBDT", 4)) { chkdn = 1; if (F14_DecodeOBDT (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
-		if (!strncmp (fmappospt, "OBFN", 4)) { chkdn = 1; if (F14_DecodeOBFN (fmappospt, MapGetchksz (fmappospt+4))) { merror = ER_MAPLOADERROR; } }
-		if (!strncmp (fmappospt, "NLYR", 4)) {
+		if (chunk_is (fmappospt, "ATHR", 4)) { chkdn = 1; DecodeATHR (fmappospt); }
+		if (chunk_is (fmappospt, "MPHD", 4)) { chkdn = 1; DecodeMPHD (fmappospt); }
+		if (chunk_is (fmappospt, "EDHD", 4)) { chkdn = 1; DecodeEDHD (fmappospt); }
+		if (chunk_is (fmappospt, "EPHD", 4)) { chkdn = 1; if (F14_DecodeEPHD (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
+		if (chunk_is (fmappospt, "TSTR", 4)) { chkdn = 1; if (F14_DecodeTSTR (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
+		if (chunk_is (fmappospt, "LSTR", 4)) { chkdn = 1; if (F14_DecodeLSTR (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
+		if (chunk_is (fmappospt, "OBDT", 4)) { chkdn = 1; if (F14_DecodeOBDT (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
+		if (chunk_is (fmappospt, "OBFN", 4)) { chkdn = 1; if (F14_DecodeOBFN (fmappospt, MapGetchksz (fmappospt+4))) { merror = ER_MAPLOADERROR; } }
+		if (chunk_is (fmappospt, "NLYR", 4)) {
 			int nlyr, nloff;
 			chkdn = 1;
 			{
@@ -1294,16 +1300,16 @@ int held_ngfx = 0;
 					DecodeNULL (fmappospt);
 			}
 		}
-		if (!strncmp (fmappospt, "CMAP", 4)) { chkdn = 1; DecodeCMAP (fmappospt); }
-		if (!strncmp (fmappospt, "BKDT", 4)) { chkdn = 1; DecodeBKDT (fmappospt); }
-		if (!strncmp (fmappospt, "ANDT", 4)) { chkdn = 1; DecodeANDT (fmappospt); }
-		if (!strncmp (fmappospt, "AGFX", 4)) { chkdn = 1; DecodeAGFX (fmappospt); }
-		if (!strncmp (fmappospt, "BGFX", 4)) { chkdn = 1; DecodeBGFX (fmappospt); }
-		if (!strncmp (fmappospt, "NOVC", 4)) { chkdn = 1; DecodeNOVC (fmappospt); }
-		if (!strncmp (fmappospt, "BODY", 4)) { chkdn = 1; DecodeLayer (fmappospt, 0); }
-		if (!strncmp (fmappospt, "LYR", 3) && fmappospt[3]>='1' && fmappospt[3]<='9') { chkdn = 1; DecodeLayer (fmappospt, fmappospt[3]-'0'); }
+		if (chunk_is (fmappospt, "CMAP", 4)) { chkdn = 1; DecodeCMAP (fmappospt); }
+		if (chunk_is (fmappospt, "BKDT", 4)) { chkdn = 1; DecodeBKDT (fmappospt); }
+		if (chunk_is (fmappospt, "ANDT", 4)) { chkdn = 1; DecodeANDT (fmappospt); }
+		if (chunk_is (fmappospt, "AGFX", 4)) { chkdn = 1; DecodeAGFX (fmappospt); }
+		if (chunk_is (fmappospt, "BGFX", 4)) { chkdn = 1; DecodeBGFX (fmappospt); }
+		if (chunk_is (fmappospt, "NOVC", 4)) { chkdn = 1; DecodeNOVC (fmappospt); }
+		if (chunk_is (fmappospt, "BODY", 4)) { chkdn = 1; DecodeLayer (fmappospt, 0); }
+		if (chunk_is (fmappospt, "LYR", 3) && fmappospt[3]>='1' && fmappospt[3]<='9') { chkdn = 1; DecodeLayer (fmappospt, fmappospt[3]-'0'); }
 		/* Layers 10..99 written as LY10 by older builds of this editor */
-		if (!strncmp (fmappospt, "LY", 2) && fmappospt[2]>='1' && fmappospt[2]<='9' && fmappospt[3]>='0' && fmappospt[3]<='9') {
+		if (chunk_is (fmappospt, "LY", 2) && fmappospt[2]>='1' && fmappospt[2]<='9' && fmappospt[3]>='0' && fmappospt[3]<='9') {
 			int lyn = (fmappospt[2]-'0')*10+(fmappospt[3]-'0');
 			if (lyn>=10 && lyn<MAXMAPLAYERS) { chkdn = 1; DecodeLayer (fmappospt, lyn); }
 		}
@@ -1616,7 +1622,7 @@ int * myanseqpt;
 	CaptureEditorPrefs ();
 
 	strcpy (backupname, mapfilename);
-	j = 0; for (i=0;i<(strlen(backupname));i++) { if (backupname[i]=='.') j = i; }
+	j = 0; for (i=0; backupname[i]; i++) { if (backupname[i]=='.') j = i; }
 	if (j) {
 		backupname[j+1] = 'B'; backupname[j+2] = 'A';
 		backupname[j+3] = 'K'; backupname[j+4] = 0;
@@ -1968,7 +1974,7 @@ int * myanseqpt;
 					t = w[1]; w[1] = w[2]; w[2] = t;
 				}
 			}
-			if (fwrite (body, 1, bodylen, filept)!=bodylen)
+			if (fwrite (body, 1, (size_t) bodylen, filept)!=(size_t) bodylen)
 			{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 			/* swap back to restore in-memory LE layout */
 			for (o = 0; o + 4 <= bodylen && body + o + 4 <= seq_end; o += 4) {
@@ -1984,7 +1990,7 @@ int * myanseqpt;
 				}
 			}
 		} else {
-			if (fwrite (body, 1, bodylen, filept)!=bodylen)
+			if (fwrite (body, 1, (size_t) bodylen, filept)!=(size_t) bodylen)
 			{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 		}
 	}
@@ -2020,7 +2026,7 @@ int * myanseqpt;
 			fmp_put_be32(hdr + 4, unk->size);
 			if (fwrite (hdr, 1, sizeof(hdr), filept)!=sizeof(hdr))
 				{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
-			if (fwrite ((unsigned char *)(unk + 1) + 8, 1, unk->size, filept)!=unk->size)
+			if (fwrite ((unsigned char *)(unk + 1) + 8, 1, (size_t) unk->size, filept)!=(size_t) unk->size)
 				{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 			unk = unk->next;
 		}
@@ -2035,8 +2041,8 @@ int * myanseqpt;
 		if (fmp_write_genheader(filept)!=0)
 			{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 
-		if (fwrite (altgfxpt, 1, numblockgfx*blockheight*blockwidth,
-			filept)!=(numblockgfx*blockheight*blockwidth))
+		if (fwrite (altgfxpt, 1, (size_t) numblockgfx*blockheight*blockwidth,
+			filept)!=(size_t) numblockgfx*blockheight*blockwidth)
 			{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 		if ((numblockgfx*blockheight*blockwidth)&1)
 			{
@@ -2052,7 +2058,7 @@ int * myanseqpt;
 		genheader.headsize=byteswapl((unsigned long)i);
 		if (fmp_write_genheader(filept)!=0)
 			{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
-		if (fwrite (novctext, 1, i, filept)!=i)
+		if (fwrite (novctext, 1, (size_t) i, filept)!=(size_t) i)
 			{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 	}
 
@@ -2067,11 +2073,11 @@ int * myanseqpt;
 	}
 	if (fmp_write_genheader(filept)!=0)
 	{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
-	if (sdepth==15) { if (fwrite (blockgfxpt, 1, numblockgfx*blockheight*blockwidth*2,
-		filept)!=numblockgfx*blockheight*blockwidth*2)
+	if (sdepth==15) { if (fwrite (blockgfxpt, 1, (size_t) numblockgfx*blockheight*blockwidth*2,
+		filept)!=(size_t) numblockgfx*blockheight*blockwidth*2)
 	{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; } } else
-	{ if (fwrite (blockgfxpt, 1, numblockgfx*blockheight*blockwidth*(blockdepth/8),
-		filept)!=numblockgfx*blockheight*blockwidth*(blockdepth/8))
+	{ if (fwrite (blockgfxpt, 1, (size_t) numblockgfx*blockheight*blockwidth*(blockdepth/8),
+		filept)!=(size_t) numblockgfx*blockheight*blockwidth*(blockdepth/8))
 	{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; } }
 	if ((numblockgfx*blockheight*blockwidth*(blockdepth/8))&1)
 	{ if (fwrite (blockgfxpt, 1, 1, filept)!=1)
@@ -3095,7 +3101,6 @@ int MakeBrushBS (int bsstart, int bswidth, int bsheight, int bsmodu)
 {
 int j, k;
 short int * mybrshpt;
-BLKSTR * myblkstrpt;
 
 	if (curbrsh<1 || curbrsh>MAXBRSH) return -1;
 	if (brshpt[curbrsh-1]!=NULL) free (brshpt[curbrsh-1]);
@@ -3107,8 +3112,6 @@ BLKSTR * myblkstrpt;
 	mybrshpt = (short int *) brshpt[curbrsh-1];
 	*mybrshpt = bswidth; mybrshpt++;
 	*mybrshpt = bsheight; mybrshpt++;
-
-	myblkstrpt = (BLKSTR *) blockstrpt;
 
 	for (j=0;j<bsheight;j++)
 	{
