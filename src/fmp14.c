@@ -9,22 +9,22 @@
  *   if (bodysize > 0x1F): +20,+22 short, +24 long, +28 short
  *   if (bodysize > 0x23): +34 short, then +32 short (yes, that order)
  *   if (bodysize > 0x27): +36 short, then +38 short
- *  Observed sizes: 32 (0x20) and 40 (0x28). vhistory.html says EPHD holds
- *  showuser/onion/curlayer/dividers state; the binary gives no field names,
- *  so fields are exposed by index (F14_EPHD_*). Raw bytes are preserved so
- *  unparsed tail/pad bytes round-trip exactly.
+ *  Observed sizes: 32 (0x20) and 40 (0x28). Field names (curlayer, onion*,
+ *  divideron/gapx/gapy/col, showuser) match 1.4.23 load/save. Raw bytes are
+ *  preserved so unparsed tail/pad bytes round-trip exactly.
  *
- * TSTR (sub_4256B0 @004256B0): 4 NUL-terminated strings back-to-back,
- *  bounded by the chunk size (authorname/authorinfo1-3 style slots).
+ * TSTR (sub_425780 @00425780 load, fwrite @0042866C save):
+ *   +0 u32 offset to strings (16), +4 u32 count, +8/+12 u32 spare,
+ *   strings at body+offset, then a pad byte if ftell is odd.
+ *   (ATHR is the 4 packed author strings; that is sub_4256B0.)
  *
- * LSTR (sub_425780 @00425780): layer names:
- *   +0 : u32 offset to strings (8 in all samples)
- *   +4 : u32 name count (clamped to 0xFFF by the original)
- *   +8,+12 : u32 spare (overlap string data in small chunks; preserved)
- *   strings start at body+offset, count NUL-terminated names.
- *  Sample: `08 00 00 00 01 00 00 00 "Layer 0" 00` (lala.fmp, smooth.fmp).
- *  TSTR doc (MAPWIN.HTM "TextStrings and Labels"): "the first int is the
- *  offset to the strings" - same convention.
+ * LSTR (sub_4258B0 @004258B0 load, fwrite @004287F0 save):
+ *   +0 u32 offset (8), +4 u32 count of leading non-NULL layers,
+ *   names at body+8, word-aligned. Always written on save.
+ *
+ * NLYR (sub_425FD0 with layer=-1; save @00429423): one chunk per layer
+ *   8..99. Prefix 16 bytes: u32 offset=16, i16 layer, i16 width,
+ *   i16 height, 6 zero bytes; then BODY-style shorts.
  *
  * OBDT/OBFN (DOCS/readobj.c DecodeOBDTChunk/DecodeOBFNChunk):
  *  OBFN body: NUL-terminated filenames back-to-back.
@@ -96,12 +96,22 @@ int F14_EphdSize(void) { return ephd.present ? ephd.bodysize : 0; }
 void F14_EnsureEPHD(void)
 {
 	if (ephd.present) {
-		if (ephd.bodysize < 40) ephd.bodysize = 40;
+		if (ephd.bodysize < 40) {
+			/* 1.4.23 always writes 40 bytes; fill the extra shorts
+			 * with the same defaults the original uses when size was 32. */
+			ephd.bodysize = 40;
+			if (ephd.s[11] == 0) ephd.s[11] = 0x14; /* +32 */
+			if (ephd.s[10] == 0) ephd.s[10] = 1;    /* +34 */
+		}
 		return;
 	}
 	memset(&ephd, 0, sizeof(ephd));
 	ephd.present = 1;
 	ephd.bodysize = 40;
+	ephd.l[1] = 0x00FFFFFF; /* +24 default in 1.4.23 */
+	ephd.s[9] = 0x20;       /* +28 */
+	ephd.s[11] = 0x14;      /* +32 */
+	ephd.s[10] = 1;         /* +34 */
 }
 
 int F14_EphdGet(int field)
@@ -160,24 +170,52 @@ int F14_SaveEPHD(FILE *f, int is_lsb)
 static struct {
 	int present;
 	int count;
+	int spare1, spare2;
 	char s[F14_MAXTSTRCOUNT][F14_MAXTEXTSTR];
 } tstr;
 
-int F14_DecodeTSTR(const unsigned char *chunk, int bodysize)
+static int f14_write_pad_even(FILE *f)
 {
-	int i, pos = 8; /* chunk+8 = body start */
-	if (bodysize < 1) return -1;
-	memset(&tstr, 0, sizeof(tstr));
-	tstr.present = 1;
+	long p = ftell(f);
+	unsigned char z = 0;
+	if (p < 0) return -1;
+	if (p & 1) return (fwrite(&z, 1, 1, f) == 1) ? 0 : -1;
+	return 0;
+}
+
+static void f14_read_packed_strings(const unsigned char *chunk, int bodysize, int pos)
+{
+	int i;
 	for (i = 0; i < F14_MAXTSTRCOUNT && pos < 8 + bodysize; i++) {
 		int n = 0;
 		while (pos < 8 + bodysize && chunk[pos] != 0 && n < F14_MAXTEXTSTR - 1)
 			tstr.s[i][n++] = (char)chunk[pos++];
 		tstr.s[i][n] = 0;
-		if (pos < 8 + bodysize) pos++; /* skip NUL */
+		if (pos < 8 + bodysize) pos++;
 		tstr.count = i + 1;
 		if (pos >= 8 + bodysize) break;
 	}
+}
+
+int F14_DecodeTSTR(const unsigned char *chunk, int bodysize, int is_lsb)
+{
+	int32_t off, cnt;
+	if (bodysize < 1) return -1;
+	memset(&tstr, 0, sizeof(tstr));
+	tstr.present = 1;
+	if (bodysize >= 16) {
+		off = fmp_get_i32(chunk + 8, is_lsb);
+		cnt = fmp_get_i32(chunk + 12, is_lsb);
+		if (off >= 16 && off < bodysize && cnt >= 0 && cnt <= 0xFFF) {
+			tstr.spare1 = (int)fmp_get_i32(chunk + 16, is_lsb);
+			tstr.spare2 = (int)fmp_get_i32(chunk + 20, is_lsb);
+			f14_read_packed_strings(chunk, bodysize, 8 + (int)off);
+			if (tstr.count > (int)cnt) tstr.count = (int)cnt;
+			return 0;
+		}
+	}
+	/* Legacy packed-only TSTR (our earlier saves, no 16-byte header). */
+	f14_read_packed_strings(chunk, bodysize, 8);
 	return 0;
 }
 
@@ -190,18 +228,28 @@ int F14_HasTSTR(void)
 	return 0;
 }
 
-int F14_SaveTSTR(FILE *f)
+int F14_SaveTSTR(FILE *f, int is_lsb)
 {
 	int i;
-	size_t total = 0;
+	size_t strbytes = 0;
+	uint32_t body;
+	unsigned char hdr[16];
 	if (!F14_HasTSTR()) return 0;
-	for (i = 0; i < tstr.count; i++) total += strlen(tstr.s[i]) + 1;
-	if (fmp_write_chunk_header(f, 'T', 'S', 'T', 'R', (uint32_t)total) != 0)
+	for (i = 0; i < tstr.count; i++) strbytes += strlen(tstr.s[i]) + 1;
+	body = (uint32_t)(16 + strbytes);
+	if (body & 1) body++;
+	if (fmp_write_chunk_header(f, 'T', 'S', 'T', 'R', body) != 0)
 		return -1;
+	memset(hdr, 0, sizeof(hdr));
+	fmp_put_i32(hdr + 0, 16, is_lsb);
+	fmp_put_i32(hdr + 4, (int32_t)tstr.count, is_lsb);
+	fmp_put_i32(hdr + 8, (int32_t)tstr.spare1, is_lsb);
+	fmp_put_i32(hdr + 12, (int32_t)tstr.spare2, is_lsb);
+	if (fwrite(hdr, 1, 16, f) != 16) return -1;
 	for (i = 0; i < tstr.count; i++)
 		if (fwrite(tstr.s[i], 1, strlen(tstr.s[i]) + 1, f) != strlen(tstr.s[i]) + 1)
 			return -1;
-	return 0;
+	return f14_write_pad_even(f);
 }
 
 int F14_TstrCount(void) { return tstr.present ? tstr.count : 0; }
@@ -269,14 +317,29 @@ int F14_DecodeLSTR(const unsigned char *chunk, int bodysize, int is_lsb)
 
 int F14_HasLSTR(void) { return lstr.present && lstr.count > 0; }
 
+void F14_LstrEnsure(int nlayers)
+{
+	int k;
+	if (nlayers < 1) nlayers = 1;
+	if (nlayers > F14_MAXLAYERNAMES) nlayers = F14_MAXLAYERNAMES;
+	lstr.present = 1;
+	if (nlayers > lstr.count) {
+		for (k = lstr.count; k < nlayers; k++) lstr.names[k][0] = 0;
+	}
+	lstr.count = nlayers;
+}
+
 int F14_SaveLSTR(FILE *f, int is_lsb)
 {
 	unsigned char hdr[8];
 	int i;
 	size_t total = 0;
-	if (!F14_HasLSTR()) return 0;
+	uint32_t body;
+	if (lstr.count < 1) F14_LstrEnsure(1);
 	for (i = 0; i < lstr.count; i++) total += strlen(lstr.names[i]) + 1;
-	if (fmp_write_chunk_header(f, 'L', 'S', 'T', 'R', (uint32_t)(8 + total)) != 0)
+	body = (uint32_t)(8 + total);
+	if (body & 1) body++;
+	if (fmp_write_chunk_header(f, 'L', 'S', 'T', 'R', body) != 0)
 		return -1;
 	fmp_put_i32(hdr + 0, 8, is_lsb);
 	fmp_put_i32(hdr + 4, (int32_t)lstr.count, is_lsb);
@@ -284,7 +347,35 @@ int F14_SaveLSTR(FILE *f, int is_lsb)
 	for (i = 0; i < lstr.count; i++)
 		if (fwrite(lstr.names[i], 1, strlen(lstr.names[i]) + 1, f) != strlen(lstr.names[i]) + 1)
 			return -1;
+	return f14_write_pad_even(f);
+}
+
+int F14_NlyrInfo(const unsigned char *chunk, int bodysize, int is_lsb, int *layer, int *dataoff)
+{
+	int off, lyr;
+	if (bodysize < 16 || chunk == NULL) return -1;
+	off = fmp_get_i32(chunk + 8, is_lsb);
+	lyr = fmp_get_i16(chunk + 12, is_lsb);
+	if (off < 16 || off >= bodysize) {
+		off = fmp_get_i32(chunk + 8, 1);
+		lyr = fmp_get_i16(chunk + 12, 1);
+	}
+	if (off < 16 || off >= bodysize) return -1;
+	if (lyr < 0 || lyr >= F14_MAXLAYERNAMES) return -1;
+	if (layer) *layer = lyr;
+	if (dataoff) *dataoff = off;
 	return 0;
+}
+
+int F14_WriteNLYRPrefix(FILE *f, int layer, int width, int height, int is_lsb)
+{
+	unsigned char h[16];
+	memset(h, 0, 16);
+	fmp_put_i32(h + 0, 16, is_lsb);
+	fmp_put_i16(h + 4, layer, is_lsb);
+	fmp_put_i16(h + 6, width, is_lsb);
+	fmp_put_i16(h + 8, height, is_lsb);
+	return (fwrite(h, 1, 16, f) == 16) ? 0 : -1;
 }
 
 int F14_LstrCount(void) { return lstr.present ? lstr.count : 0; }

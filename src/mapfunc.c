@@ -1240,12 +1240,18 @@ int held_ngfx = 0;
 		if (!strncmp (fmappospt, "MPHD", 4)) { chkdn = 1; DecodeMPHD (fmappospt); }
 		if (!strncmp (fmappospt, "EDHD", 4)) { chkdn = 1; DecodeEDHD (fmappospt); }
 		if (!strncmp (fmappospt, "EPHD", 4)) { chkdn = 1; if (F14_DecodeEPHD (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
-		if (!strncmp (fmappospt, "TSTR", 4)) { chkdn = 1; if (F14_DecodeTSTR (fmappospt, MapGetchksz (fmappospt+4))) { merror = ER_MAPLOADERROR; } }
+		if (!strncmp (fmappospt, "TSTR", 4)) { chkdn = 1; if (F14_DecodeTSTR (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
 		if (!strncmp (fmappospt, "LSTR", 4)) { chkdn = 1; if (F14_DecodeLSTR (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
 		if (!strncmp (fmappospt, "OBDT", 4)) { chkdn = 1; if (F14_DecodeOBDT (fmappospt, MapGetchksz (fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
 		if (!strncmp (fmappospt, "OBFN", 4)) { chkdn = 1; if (F14_DecodeOBFN (fmappospt, MapGetchksz (fmappospt+4))) { merror = ER_MAPLOADERROR; } }
-		/* NLYR (100-layer container) stays on the opaque unknown-chunk
-		 * path: no verified sample exists, see fmp14.h. */
+		if (!strncmp (fmappospt, "NLYR", 4)) {
+			int nlyr, nloff;
+			chkdn = 1;
+			if (F14_NlyrInfo (fmappospt, MapGetchksz (fmappospt+4), mapislsb, &nlyr, &nloff) == 0)
+				DecodeLayer (fmappospt + nloff, nlyr);
+			else
+				DecodeNULL (fmappospt);
+		}
 		if (!strncmp (fmappospt, "CMAP", 4)) { chkdn = 1; DecodeCMAP (fmappospt); }
 		if (!strncmp (fmappospt, "BKDT", 4)) { chkdn = 1; DecodeBKDT (fmappospt); }
 		if (!strncmp (fmappospt, "ANDT", 4)) { chkdn = 1; DecodeANDT (fmappospt); }
@@ -1254,7 +1260,7 @@ int held_ngfx = 0;
 		if (!strncmp (fmappospt, "NOVC", 4)) { chkdn = 1; DecodeNOVC (fmappospt); }
 		if (!strncmp (fmappospt, "BODY", 4)) { chkdn = 1; DecodeLayer (fmappospt, 0); }
 		if (!strncmp (fmappospt, "LYR", 3) && fmappospt[3]>='1' && fmappospt[3]<='9') { chkdn = 1; DecodeLayer (fmappospt, fmappospt[3]-'0'); }
-		/* Layers 10..99: our LY10..LY99 extension (NLYR layout unverified, stays opaque) */
+		/* Layers 10..99 written as LY10 by older builds of this editor */
 		if (!strncmp (fmappospt, "LY", 2) && fmappospt[2]>='1' && fmappospt[2]<='9' && fmappospt[3]>='0' && fmappospt[3]<='9') {
 			int lyn = (fmappospt[2]-'0')*10+(fmappospt[3]-'0');
 			if (lyn>=10 && lyn<MAXMAPLAYERS) { chkdn = 1; DecodeLayer (fmappospt, lyn); }
@@ -1523,7 +1529,7 @@ void ApplyEditorPrefs (void)
 	v = F14_EphdGet (F14_EPHD_CURLAYER);
 	if (v >= 0 && v < MAXMAPLAYERS && GetLayerpt (v) != NULL)
 		MapSetCurLayer (v);
-	/* Dividers stay off unless the user enables them (INI or MapTools). */
+	divideron = F14_EphdGet (F14_EPHD_DIVON) ? 1 : 0;
 	v = F14_EphdGet (F14_EPHD_DIVGAPX);
 	if (v >= 8 && v <= 4096) dividergapx = v;
 	v = F14_EphdGet (F14_EPHD_DIVGAPY);
@@ -1784,20 +1790,29 @@ int * myanseqpt;
 		}
 	}
 
-	/* 1.4 chunks, 1.4 file order (EDHD, EPHD, [TSTR,] LSTR, CMAP, ...).
-	 * Each is presence-guarded, so pre-1.4 maps save exactly as before. */
-	/* Always write EPHD so showuser/onion/curlayer/dividers round-trip. */
+	/* 1.4.23 order after EDHD: EPHD, [OBFN/OBDT,] [TSTR,] LSTR, CMAP. */
 	F14_EnsureEPHD ();
 	if (F14_SaveEPHD (filept, mapislsb))
 	{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
+	if (F14_HasOBFN()) {
+		if (F14_SaveOBFN (filept))
+		{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
+	}
+	if (F14_HasOBDT()) {
+		if (F14_SaveOBDT (filept, mapislsb))
+		{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
+	}
 	if (F14_HasTSTR()) {
-		if (F14_SaveTSTR (filept))
+		if (F14_SaveTSTR (filept, mapislsb))
 		{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 	}
-	if (F14_HasLSTR()) {
-		if (F14_SaveLSTR (filept, mapislsb))
-		{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
+	{
+		int nlay = 0;
+		while (nlay < MAXMAPLAYERS && mapmappt[nlay] != NULL) nlay++;
+		F14_LstrEnsure (nlay > 0 ? nlay : 1);
 	}
+	if (F14_SaveLSTR (filept, mapislsb))
+	{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 
 	genheader.id1='C'; genheader.id2='M'; genheader.id3='A'; genheader.id4='P';
 	genheader.headsize=byteswapl((unsigned long)(3*256));
@@ -2023,13 +2038,16 @@ int * myanseqpt;
 	for (i=0;i<MAXMAPLAYERS;i++) { if (mapmappt[i]!=NULL) {
 	if (i == 0) {
 		genheader.id1='B'; genheader.id2='O'; genheader.id3='D'; genheader.id4='Y';
-	} else if (i < 10) {
+	} else if (i < 8) {
 		genheader.id1='L'; genheader.id2='Y'; genheader.id3='R'; genheader.id4=i+48;
 	} else {
-		/* Layers 10..99: LY10..LY99 extension (NLYR layout unverified) */
-		genheader.id1='L'; genheader.id2='Y'; genheader.id3=(i/10)+48; genheader.id4=(i%10)+48;
+		/* Layers 8..99: NLYR + 16-byte prefix (1.4.23 @00429423) */
+		genheader.id1='N'; genheader.id2='L'; genheader.id3='Y'; genheader.id4='R';
 	}
-	genheader.headsize=byteswapl((unsigned long)(mapwidth*mapheight*2));
+	if (i >= 8)
+		genheader.headsize=byteswapl((unsigned long)(mapwidth*mapheight*2 + 16));
+	else
+		genheader.headsize=byteswapl((unsigned long)(mapwidth*mapheight*2));
 
 	if (maptype > 0) {
 		j = ((int) mapwidth)*((int) mapheight);
@@ -2048,6 +2066,10 @@ int * myanseqpt;
 	} else {
 		if (fmp_write_genheader(filept)!=0)
 		{ merror = ER_MAPSAVEERROR; fclose (filept); }
+		if (i >= 8) {
+			if (F14_WriteNLYRPrefix (filept, i, mapwidth, mapheight, mapislsb))
+			{ merror = ER_MAPSAVEERROR; fclose (filept); }
+		}
 		{ /* endian-safe BODY/LYR: file shorts obey mapislsb */
 			int cells = ((int)mapwidth)*((int)mapheight);
 			if (!mapislsb) {
@@ -2083,16 +2105,6 @@ int * myanseqpt;
 	if (merror) return -1;
 	} }
 
-	/* 1.4 Pro objects (presence-guarded). Chunk order is irrelevant to
-	 * MapDecode, which dispatches by ID. */
-	if (F14_HasOBFN()) {
-		if (F14_SaveOBFN (filept))
-		{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
-	}
-	if (F14_HasOBDT()) {
-		if (F14_SaveOBDT (filept, mapislsb))
-		{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
-	}
 	if (merror) return -1;
 
 	fseek (filept, 0, SEEK_END);

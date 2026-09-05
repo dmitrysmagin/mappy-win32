@@ -42,10 +42,11 @@ void F14_FreeAll(void);              /* reset all 1.4 state (call from FreeAll) 
  *bodysize is the BE chunk-body size. Returns 0 on success, -1 on error
  * (sets merror via F14_SetErrorCb or returns -1 for caller to handle). */
 int F14_DecodeEPHD(const unsigned char *chunk, int bodysize, int is_lsb);
-int F14_DecodeTSTR(const unsigned char *chunk, int bodysize);
+int F14_DecodeTSTR(const unsigned char *chunk, int bodysize, int is_lsb);
 int F14_DecodeLSTR(const unsigned char *chunk, int bodysize, int is_lsb);
 int F14_DecodeOBDT(const unsigned char *chunk, int bodysize, int is_lsb);
 int F14_DecodeOBFN(const unsigned char *chunk, int bodysize);
+int F14_NlyrInfo(const unsigned char *chunk, int bodysize, int is_lsb, int *layer, int *dataoff);
 
 /* Presence queries for SaveProject */
 int F14_HasEPHD(void);
@@ -56,10 +57,12 @@ int F14_HasOBFN(void);
 
 /* Encode: write ID + BE size + body. Returns 0 ok, -1 on I/O error. */
 int F14_SaveEPHD(FILE *f, int is_lsb);
-int F14_SaveTSTR(FILE *f);
+int F14_SaveTSTR(FILE *f, int is_lsb);
 int F14_SaveLSTR(FILE *f, int is_lsb);
 int F14_SaveOBDT(FILE *f, int is_lsb);
 int F14_SaveOBFN(FILE *f);
+int F14_WriteNLYRPrefix(FILE *f, int layer, int width, int height, int is_lsb);
+void F14_LstrEnsure(int nlayers);    /* grow to nlayers with "" so save matches 1.4.23 */
 
 /* Accessors (for future UI / Lua use; index-checked, -1/NULL on error) */
 int F14_EphdGet(int field);          /* 0..15, see F14_EPHD_* below */
@@ -67,25 +70,26 @@ void F14_EphdSet(int field, int v);
 int F14_EphdSize(void);              /* stored body size (32 or 40) */
 void F14_EnsureEPHD(void);           /* create 40-byte EPHD if missing */
 
-/* EPHD field ids (offsets below are body-relative byte offsets) */
-#define F14_EPHD_S0  0   /* +0  short  showuser */
+/* EPHD field ids (offsets below are body-relative byte offsets).
+ * Names verified against mapwin 1.4.23 load/save (sub_4254B0 / fwrite @004281B0). */
+#define F14_EPHD_S0  0   /* +0  short  curlayer */
 #define F14_EPHD_S1  1   /* +2  short  onion */
 #define F14_EPHD_S2  2   /* +4  short  oniondark */
 #define F14_EPHD_S3  3   /* +6  short  onionlower */
-#define F14_EPHD_S4  4   /* +8  short  curlayer */
-#define F14_EPHD_S5  5   /* +10 short  divideron */
-#define F14_EPHD_S6  6   /* +12 short  dividergapx */
+#define F14_EPHD_S4  4   /* +8  short  divideron */
+#define F14_EPHD_S5  5   /* +10 short  dividergapx */
+#define F14_EPHD_S6  6   /* +12 short  dividergapy */
 #define F14_EPHD_L0  7   /* +16 long   dividercol */
-#define F14_EPHD_SHOWUSER  F14_EPHD_S0
+#define F14_EPHD_S7  8   /* +20 short showuser (present if size > 0x1F) */
+#define F14_EPHD_CURLAYER  F14_EPHD_S0
 #define F14_EPHD_ONION     F14_EPHD_S1
 #define F14_EPHD_ONIONDARK F14_EPHD_S2
 #define F14_EPHD_ONIONLOW  F14_EPHD_S3
-#define F14_EPHD_CURLAYER  F14_EPHD_S4
-#define F14_EPHD_DIVON     F14_EPHD_S5
-#define F14_EPHD_DIVGAPX   F14_EPHD_S6
+#define F14_EPHD_DIVON     F14_EPHD_S4
+#define F14_EPHD_DIVGAPX   F14_EPHD_S5
+#define F14_EPHD_DIVGAPY   F14_EPHD_S6
 #define F14_EPHD_DIVCOL    F14_EPHD_L0
-#define F14_EPHD_S7  8   /* +20 short dividergapy (present if size > 0x1F) */
-#define F14_EPHD_DIVGAPY   F14_EPHD_S7
+#define F14_EPHD_SHOWUSER  F14_EPHD_S7
 #define F14_EPHD_S8  9   /* +22 short (present if size > 0x1F) */
 #define F14_EPHD_L1  10  /* +24 long  (present if size > 0x1F) */
 #define F14_EPHD_S9  11  /* +28 short (present if size > 0x1F) */
@@ -119,9 +123,7 @@ int F14_AddImage(const char *fname);
 void F14_SetImageName(int i, const char *fname);
 void F14_DeleteImage(int i);
 
-/* NOTE: NLYR (100-layer container) and layers 9..99 are intentionally NOT
- * decoded here: no sample map contains NLYR and its container layout cannot
- * be verified. NLYR keeps flowing through the opaque unknown-chunk path,
- * so such maps still round-trip without data loss. */
+/* NLYR: one chunk per layer 8..99. Body is 16-byte prefix (offset=16,
+ * layer, width, height, pad) then the same shorts as BODY/LYRn. */
 
 #endif /* FMP14_H */
