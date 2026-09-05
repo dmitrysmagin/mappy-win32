@@ -24,9 +24,9 @@ Batch 1: 100 layers in memory, zoom 0.25/0.5, onion All + lower layers, `tbarinf
 | **Auto set BG transparency** | Useful functions + Range Edit button. |
 | **`luafilemenu=1`** | Stage 3: File items run `luascr/luafile*.lua` when present. |
 
-`Adjust Values` **is** implemented (`DIALayerAdj`). Multi-layer `.MAP` import still replaces the current layer only (`MapCustomLoad`).
+`Adjust Values` **is** implemented (`DIALayerAdj`). Multi-layer `.MAP` import/export walks each `A` field onto successive layers (`MapCustomLoad` / `MapCustomSave`).
 
-Other Stage 1 gaps closed here: EPHD applied on load (`ApplyEditorPrefs`); tilemodes already in MPHD reserved1; Resize Map New Left/New Top; Help → Edit MAPWIN.INI; Grab New Brush + Handle submenu; 32-bit FG/onion alphablend (1.4.19). Still open: NLYR vs our `LY10`–`LY99` (no verified sample; unknown-chunk round-trip).
+Other Stage 1 gaps closed here: EPHD applied on load (`ApplyEditorPrefs`); tilemodes already in MPHD reserved1; Resize Map New Left/New Top; Help → Edit MAPWIN.INI; Grab New Brush + Handle submenu; 32-bit FG/onion alphablend (1.4.19). Layers 8+ save/load as `NLYR` (old `LY10`–`LY99` still load). Unknown-chunk round-trip is preserved.
 
 ## Stage 2 — Editors DONE
 
@@ -47,9 +47,10 @@ Layout: tile on the left; FLH/FLV/ROT/CLR/MSK/BLK/REV + Draw size + status along
 
 L0–L4 in `PLAN-LUA.md`. Bundled `src/luascr/` scripts use the 1.4.23 `mappy.*` contracts (`getPixel` A,R,G,B / 8-bit index, `createBlock(index)`, `fileRequester`/`doDialogue`, `sendMessage(CM_,0)`, `shellExecute` 5 args, Placer/Area/400+ mouse, BlockProp/ObjectProp, `luafilemenu`). Custom menu is `&Custom`. `sortblocks` / `sortobjects` draw filters are in Stage 2. Remaining polish: in-GUI script pass.
 
-## Stage 4 — Polish / release
+## Stage 4 — Polish / release DONE
 
-- `MAPWIN.INI` comments/defaults vs `mapwin1423/MAPWIN.INI` (`panelpro`, `prographbg`, `hexordec`, `thumbtrack=1`, `tbarinfo=6`, `mwheelstyle` semantics).
+- `MAPWIN.INI` comments/defaults match 1.4.23 (`panelpro`, `prographbg`, `hexordec`, `thumbtrack=1`, `tbarinfo=6`, `mwheelstyle` 0=over-window / 1=always blocks, divider key aliases, `tbarname` 0/1).
 - Docs, About, Tutorials-menu already absent (good).
-- Resource-leak pass (MemProof: `ReleaseDC`, Anim Preview free, 1280×1024 0.25 crash, 8-bit export colours).
-- Full regression: FMP round-trip including NLYR-compatible layers 8+, EPHD apply, all exports, Graph tab, Lua scripts.
+- Resource-leak pass: `ReleaseDC` after `EndPaint` stays commented (BeginPaint/EndPaint pair); `APCleanup` on exit; 0.25 zoom uses client size + uncapped DIB pitch + alloc guard; 8-bit level BMP export maps 24-bit pixels to nearest CMAP index.
+- File → Save fallthrough to Save As is intentional (no filename yet); annotated for gcc.
+- Full regression remains a manual pass: FMP round-trip including NLYR layers 8+, EPHD apply, exports, Graph tab, Lua scripts. Do not treat this as automated.

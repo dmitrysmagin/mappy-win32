@@ -51,22 +51,23 @@ extern int brushhandle;
 /* Tier-1 1.4 settings */
 int dobackups = 0;		/* save .BAK before overwrite */
 int warnctrlx = 0;		/* prompt on Ctrl+X */
-int thumbtrack = 0;		/* live scrollbar tracking */
-int mwheelstyle = 1;		/* 0=off 1=scroll 2=arrows 3=both */
-int mwheelblks = 1;		/* blocks per wheel click */
-int graphicsmem = 0;		/* device caps override */
-int simpleimport = 0;		/* default to simple import dialog */
-int csvusebg = 0;		/* CSV export uses BG layer */
+int thumbtrack = 1;		/* live scrollbar tracking */
+int mwheelstyle = 0;		/* 0=over-window 1=always block window */
+int mwheelblks = 2;		/* blocks per wheel click */
+int graphicsmem = 8;		/* device caps override */
+int simpleimport = 1;		/* default to simple import dialog */
+int csvusebg = 1;		/* CSV export uses BG layer */
 int gridstyle = 1;		/* 0=none 1=cursor 2=crosshatch */
 int showuser = 0;		/* show user-set overlay */
-char tbarname[64] = "";		/* custom titlebar name */
+int tbarname = 1;		/* 0=MapWin32 1=path then MapWin32 */
 int divideron = 0;		/* divider grid overlay enable */
 int dividergapx = 256;		/* divider pixel gap X */
 int dividergapy = 192;		/* divider pixel gap Y */
 long dividercol = 0x0000FF;	/* divider line colour RRGGBB */
-int tbarinfo = 1;		/* map-window titlebar mode 0..6 */
+int tbarinfo = 6;		/* map-window titlebar mode 0..6 */
 int panelzoom = 1;		/* block window follows map zoom */
 int zmstyle = 1;		/* 0=software 1=hardware zoom */
+extern int hexordec;		/* Block/Anim properties start in hex */
 int zoomdiv = 1;		/* 1=x1 2=x0.5 4=x0.25 (zoomon forced 1) */
 char folder[256] = ".";		/* file dialog start folder */
 /* Custom mousebuttons (binary list: 0 None,1 Current block,2 Block 0,
@@ -224,7 +225,7 @@ void Rejig (void)
 		char title[MAX_PATH + 32];
 		char full[MAX_PATH];
 		const char *path = mapfilename;
-		if (mapfilename[0]) {
+		if (mapfilename[0] && tbarname) {
 			if (GetFullPathNameA (mapfilename, MAX_PATH, full, NULL))
 				path = full;
 			sprintf (title, "%s - MapWin32", path);
@@ -409,7 +410,10 @@ FILE * marfpt;
 					else mapaltered = 0;
 				}
 				Rejig(); break; }
-/* Do not split SAVE/SAVEAS cases! Save runs into SaveAs if no filename */
+			/* FALLTHROUGH: no filename yet, use Save As */
+#if defined(__GNUC__)
+			__attribute__((fallthrough));
+#endif
 			case CM_FILESAVEAS:
 				if (mappt==NULL) { MessageBox (hwnd, "No, map to save!", "Map Editor", MB_OK | MB_ICONEXCLAMATION); break; }
 				szFile[0] = 0; szFileTitle[0] = 0; szInitDir[0] = 0;
@@ -1142,14 +1146,21 @@ FILE * marfpt;
 		BEResizeWind (LOWORD(lParam), HIWORD(lParam));
 		break;
 	case WM_MOUSEWHEEL:
-		/* mousewheel scrolls the window the mouse is over */
+		/* 0: scroll whichever editor the mouse is over; 1: always block window */
 		{
-			POINT wpt; HWND wchild;
+			POINT wpt; HWND wchild, bh;
+			bh = BEGetHWND ();
+			if (mwheelstyle == 1) {
+				if (bh != NULL) SendMessage (bh, message, wParam, lParam);
+				break;
+			}
 			GetCursorPos (&wpt);
 			wchild = WindowFromPoint (wpt);
-			if (wchild!=NULL && wchild!=hwnd) {
-				SendMessage (wchild, message, wParam, lParam);
-				break;
+			if (wchild != NULL) {
+				if (bh != NULL && (wchild == bh || IsChild (bh, wchild)))
+					SendMessage (bh, message, wParam, lParam);
+				else if (wchild != hwnd)
+					SendMessage (wchild, message, wParam, lParam);
 			}
 		}
 		break;
@@ -1314,16 +1325,21 @@ char * iniinfo, * inipos;
 	}
 
 	defwidth = 640; defheight = 480; gridon = 0; zoomon = 1; picklayer = 1;
-	picklx = 0; pickly = 0; csvadjust = -1; flippedtiles = 0; wlayout = 0;
+	picklx = 0; pickly = 0; csvadjust = 0; flippedtiles = 0; wlayout = 0;
 	transred = 255; transgreen = 0; transblue = 255; trans8bit = 0;
 	i = strlen (defpname); strcpy (defpname+i, "MAPWIN.INI");
 	fpt = fopen (defpname, "rb");
 	defpname[i] = 0;
 	if (fpt != NULL) {
-		iniinfo = malloc (4096);
+		fseek (fpt, 0, SEEK_END);
+		flength = (int) ftell (fpt);
+		fseek (fpt, 0, SEEK_SET);
+		if (flength < 0) flength = 0;
+		if (flength > 65536) flength = 65536;
+		iniinfo = malloc ((size_t) flength + 1);
 		if (iniinfo!=NULL) {
-		memset (iniinfo, 0, 4096);
-		flength = fread (iniinfo, 1, 4096, fpt);
+		memset (iniinfo, 0, (size_t) flength + 1);
+		flength = (int) fread (iniinfo, 1, (size_t) flength, fpt);
 
 			inipos = iniinfo;
 			while (inipos<(iniinfo+flength)) {
@@ -1368,10 +1384,11 @@ char * iniinfo, * inipos;
 				if (!strncmp (inipos, "csvusebg", 8)) { i = GetEquals(inipos); csvusebg = atoi (inipos+i); }
 				if (!strncmp (inipos, "gridstyle", 9)) { i = GetEquals(inipos); gridstyle = atoi (inipos+i); if (gridstyle) gridon = gridstyle; }
 				if (!strncmp (inipos, "showuser", 8)) { i = GetEquals(inipos); showuser = atoi (inipos+i); }
-				if (!strncmp (inipos, "divideron", 9)) { i = GetEquals(inipos); divideron = atoi (inipos+i); }
-				if (!strncmp (inipos, "dividergapx", 11)) { i = GetEquals(inipos); dividergapx = atoi (inipos+i); }
-				if (!strncmp (inipos, "dividergapy", 11)) { i = GetEquals(inipos); dividergapy = atoi (inipos+i); }
+				if (!strncmp (inipos, "divideron", 9) || !strncmp (inipos, "dividers", 8)) { i = GetEquals(inipos); divideron = atoi (inipos+i); }
+				if (!strncmp (inipos, "dividergapx", 11) || !strncmp (inipos, "dividerx", 8)) { i = GetEquals(inipos); dividergapx = atoi (inipos+i); }
+				if (!strncmp (inipos, "dividergapy", 11) || !strncmp (inipos, "dividery", 8)) { i = GetEquals(inipos); dividergapy = atoi (inipos+i); }
 				if (!strncmp (inipos, "dividercol", 10)) { i = GetEquals(inipos); dividercol = strtol (inipos+i, NULL, 16) & 0xFFFFFF; }
+				if (!strncmp (inipos, "hexordec", 8)) { i = GetEquals(inipos); hexordec = atoi (inipos+i); }
 				if (!strncmp (inipos, "wnesmode", 8)) { i = GetEquals(inipos); wnesmode = atoi (inipos+i); }
 				if (!strncmp (inipos, "rotatedtiles", 12)) { i = GetEquals(inipos); rotatedtiles = atoi (inipos+i); }
 				if (!strncmp (inipos, "folder", 6)) { i = GetEquals(inipos); { int q = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && q<250) { folder[q++] = inipos[i]; i++; } folder[q]=0; } }
@@ -1416,7 +1433,7 @@ char * iniinfo, * inipos;
 						if (li >= numluascript) numluascript = li + 1;
 					}
 				}
-				if (!strncmp (inipos, "tbarname", 8)) { i = GetEquals(inipos); { int q = 0; if (inipos[i]=='"') i++; while (inipos[i] && inipos[i]!='"' && q<62) { tbarname[q++] = inipos[i]; i++; } tbarname[q]=0; } }
+				if (!strncmp (inipos, "tbarname", 8)) { i = GetEquals(inipos); if (inipos[i]=='"') i++; tbarname = atoi (inipos+i); }
 			}
 			while (inipos<(iniinfo+flength)) { if (*inipos==0x0a) break; inipos++; } inipos++;
 		}

@@ -7,19 +7,20 @@
 #include "mapwin.h"
 
 extern short int * mappt;
+extern short int * mapmappt[MAXMAPLAYERS];
 extern short int mapwidth, mapheight;
 extern short int blockwidth, blockheight, blockdepth, sdepth;
 extern short int numblockstr;
 extern int clickmask;
 extern char mapfilename[256];
 
-static char mapformat[16] = { 0 };
+static char mapformat[64] = "a10";
 static char mcdefBMPname[512] = { 0 };
 
-short int mcblkdefwidth, mcblkdefheight;
-short int mcmapdefwidth, mcmapdefheight;
+short int mcblkdefwidth = 16, mcblkdefheight = 16;
+short int mcmapdefwidth = 120, mcmapdefheight = 72;
 int mcblkstaggerx, mcblkstaggery, mcblkclickmask;
-int csvadjust;
+int csvadjust = 0;
 
 void MapCustSetDefBMPName (char * defname)
 {
@@ -38,12 +39,12 @@ void MapCustomSetFormat (char * fstring)
 {
 int i, j;
 
-	i = 0; while (fstring[i] != '\"') { if (i>14) return; i++; }
+	i = 0; while (fstring[i] != '\"') { if (i>62) return; i++; }
 	i++;
 	j = 0; while (fstring[i] != '\"') {
 		mapformat[j] = tolower (fstring[i]);
 		i++; j++;
-		if (j>14) { mapformat[j] = 0; return; }
+		if (j>62) { mapformat[j] = 0; return; }
 	}
 	mapformat[j] = 0;
 	return;
@@ -51,7 +52,7 @@ int i, j;
 
 int MapCustomLoad (char * loadname, HWND hwnd)
 {
-int i, j, k, l;
+int i, j, k, l, layeridx;
 short int newmw, newmh, newmd, newbw, newbh;
 int modemsb;
 unsigned char mapoutput[4];
@@ -59,7 +60,7 @@ FILE * fpt;
 FILE * bmfpt;
 short int * mymappt;
 char * mcname;
-long int arpos;
+long int arpos, first_arpos;
 unsigned char * bmppt;
 BITMAPFILEHEADER * bfh;
 BITMAPINFOHEADER * bmihpt;
@@ -70,6 +71,7 @@ char szFileTitle[256];
 char szInitDir[256];
 
 		modemsb = 0;
+		first_arpos = -1;
 		mcname = malloc (strlen (loadname)+8);
 		if (mcname == NULL) return -1;
 		strcpy (mcname, loadname);
@@ -198,9 +200,14 @@ char szInitDir[256];
 					i++;
 					break;
 				case 'a':
-					arpos = ftell (fpt);
-					if (mapformat[i+2] == '-') i+= 4; else i += 3;
-					fseek (fpt, newmh*newmw*((int) mapformat[i+1]-'0'), SEEK_CUR);
+					if (first_arpos < 0) first_arpos = ftell (fpt);
+					{
+						int nbytes = 1;
+						if (mapformat[i+1] >= '1' && mapformat[i+1] <= '4')
+							nbytes = mapformat[i+1] - '0';
+						fseek (fpt, (long)newmh * (long)newmw * nbytes, SEEK_CUR);
+						if (mapformat[i+2] == '-') i += 4; else i += 3;
+					}
 					break;
 				default:
 					i++;
@@ -218,11 +225,23 @@ char szInitDir[256];
 
 		IMImportBlocks (szFile, -1);
 
-		fseek (fpt, arpos, SEEK_SET);
+		if (first_arpos >= 0) fseek (fpt, first_arpos, SEEK_SET);
+		else fseek (fpt, arpos, SEEK_SET);
+		layeridx = 0;
 		i = 0; while (mapformat[i] != 0) {
 				if (mapformat[i] == 'a') {
 					i++;
-					mymappt = (short int *) mappt;
+					if (layeridx >= MAXMAPLAYERS) { fclose (fpt); return -1; }
+					if (layeridx == 0) {
+						mymappt = mappt;
+					} else {
+						if (mapmappt[layeridx] == NULL) {
+							mapmappt[layeridx] = (short int *) malloc ((size_t)mapwidth*(size_t)mapheight*2);
+							if (mapmappt[layeridx] == NULL) { fclose (fpt); return -1; }
+							memset (mapmappt[layeridx], 0, (size_t)mapwidth*(size_t)mapheight*2);
+						}
+						mymappt = mapmappt[layeridx];
+					}
 					j = ((int) mapwidth)*((int) mapheight);
 					if (mapformat[i+1] == '-') {
 						l = (int) (mapformat[i+2]-'0');
@@ -246,7 +265,6 @@ char szInitDir[256];
 							k += l;
 							if (k < 0) k = 0;
 							if (k >= ((int) numblockstr)) k = ((int) numblockstr-1);
-//							k *= SOBSTR;
 							*mymappt = (short int) k;
 							mymappt++;
 							j--;
@@ -266,13 +284,14 @@ char szInitDir[256];
 							k += l;
 							if (k < 0) k = 0;
 							if (k >= ((int) numblockstr)) k = ((int) numblockstr-1);
-//							k *= SOBSTR;
 							*mymappt = (short int) k;
 							mymappt++;
 							j--;
 						}
 					}
-					break;
+					if (mapformat[i+1] == '-') i += 3; else i += 2;
+					layeridx++;
+					continue;
 				}
 				i++;
 		}
@@ -283,7 +302,7 @@ char szInitDir[256];
 
 int MapCustomSave (char * savename)
 {
-int i, j, k, l;
+int i, j, k, l, layeridx;
 int modemsb;
 char mapoutput[4];
 FILE * fpt;
@@ -298,6 +317,7 @@ char * mcname;
 		fpt = fopen (mcname, "wb");
 		free (mcname);
 		if (fpt==NULL) return -1;
+		layeridx = 0;
 		i = 0; while (mapformat[i] != 0) {
 			switch (mapformat[i]) {
 				case 'l':
@@ -360,7 +380,10 @@ char * mcname;
 					break;
 				case 'a':
 					i++;
-					mymappt = (short int *) mappt;
+					if (layeridx < MAXMAPLAYERS && mapmappt[layeridx] != NULL)
+						mymappt = mapmappt[layeridx];
+					else
+						mymappt = mappt;
 					j = ((int) mapwidth)*((int) mapheight);
 					if (mapformat[i+1] == '-') {
 						l = (int) (mapformat[i+2]-'0');
@@ -410,6 +433,7 @@ char * mcname;
 						}
 					}
 					if (l < 0) i+=3; else i += 2;
+					layeridx++;
 					break;
 				default:
 					i++;

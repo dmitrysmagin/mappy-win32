@@ -87,7 +87,8 @@ extern unsigned char trans8bit, transred, transgreen, transblue;
 extern unsigned char trans16hi, trans16low;
 extern int resize_left, resize_top;
 
-static int editnum, pgfxnum, editpoint, pickwhat, totalmapmem, hexordec;
+static int editnum, pgfxnum, editpoint, pickwhat, totalmapmem;
+int hexordec = 0;
 static int propedit_haspos = 0; /* remember Block Properties pos across reopen */
 static RECT propedit_rc;
 static short int newmapwidth, newmapheight, newmapdepth, newblockwidth, newblockheight;
@@ -2342,16 +2343,21 @@ unsigned long int * darkenpt;
 	bmlinept = bmdatapt + (k*blockgapy*bwpitch);
 
 	bmlinept -= bwpitch;
-	i = (((bwpitch/3)+3)&0x7FFC);
+	i = ((bwpitch/3)+3)&~3;
 	mycmappt = (unsigned char *) cmappt;
 
 	for (j=(k*blockgapy);j>blockstaggery;j--) {
 		if (blockdepth == 8) {
 			for (k=0;k<=((bwpitch-3)/3);k++) {
+				int best = 0, bestd = 0x7fffffff;
 				for (l=0;l<256;l++) {
-					if (mycmappt[l*3] == bmlinept[k*3+2] && mycmappt[l*3+1] == bmlinept[k*3+1] && mycmappt[l*3+2] == bmlinept[k*3]) break; 
+					int dr = (int)mycmappt[l*3] - (int)bmlinept[k*3+2];
+					int dg = (int)mycmappt[l*3+1] - (int)bmlinept[k*3+1];
+					int db = (int)mycmappt[l*3+2] - (int)bmlinept[k*3];
+					int d = dr*dr + dg*dg + db*db;
+					if (d < bestd) { bestd = d; best = l; if (d == 0) break; }
 				}
-				bmlinept[k] = (unsigned char) l;
+				bmlinept[k] = (unsigned char) best;
 			}
 			if (fwrite (bmlinept+(blockstaggerx), 1, i, fpt)!=i) { free (bmdatapt); return -1; }
 		} else {

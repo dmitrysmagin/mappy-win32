@@ -43,6 +43,7 @@ extern short int * brshpt[MAXBRSH];
 extern short int numbrushes;
 extern int wlayout;
 extern int sortblocks, sortobjects;
+extern int mwheelblks, thumbtrack;
 
 static void BECreateTabButtons (HWND parent);
 static void BEUpdateTabButtons (void);
@@ -537,6 +538,9 @@ PAINTSTRUCT ps;
 			case SB_THUMBPOSITION:
 			beyoff = (HIWORD(wParam));
 			break;
+			case SB_THUMBTRACK:
+			if (thumbtrack) beyoff = (HIWORD(wParam));
+			break;
 			}
 		SetScrollPos (bhwnd, SB_VERT, beyoff, TRUE);
 		InvalidateRgn (bhwnd, NULL, FALSE);
@@ -661,10 +665,12 @@ PAINTSTRUCT ps;
 		if (blockgfxpt==NULL) break;
 		{
 			int bdelta = (short)HIWORD(wParam);
+			int bstep = (bdelta>0) ? -mwheelblks : mwheelblks;
 			BERefreshSort ();
 			i = (short int) BEVisibleCount ();
-			if (bdelta>0) { if (beyoff>0) beyoff--; }
-			else { if (beyoff<(i-1)) beyoff++; }
+			beyoff += (short int) bstep;
+			if (beyoff<0) beyoff = 0;
+			if (beyoff>(i-1)) beyoff = (short int)(i-1);
 			SetScrollPos (bhwnd, SB_VERT, beyoff, TRUE);
 			InvalidateRgn (bhwnd, NULL, FALSE);
 		}

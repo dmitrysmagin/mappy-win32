@@ -520,14 +520,23 @@ BITMAPINFOHEADER bih;
 RGBQUAD rgbq;
 RECT rc;
 
-		GetWindowRect (phwnd, &rc);
-		k = (((rc.right)-(rc.left))/blockgapx)+2;
+		GetClientRect (phwnd, &rc);
+		if (blockgapx < 1 || blockgapy < 1) return;
+		k = (rc.right/blockgapx)+2;
 		if (zoomon!=1||zoomdiv!=1) { k = (k*zoomdiv)/zoomon+(zoomon-1); }
-		l = (((rc.bottom)-(rc.top+20))/blockgapy)+2;
+		l = (rc.bottom/blockgapy)+2;
 		if (zoomon!=1||zoomdiv!=1) { l = (l*zoomdiv)/zoomon+(zoomon-1); }
+		if (k < 1) k = 1;
+		if (l < 1) l = 1;
+		if (k > 512) k = 512;
+		if (l > 512) l = 512;
 
-		bwpitch = ((k*blockgapx*3)+3)&0x7FFC;
-		destmempt = malloc ((l+2)*bwpitch*blockgapy);
+		bwpitch = ((k*blockgapx*3)+3)&~3;
+		{
+			size_t nbytes = (size_t)(l+2) * (size_t)bwpitch * (size_t)blockgapy;
+			if (bwpitch < 4 || nbytes == 0 || nbytes > (96u*1024u*1024u)) return;
+			destmempt = malloc (nbytes);
+		}
 		if (destmempt==NULL) return;
 
 		fromhdc = CreateCompatibleDC (myhdc);
@@ -2264,17 +2273,16 @@ PAINTSTRUCT ps;
 		break;
 	case WM_MOUSEWHEEL:
 		if (mappt==NULL) break;
+		if (mwheelstyle == 1) break; /* parent routes wheel to the block window */
 		{
 			int delta = (short)HIWORD(wParam);
 			int step = (delta>0) ? -mwheelblks : mwheelblks;
-			if (mwheelstyle & 1) {
-				ymapoffset += step;
-				if (ymapoffset<0) ymapoffset = 0;
-				if (ymapoffset>(mapheight-2)) ymapoffset = mapheight-2;
-				if ((blockstaggerx || blockstaggery) && ymapoffset&1) ymapoffset--;
-				SetScrollPos (mhwnd, SB_VERT, ymapoffset, TRUE);
-				InvalidateRgn (mhwnd, NULL, FALSE);
-			}
+			ymapoffset += step;
+			if (ymapoffset<0) ymapoffset = 0;
+			if (ymapoffset>(mapheight-2)) ymapoffset = mapheight-2;
+			if ((blockstaggerx || blockstaggery) && ymapoffset&1) ymapoffset--;
+			SetScrollPos (mhwnd, SB_VERT, ymapoffset, TRUE);
+			InvalidateRgn (mhwnd, NULL, FALSE);
 		}
 		break;
 	case WM_VSCROLL:
