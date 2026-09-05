@@ -80,6 +80,7 @@ extern int mb_l, mb_m, mb_r, mb_x1, mb_x2;
 extern int key1, key2, key3, keyi, keyk, keym;
 extern int keyF[10];
 extern int objplace;
+extern int panelpro, prographbg, sortobjects;
 
 #include "fmp.h"
 #include "fmp14.h"
@@ -632,7 +633,7 @@ RECT rc;
 
 		if (showuser>=1 && showuser<=8) {
 			/* show user field / flags overlaying tiles (objects win) */
-			char utxt[24]; int vx, vy, ti, tj; short int bv; BLKSTR * bp;
+			char utxt[64]; int vx, vy, ti, tj; short int bv; BLKSTR * bp;
 			SetBkMode (myhdc, TRANSPARENT);
 			SetTextColor (myhdc, RGB (255, 255, 0));
 			for (tj=0;tj<l;tj++) {
@@ -655,6 +656,24 @@ RECT rc;
 						case 6: sprintf (utxt, "%u", bp->user6); break;
 						case 7: sprintf (utxt, "%u", bp->user7); break;
 						default: sprintf (utxt, "%d%d%d%d%d", bp->tl, bp->tr, bp->bl, bp->br, bp->trigger); break;
+					}
+					if (showuser >= 1 && showuser <= 7 && showuser == LuaGetStrBlkUser ()) {
+						unsigned long sv;
+						const char * ts;
+						switch (showuser) {
+							case 1: sv = bp->user1; break;
+							case 2: sv = bp->user2; break;
+							case 3: sv = bp->user3; break;
+							case 4: sv = bp->user4; break;
+							case 5: sv = bp->user5; break;
+							case 6: sv = bp->user6; break;
+							default: sv = bp->user7; break;
+						}
+						ts = F14_TstrGet ((int) sv);
+						if (ts && ts[0]) {
+							strncpy (utxt, ts, sizeof (utxt) - 1);
+							utxt[sizeof (utxt) - 1] = 0;
+						}
 					}
 					TextOut (myhdc, ZX(ti*blockgapx), ZX(tj*blockgapy), utxt, strlen (utxt));
 				}
@@ -936,13 +955,14 @@ static void MEDragFinish (void)
 }
 
 /* ---- Graphic editor mode (Graph tab) ---- */
-/* Layout matches mapwin 1.4.23: large tile on the left, tools along the
- * bottom, palette + RGB bars + live map preview right-aligned. */
+/* Graph tab: tile on the left, tools along the bottom, optional palette
+ * cluster or bar on the right (panelpro). */
 
 typedef struct {
 	int pw, ph;
 	int tilex, tiley, tilew, tileh;	/* stretched tile preview */
 	int palx, paly, palcell, palw, palh;
+	int palcols, palrows;
 	int pbtny, pbtnh;			/* CPY/EXG/SPR/TRN/? row */
 	int barx[3], bary, barw, barh;
 	int valy, hexy;
@@ -950,6 +970,7 @@ typedef struct {
 	int toolx, tooly, toolw, toolh, ntools;
 	int dsx, dsy;
 	int statusy;
+	int showpanel;
 } GELayout;
 
 static int GE_gfxcol = 0;
@@ -958,6 +979,11 @@ static int GE_paint = 0;		/* dragging on the tile */
 static int GE_bar = -1;			/* 0=R 1=G 2=B while dragging a bar */
 static int GE_palop = 0;		/* 1=CPY 2=EXG 3=SPR 4=pick-from-tile */
 static int GE_palsrc = 0;
+static int GE_lastpx = 0, GE_lastpy = 0, GE_haslast = 0;
+static int GE_mx = 0, GE_my = 0;
+static int GE_linemode = 0, GE_linex = 0, GE_liney = 0;
+static unsigned char * GE_undo = NULL;
+static int GE_undogfx = -1, GE_undolen = 0;
 static GELayout gelay;
 
 static int GE_FindBlockForGraphic (int gfx)
@@ -985,17 +1011,55 @@ static void GEComputeLayout (HWND hwnd, GELayout * L)
 	if (L->ph < 80) L->ph = 80;
 
 	toolstrip = 48;
+	L->showpanel = (panelpro != 0);
+	if (panelpro == 2) { L->palcols = 32; L->palrows = 8; }
+	else { L->palcols = 16; L->palrows = 16; }
 
-	/* Palette: 16x16, scaled up, right-aligned with an 8px margin. */
-	palcell = 20;
-	palw = palcell * 16;
-	if (palw + 16 > L->pw / 2) {
-		palcell = (L->pw / 2 - 16) / 16;
-		if (palcell < 12) palcell = 12;
-		if (palcell > 24) palcell = 24;
-		palw = palcell * 16;
+	L->ntools = 7;
+	L->toolw = 36;
+	L->toolh = 18;
+	L->toolx = 8;
+	L->tooly = L->ph - 42;
+	L->dsx = L->toolx + L->ntools * (L->toolw + 4) + 12;
+	L->dsy = L->tooly;
+	L->statusy = L->ph - 16;
+
+	if (!L->showpanel) {
+		L->tilex = 0;
+		L->tiley = 0;
+		L->tilew = L->pw - 8;
+		L->tileh = L->ph - toolstrip;
+		if (L->tileh < 8) L->tileh = 8;
+		if (L->tilew < 8) L->tilew = 8;
+		{
+			int ts = L->tilew < L->tileh ? L->tilew : L->tileh;
+			L->tilew = ts;
+			L->tileh = ts;
+		}
+		L->palcell = 12;
+		L->palw = L->palh = 0;
+		L->palx = L->pw + 64;
+		L->paly = 0;
+		L->pbtny = 0;
+		L->pbtnh = 16;
+		L->barw = L->barh = 0;
+		L->barx[0] = L->barx[1] = L->barx[2] = L->pw + 64;
+		L->bary = L->valy = L->hexy = 0;
+		L->previewx = L->pw + 64;
+		L->previewy = 0;
+		L->previeww = L->previewh = 0;
+		return;
 	}
-	palh = palcell * 16;
+
+	palcell = (panelpro == 2) ? 14 : 20;
+	palw = palcell * L->palcols;
+	if (palw + 16 > L->pw / 2) {
+		palcell = (L->pw / 2 - 16) / L->palcols;
+		if (palcell < 8) palcell = 8;
+		if (palcell > 24) palcell = 24;
+		palw = palcell * L->palcols;
+	}
+	palh = palcell * L->palrows;
 	L->palcell = palcell;
 	L->palw = palw;
 	L->palh = palh;
@@ -1010,7 +1074,6 @@ static void GEComputeLayout (HWND hwnd, GELayout * L)
 	L->tilew = rightx;
 	L->tileh = L->ph - toolstrip;
 	if (L->tileh < blockheight) L->tileh = blockheight;
-	/* Keep the stretched tile square-ish using the smaller axis. */
 	{
 		int ts = L->tilew < L->tileh ? L->tilew : L->tileh;
 		if (ts < 8) ts = 8;
@@ -1022,9 +1085,9 @@ static void GEComputeLayout (HWND hwnd, GELayout * L)
 	L->pbtnh = 16;
 
 	remain = L->ph - (L->pbtny + L->pbtnh + 4) - 40 - 8;
-	if (remain < 120) remain = 120;
+	if (remain < 80) remain = 80;
 	barh = remain * 2 / 5;
-	if (barh < 72) barh = 72;
+	if (barh < 48) barh = 48;
 	if (barh > 140) barh = 140;
 	L->barh = barh;
 	L->barw = (palw - 16) / 3;
@@ -1042,15 +1105,6 @@ static void GEComputeLayout (HWND hwnd, GELayout * L)
 	L->previeww = palw;
 	L->previewh = L->ph - L->previewy - 8;
 	if (L->previewh < 32) L->previewh = 32;
-
-	L->ntools = 7;
-	L->toolw = 36;
-	L->toolh = 18;
-	L->toolx = 8;
-	L->tooly = L->ph - 42;
-	L->dsx = L->toolx + L->ntools * (L->toolw + 4) + 12;
-	L->dsy = L->tooly;
-	L->statusy = L->ph - 16;
 }
 
 static void GEGetColRGB (int * r, int * g, int * b)
@@ -1079,44 +1133,161 @@ static void GESetColChan (int chan, int v)
 	mapaltered = 1;
 }
 
-static void GEPlot (int px, int py)
+static int GETileBytes (void)
 {
-	int bpp, off, dx, dy, r, g, b, t;
-	unsigned char * tile;
-	if (blockgfxpt == NULL || curgfxsel < 0) return;
+	int bpp = (blockdepth + 1) / 8;
+	if (bpp < 1) bpp = 1;
+	return blockwidth * blockheight * bpp;
+}
+
+static unsigned char * GETilePtr (void)
+{
+	if (blockgfxpt == NULL || curgfxsel < 0) return NULL;
+	return (unsigned char *) blockgfxpt + curgfxsel * GETileBytes ();
+}
+
+static void GEPushUndo (void)
+{
+	int tb = GETileBytes ();
+	unsigned char * src = GETilePtr ();
+	if (src == NULL || tb <= 0) return;
+	if (GE_undo == NULL || GE_undolen != tb) {
+		free (GE_undo);
+		GE_undo = malloc ((size_t) tb);
+		GE_undolen = tb;
+	}
+	if (GE_undo == NULL) return;
+	memcpy (GE_undo, src, (size_t) tb);
+	GE_undogfx = curgfxsel;
+}
+
+void GEUndo (void)
+{
+	unsigned char * src;
+	int tb;
+	if (betype != BETYPE_GRAPH) return;
+	src = GETilePtr ();
+	tb = GETileBytes ();
+	if (src == NULL || GE_undo == NULL || GE_undogfx != curgfxsel || GE_undolen != tb)
+		return;
+	{
+		unsigned char * tmp = malloc ((size_t) tb);
+		if (tmp == NULL) return;
+		memcpy (tmp, src, (size_t) tb);
+		memcpy (src, GE_undo, (size_t) tb);
+		memcpy (GE_undo, tmp, (size_t) tb);
+		free (tmp);
+	}
+	mapaltered = 1;
+	if (mhwnd) InvalidateRect (mhwnd, NULL, FALSE);
+	BEInvalidate ();
+}
+
+static void GEWritePix (unsigned char * tile, int x, int y, int col, int r, int g, int b)
+{
+	int bpp, off;
+	if (x < 0 || y < 0 || x >= blockwidth || y >= blockheight) return;
 	bpp = (blockdepth + 1) / 8;
 	if (bpp < 1) bpp = 1;
-	tile = (unsigned char *) blockgfxpt + curgfxsel * blockwidth * blockheight * bpp;
+	off = (y * blockwidth + x) * bpp;
+	if (blockdepth == 8)
+		tile[off] = (unsigned char) col;
+	else if (blockdepth == 15) {
+		unsigned short p = (unsigned short) (((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3));
+		tile[off] = (unsigned char) (p >> 8);
+		tile[off + 1] = (unsigned char) (p & 0xFF);
+	} else if (blockdepth == 16) {
+		unsigned short p = (unsigned short) (((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+		tile[off] = (unsigned char) (p >> 8);
+		tile[off + 1] = (unsigned char) (p & 0xFF);
+	} else if (blockdepth == 32) {
+		tile[off] = 0;
+		tile[off + 1] = (unsigned char) r;
+		tile[off + 2] = (unsigned char) g;
+		tile[off + 3] = (unsigned char) b;
+	} else {
+		tile[off] = (unsigned char) b;
+		tile[off + 1] = (unsigned char) g;
+		tile[off + 2] = (unsigned char) r;
+	}
+}
+
+static void GEPlot (int px, int py)
+{
+	int dx, dy, r, g, b, t;
+	unsigned char * tile = GETilePtr ();
+	if (tile == NULL) return;
 	GEGetColRGB (&r, &g, &b);
 	t = GE_thickness;
 	if (t < 1) t = 1;
 	for (dy = 0; dy < t; dy++) {
-		for (dx = 0; dx < t; dx++) {
-			int x = px + dx, y = py + dy;
-			if (x < 0 || y < 0 || x >= blockwidth || y >= blockheight) continue;
-			off = (y * blockwidth + x) * bpp;
-			if (blockdepth == 8)
-				tile[off] = (unsigned char) GE_gfxcol;
-			else if (blockdepth == 15) {
-				unsigned short p = (unsigned short) (((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3));
-				tile[off] = (unsigned char) (p >> 8);
-				tile[off + 1] = (unsigned char) (p & 0xFF);
-			} else if (blockdepth == 16) {
-				unsigned short p = (unsigned short) (((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
-				tile[off] = (unsigned char) (p >> 8);
-				tile[off + 1] = (unsigned char) (p & 0xFF);
-			} else if (blockdepth == 32) {
-				tile[off] = 0;
-				tile[off + 1] = (unsigned char) r;
-				tile[off + 2] = (unsigned char) g;
-				tile[off + 3] = (unsigned char) b;
-			} else {
-				tile[off] = (unsigned char) b;
-				tile[off + 1] = (unsigned char) g;
-				tile[off + 2] = (unsigned char) r;
-			}
+		for (dx = 0; dx < t; dx++)
+			GEWritePix (tile, px + dx, py + dy, GE_gfxcol, r, g, b);
+	}
+	GE_lastpx = px; GE_lastpy = py; GE_haslast = 1;
+}
+
+static void GELine (int x0, int y0, int x1, int y1)
+{
+	int dx = abs (x1 - x0), sx = x0 < x1 ? 1 : -1;
+	int dy = -abs (y1 - y0), sy = y0 < y1 ? 1 : -1;
+	int err = dx + dy, e2;
+	for (;;) {
+		GEPlot (x0, y0);
+		if (x0 == x1 && y0 == y1) break;
+		e2 = 2 * err;
+		if (e2 >= dy) { err += dy; x0 += sx; }
+		if (e2 <= dx) { err += dx; y0 += sy; }
+	}
+}
+
+static void GEFill (int px, int py)
+{
+	int bpp, n, sp, r, g, b;
+	unsigned char * tile, * seen, tgt[4], cur[4];
+	int * st;
+	if (px < 0 || py < 0 || px >= blockwidth || py >= blockheight) return;
+	tile = GETilePtr ();
+	if (tile == NULL) return;
+	bpp = (blockdepth + 1) / 8;
+	if (bpp < 1) bpp = 1;
+	if (bpp > 4) bpp = 4;
+	memcpy (tgt, tile + (py * blockwidth + px) * bpp, (size_t) bpp);
+	GEGetColRGB (&r, &g, &b);
+	{
+		unsigned char tmp[16];
+		memset (tmp, 0, sizeof (tmp));
+		GEWritePix (tmp, 0, 0, GE_gfxcol, r, g, b);
+		memcpy (cur, tmp, (size_t) bpp);
+	}
+	if (memcmp (tgt, cur, (size_t) bpp) == 0) return;
+	n = blockwidth * blockheight;
+	seen = calloc ((size_t) n, 1);
+	st = malloc ((size_t) n * 2 * sizeof (int));
+	if (seen == NULL || st == NULL) { free (seen); free (st); return; }
+	sp = 0;
+	st[sp++] = px; st[sp++] = py;
+	seen[py * blockwidth + px] = 1;
+	while (sp > 0) {
+		int y = st[--sp];
+		int x = st[--sp];
+		int k;
+		GEWritePix (tile, x, y, GE_gfxcol, r, g, b);
+		for (k = 0; k < 4; k++) {
+			static const int ox[4] = { 1, -1, 0, 0 };
+			static const int oy[4] = { 0, 0, 1, -1 };
+			int nx = x + ox[k], ny = y + oy[k];
+			if (nx < 0 || ny < 0 || nx >= blockwidth || ny >= blockheight) continue;
+			if (seen[ny * blockwidth + nx]) continue;
+			if (memcmp (tile + (ny * blockwidth + nx) * bpp, tgt, (size_t) bpp) != 0)
+				continue;
+			seen[ny * blockwidth + nx] = 1;
+			st[sp++] = nx; st[sp++] = ny;
 		}
 	}
+	free (seen);
+	free (st);
+	GE_lastpx = px; GE_lastpy = py; GE_haslast = 1;
 }
 
 static void GEDrawMapPreview (HDC hdc, const GELayout * L)
@@ -1218,30 +1389,59 @@ static void GEMaskWithClickmask (void)
 	}
 }
 
-static void GEPickAt (int px, int py)
+static void GEReadPixRGB (unsigned char * tile, int px, int py, int * r, int * g, int * b)
 {
 	int bpp, off;
-	unsigned char * tile;
-	if (blockgfxpt == NULL || px < 0 || py < 0 || px >= blockwidth || py >= blockheight)
-		return;
 	bpp = (blockdepth + 1) / 8;
 	if (bpp < 1) bpp = 1;
-	tile = (unsigned char *) blockgfxpt + curgfxsel * blockwidth * blockheight * bpp;
 	off = (py * blockwidth + px) * bpp;
-	if (blockdepth == 8)
-		GE_gfxcol = tile[off];
-	else if (cmappt != NULL) {
-		/* nearest palette colour */
-		int r, g, b, i, best = 0, bestd = 0x7fffffff;
-		if (blockdepth == 32) { r = tile[off + 1]; g = tile[off + 2]; b = tile[off + 3]; }
-		else if (blockdepth == 24) { b = tile[off]; g = tile[off + 1]; r = tile[off + 2]; }
-		else { r = g = b = 0; }
-		for (i = 0; i < 256; i++) {
-			int dr = cmappt[i * 3] - r, dg = cmappt[i * 3 + 1] - g, db = cmappt[i * 3 + 2] - b;
-			int d = dr * dr + dg * dg + db * db;
-			if (d < bestd) { bestd = d; best = i; }
-		}
-		GE_gfxcol = best;
+	if (blockdepth == 8) {
+		int c = tile[off];
+		if (cmappt != NULL) { *r = cmappt[c * 3]; *g = cmappt[c * 3 + 1]; *b = cmappt[c * 3 + 2]; }
+		else *r = *g = *b = c;
+	} else if (blockdepth == 32) { *r = tile[off + 1]; *g = tile[off + 2]; *b = tile[off + 3]; }
+	else if (blockdepth == 24) { *b = tile[off]; *g = tile[off + 1]; *r = tile[off + 2]; }
+	else if (blockdepth == 16) {
+		unsigned short p = (unsigned short) ((tile[off] << 8) | tile[off + 1]);
+		*r = ((p >> 11) & 31) << 3; *g = ((p >> 5) & 63) << 2; *b = (p & 31) << 3;
+	} else if (blockdepth == 15) {
+		unsigned short p = (unsigned short) ((tile[off] << 8) | tile[off + 1]);
+		*r = ((p >> 10) & 31) << 3; *g = ((p >> 5) & 31) << 3; *b = (p & 31) << 3;
+	} else *r = *g = *b = 0;
+}
+
+static int GENearestPal (int r, int g, int b)
+{
+	int i, best = 0, bestd = 0x7fffffff;
+	if (cmappt == NULL) return 0;
+	for (i = 0; i < 256; i++) {
+		int dr = cmappt[i * 3] - r, dg = cmappt[i * 3 + 1] - g, db = cmappt[i * 3 + 2] - b;
+		int d = dr * dr + dg * dg + db * db;
+		if (d < bestd) { bestd = d; best = i; }
+	}
+	return best;
+}
+
+static void GEPickAt (int px, int py, int findpal)
+{
+	unsigned char * tile;
+	int r, g, b;
+	if (px < 0 || py < 0 || px >= blockwidth || py >= blockheight) return;
+	tile = GETilePtr ();
+	if (tile == NULL) return;
+	if (blockdepth == 8) {
+		int bpp = 1;
+		GE_gfxcol = tile[(py * blockwidth + px) * bpp];
+		return;
+	}
+	GEReadPixRGB (tile, px, py, &r, &g, &b);
+	if (findpal)
+		GE_gfxcol = GENearestPal (r, g, b);
+	else if (cmappt != NULL && GE_gfxcol >= 0 && GE_gfxcol < 256) {
+		cmappt[GE_gfxcol * 3] = (unsigned char) r;
+		cmappt[GE_gfxcol * 3 + 1] = (unsigned char) g;
+		cmappt[GE_gfxcol * 3 + 2] = (unsigned char) b;
+		mapaltered = 1;
 	}
 }
 
@@ -1280,6 +1480,7 @@ static void GEDoTool (int t)
 	if (bpp < 1) bpp = 1;
 	tilebytes = blockwidth * blockheight * bpp;
 	src = (unsigned char *) blockgfxpt + curgfxsel * tilebytes;
+	if (t >= 0 && t <= 4) GEPushUndo ();
 	if (t == 0) { /* FLH */
 		for (y = 0; y < blockheight; y++) {
 			int x;
@@ -1319,37 +1520,20 @@ static void GEDoTool (int t)
 				free (tmp);
 			}
 		}
-	} else if (t == 3) { /* CLR */
-		memset (src, 0, (size_t) tilebytes);
+	} else if (t == 3) { /* CLR: fill with current colour */
+		int x, r, g, b;
+		GEGetColRGB (&r, &g, &b);
+		for (y = 0; y < blockheight; y++)
+			for (x = 0; x < blockwidth; x++)
+				GEWritePix (src, x, y, GE_gfxcol, r, g, b);
 	} else if (t == 4) { /* MSK */
 		GEMaskWithClickmask ();
 	} else if (t == 5) { /* BLK */
 		int blk = GE_FindBlockForGraphic (curgfxsel);
 		if (blk >= 0) curstr = (short int) blk;
-	} else if (t == 6) { /* REV: 180 rotate */
-		int x;
-		for (y = 0; y < blockheight / 2; y++) {
-			for (x = 0; x < blockwidth; x++) {
-				int k, lx = x, rx2 = blockwidth - 1 - x;
-				int ty = y, by2 = blockheight - 1 - y;
-				for (k = 0; k < bpp; k++) {
-					int sx = (ty * blockwidth + lx) * bpp + k;
-					int dx = (by2 * blockwidth + rx2) * bpp + k;
-					unsigned char tmp = src[sx]; src[sx] = src[dx]; src[dx] = tmp;
-				}
-			}
-		}
-		if (blockheight % 2 == 1) {
-			int midy = blockheight / 2;
-			for (x = 0; x < blockwidth / 2; x++) {
-				int k, lx = x, rx2 = blockwidth - 1 - x;
-				for (k = 0; k < bpp; k++) {
-					int sx = (midy * blockwidth + lx) * bpp + k;
-					int dx = (midy * blockwidth + rx2) * bpp + k;
-					unsigned char tmp = src[sx]; src[sx] = src[dx]; src[dx] = tmp;
-				}
-			}
-		}
+	} else if (t == 6) { /* REV: undo last draw */
+		GEUndo ();
+		return;
 	}
 	mapaltered = 1;
 }
@@ -1370,7 +1554,12 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 	cl = L;
 
 	prc.left = 0; prc.top = 0; prc.right = L->pw; prc.bottom = L->ph;
-	FillRect (myhdc, &prc, (HBRUSH) GetStockObject (BLACK_BRUSH));
+	{
+		COLORREF bg = prographbg ? RGB (0x40, 0x40, 0x40) : RGB (0, 0, 0);
+		HBRUSH hbr = CreateSolidBrush (bg);
+		FillRect (myhdc, &prc, hbr);
+		DeleteObject (hbr);
+	}
 
 	if (blockgfxpt == NULL || numblockgfx <= 0) {
 		SetBkColor (myhdc, RGB (0, 0, 0));
@@ -1424,14 +1613,16 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 	}
 
 	GEGetColRGB (&r, &g, &b);
-	SetBkColor (myhdc, RGB (0, 0, 0));
+	SetBkColor (myhdc, prographbg ? RGB (0x40, 0x40, 0x40) : RGB (0, 0, 0));
 	SetTextColor (myhdc, RGB (255, 255, 255));
+	if (L->showpanel) {
 	sprintf (txt, "Palette (col %d/255)", GE_gfxcol);
 	TextOut (myhdc, L->palx, 4, txt, (int) strlen (txt));
 
-	for (cy = 0; cy < 16; cy++) {
-		for (cx = 0; cx < 16; cx++) {
-			int ci = cy * 16 + cx;
+	for (cy = 0; cy < L->palrows; cy++) {
+		for (cx = 0; cx < L->palcols; cx++) {
+			int ci = cy * L->palcols + cx;
+			if (ci > 255) continue;
 			HBRUSH hbr;
 			prc.left = L->palx + cx * L->palcell;
 			prc.top = L->paly + cy * L->palcell;
@@ -1512,6 +1703,7 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 	}
 
 	GEDrawMapPreview (myhdc, cl);
+	}
 
 	{
 		const char * tools[] = { "FLH", "FLV", "ROT", "CLR", "MSK", "BLK", "REV" };
@@ -1583,15 +1775,58 @@ static int GETileXY (int mx, int my, int * px, int * py)
 	return 1;
 }
 
+static int GEDoTileAction (HWND hwnd, int act, int px, int py)
+{
+	if (act == 0) return 1;
+	if (act == 2) GE_gfxcol = 0;
+	if (act == 6) {
+		GEPickAt (px, py, 1);
+		InvalidateRect (hwnd, NULL, FALSE);
+		return 1;
+	}
+	if (act == 8) {
+		GEPushUndo ();
+		GEFill (px, py);
+		mapaltered = 1;
+		InvalidateRect (hwnd, NULL, FALSE);
+		BEInvalidate ();
+		return 1;
+	}
+	if (act == 9) {
+		if (!GE_linemode) {
+			GE_linemode = 1;
+			GE_linex = px; GE_liney = py;
+		} else {
+			GEPushUndo ();
+			GELine (GE_linex, GE_liney, px, py);
+			GE_linemode = 0;
+			mapaltered = 1;
+			BEInvalidate ();
+		}
+		InvalidateRect (hwnd, NULL, FALSE);
+		return 1;
+	}
+	if (act != 1 && act != 2) return 0;
+	GEPushUndo ();
+	GE_paint = 1;
+	SetCapture (hwnd);
+	GEPlot (px, py);
+	mapaltered = 1;
+	InvalidateRect (hwnd, NULL, FALSE);
+	BEInvalidate ();
+	return 1;
+}
+
 static int GEOnLButtonDown (HWND hwnd, int mx, int my)
 {
 	int px, py, ch, t, ds, bw;
 	GEComputeLayout (hwnd, &gelay);
+	GE_mx = mx; GE_my = my;
 
-	if (mx >= gelay.palx && my >= gelay.paly &&
+	if (gelay.showpanel && mx >= gelay.palx && my >= gelay.paly &&
 		mx < gelay.palx + gelay.palw && my < gelay.paly + gelay.palh) {
 		int ci = ((mx - gelay.palx) / gelay.palcell) +
-			((my - gelay.paly) / gelay.palcell) * 16;
+			((my - gelay.paly) / gelay.palcell) * gelay.palcols;
 		if (ci < 0) ci = 0;
 		if (ci > 255) ci = 255;
 		if (GE_palop >= 1 && GE_palop <= 3) {
@@ -1607,7 +1842,7 @@ static int GEOnLButtonDown (HWND hwnd, int mx, int my)
 
 	bw = gelay.palw / 5;
 	if (bw < 28) bw = 28;
-	if (my >= gelay.pbtny && my < gelay.pbtny + gelay.pbtnh &&
+	if (gelay.showpanel && my >= gelay.pbtny && my < gelay.pbtny + gelay.pbtnh &&
 		mx >= gelay.palx && mx < gelay.palx + gelay.palw) {
 		int bi = (mx - gelay.palx) / bw;
 		if (bi >= 0 && bi < 5) {
@@ -1634,7 +1869,7 @@ static int GEOnLButtonDown (HWND hwnd, int mx, int my)
 		}
 	}
 
-	for (ch = 0; ch < 3; ch++) {
+	for (ch = 0; gelay.showpanel && ch < 3; ch++) {
 		if (mx >= gelay.barx[ch] && mx < gelay.barx[ch] + gelay.barw &&
 			my >= gelay.bary && my < gelay.bary + gelay.barh) {
 			GE_bar = ch;
@@ -1670,17 +1905,29 @@ static int GEOnLButtonDown (HWND hwnd, int mx, int my)
 
 	if (GETileXY (mx, my, &px, &py)) {
 		if (GE_palop == 4) {
-			GEPickAt (px, py);
+			GEPickAt (px, py, GetKeyState (VK_CONTROL) < 0);
 			GE_palop = 0;
 			InvalidateRect (hwnd, NULL, FALSE);
 			return 1;
 		}
-		GE_paint = 1;
-		SetCapture (hwnd);
-		GEPlot (px, py);
-		mapaltered = 1;
-		InvalidateRect (hwnd, NULL, FALSE);
-		BEInvalidate ();
+		if (GetKeyState (VK_CONTROL) < 0) {
+			GEPickAt (px, py, 1);
+			InvalidateRect (hwnd, NULL, FALSE);
+			return 1;
+		}
+		GEDoTileAction (hwnd, mb_l, px, py);
+		return 1;
+	}
+	return 1;
+}
+
+static int GEOnRButtonDown (HWND hwnd, int mx, int my)
+{
+	int px, py;
+	GEComputeLayout (hwnd, &gelay);
+	GE_mx = mx; GE_my = my;
+	if (GETileXY (mx, my, &px, &py)) {
+		GEDoTileAction (hwnd, mb_r, px, py);
 		return 1;
 	}
 	return 1;
@@ -1689,6 +1936,7 @@ static int GEOnLButtonDown (HWND hwnd, int mx, int my)
 static int GEOnMouseMove (HWND hwnd, int mx, int my)
 {
 	int px, py;
+	GE_mx = mx; GE_my = my;
 	if (GE_bar >= 0) {
 		GEApplyBarAtY (GE_bar, my);
 		InvalidateRect (hwnd, NULL, FALSE);
@@ -1716,6 +1964,80 @@ static void GEOnLButtonUp (HWND hwnd)
 		InvalidateRect (hwnd, NULL, FALSE);
 		BEInvalidate ();
 	}
+}
+
+int GESlide (int dx, int dy)
+{
+	int bpp, x, y, tb;
+	unsigned char * src, * tmp;
+	if (betype != BETYPE_GRAPH) return 0;
+	src = GETilePtr ();
+	if (src == NULL || (dx == 0 && dy == 0)) return 1;
+	bpp = (blockdepth + 1) / 8;
+	if (bpp < 1) bpp = 1;
+	tb = GETileBytes ();
+	tmp = malloc ((size_t) tb);
+	if (tmp == NULL) return 1;
+	GEPushUndo ();
+	memcpy (tmp, src, (size_t) tb);
+	for (y = 0; y < blockheight; y++) {
+		for (x = 0; x < blockwidth; x++) {
+			int sx = (x - dx) % blockwidth;
+			int sy = (y - dy) % blockheight;
+			if (sx < 0) sx += blockwidth;
+			if (sy < 0) sy += blockheight;
+			memcpy (src + (y * blockwidth + x) * bpp,
+				tmp + (sy * blockwidth + sx) * bpp, (size_t) bpp);
+		}
+	}
+	free (tmp);
+	mapaltered = 1;
+	if (mhwnd) InvalidateRect (mhwnd, NULL, FALSE);
+	BEInvalidate ();
+	return 1;
+}
+
+static int GEMouseTile (int * px, int * py)
+{
+	if (mhwnd == NULL) return 0;
+	GEComputeLayout (mhwnd, &gelay);
+	return GETileXY (GE_mx, GE_my, px, py);
+}
+
+int GEAccelFill (void)
+{
+	int px, py;
+	if (betype != BETYPE_GRAPH) return 0;
+	if (!GEMouseTile (&px, &py)) return 1;
+	GEPushUndo ();
+	GEFill (px, py);
+	mapaltered = 1;
+	InvalidateRect (mhwnd, NULL, FALSE);
+	BEInvalidate ();
+	return 1;
+}
+
+int GEAccelPick (void)
+{
+	int px, py;
+	if (betype != BETYPE_GRAPH) return 0;
+	if (!GEMouseTile (&px, &py)) return 1;
+	GEPickAt (px, py, 0);
+	InvalidateRect (mhwnd, NULL, FALSE);
+	return 1;
+}
+
+int GEAccelLine (void)
+{
+	int px, py;
+	if (betype != BETYPE_GRAPH) return 0;
+	if (!GEMouseTile (&px, &py) || !GE_haslast) return 1;
+	GEPushUndo ();
+	GELine (GE_lastpx, GE_lastpy, px, py);
+	mapaltered = 1;
+	InvalidateRect (mhwnd, NULL, FALSE);
+	BEInvalidate ();
+	return 1;
 }
 
 /* ---- End Tier-2 helpers ---- */
@@ -1889,6 +2211,7 @@ PAINTSTRUCT ps;
 			if (curbrsh>0 && curbrsh<=MAXBRSH) InvalidateRgn (mhwnd, NULL, FALSE);
 		break;
 	case WM_RBUTTONUP:
+		if (betype == BETYPE_GRAPH) return 0;
 		if (mappt==NULL) break;
 		if (lua_mb_act == 10) {
 			xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
@@ -1914,6 +2237,10 @@ PAINTSTRUCT ps;
 		}
 		break;
 	case WM_RBUTTONDOWN:
+		if (betype == BETYPE_GRAPH) {
+			GEOnRButtonDown (hwnd, (int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam));
+			return 0;
+		}
 		if (mappt==NULL) break;
 		if (MBDoAction (mb_r, hwnd, lParam)) rmapped = 1;
 		break;
@@ -2017,6 +2344,17 @@ PAINTSTRUCT ps;
 		InvalidateRgn (mhwnd, NULL, FALSE);
 		break;
 	case WM_KEYDOWN:
+		if (betype == BETYPE_GRAPH) {
+			switch (LOWORD(wParam)) {
+				case 'L': GEAccelLine (); break;
+				case 'F': GEAccelFill (); break;
+				case 'P': GEAccelPick (); break;
+				case 'Z':
+					if (GetKeyState (VK_CONTROL) < 0) GEUndo ();
+					break;
+			}
+			return 0;
+		}
 		if (mappt==NULL) break;
 		if (LOWORD(wParam)>=VK_F1 && LOWORD(wParam)<=VK_F10) {
 			int fn = LOWORD(wParam)-VK_F1;

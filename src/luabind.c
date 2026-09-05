@@ -1941,6 +1941,63 @@ void LuaRunObjectProp (int editidx)
 		LuaRunScript (path);
 }
 
+int LuaGetStrBlkUser (void)
+{
+	return strblkuser;
+}
+
+int LuaGetStrObjUser (void)
+{
+	return strobjuser;
+}
+
+void LuaRefreshBlockSort (void)
+{
+	int i;
+	char path[MAX_PATH * 2];
+	nblocksort = numblockstr;
+	if (nblocksort > MAXBLKSTR) nblocksort = MAXBLKSTR;
+	for (i = 0; i < nblocksort; i++) blocksort[i] = i;
+	sprintf (path, "%sluascr\\BlockSort.lua", mapwinpath);
+	if (GetFileAttributes (path) != INVALID_FILE_ATTRIBUTES)
+		LuaRunScript (path);
+}
+
+void LuaRefreshObjectSort (void)
+{
+	int i, n;
+	char path[MAX_PATH * 2];
+	n = F14_NumObjects ();
+	nobjectsort = n;
+	if (nobjectsort > F14_MAXOBJ) nobjectsort = F14_MAXOBJ;
+	for (i = 0; i < nobjectsort; i++) objectsort[i] = i;
+	sprintf (path, "%sluascr\\ObjectSort.lua", mapwinpath);
+	if (GetFileAttributes (path) != INVALID_FILE_ATTRIBUTES)
+		LuaRunScript (path);
+}
+
+int LuaBlockSortCount (void)
+{
+	return nblocksort;
+}
+
+int LuaBlockSortAt (int i)
+{
+	if (i < 0 || i >= nblocksort) return -1;
+	return blocksort[i];
+}
+
+int LuaObjectSortCount (void)
+{
+	return nobjectsort;
+}
+
+int LuaObjectSortAt (int i)
+{
+	if (i < 0 || i >= nobjectsort) return -1;
+	return objectsort[i];
+}
+
 int LuaFileMenuRun (int cmd)
 {
 	const char *fn = NULL;

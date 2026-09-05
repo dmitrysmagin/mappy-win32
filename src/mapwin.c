@@ -61,9 +61,9 @@ int gridstyle = 1;		/* 0=none 1=cursor 2=crosshatch */
 int showuser = 0;		/* show user-set overlay */
 char tbarname[64] = "";		/* custom titlebar name */
 int divideron = 0;		/* divider grid overlay enable */
-int dividergapx = 32;		/* divider pixel gap X */
-int dividergapy = 32;		/* divider pixel gap Y */
-long dividercol = 0xFFFFFF;	/* divider line colour RRGGBB */
+int dividergapx = 256;		/* divider pixel gap X */
+int dividergapy = 192;		/* divider pixel gap Y */
+long dividercol = 0x0000FF;	/* divider line colour RRGGBB */
 int tbarinfo = 1;		/* map-window titlebar mode 0..6 */
 int panelzoom = 1;		/* block window follows map zoom */
 int zmstyle = 1;		/* 0=software 1=hardware zoom */
@@ -87,9 +87,13 @@ char objlabels[16][64] = {
 };	/* object properties dialogue labels */
 int objplace = 0;		/* object placement mode (map clicks place) */
 int objshow = 1;		/* draw objects on map */
-int sortobjects = 0;		/* draw objects sorted by Y */
+int sortobjects = 0;		/* ObjectSort.lua + Y-order draw */
+int sortblocks = 0;		/* BlockSort.lua filters the block window */
+int panelpro = 1;		/* graph panel: 0 none, 1 cluster, 2 bar */
+int prographbg = 1;		/* graph window background (0 black, 1 dark) */
 int luafilemenu = 0;		/* override File menu with luascr/luafile*.lua */
 int objlayeruser = 0;		/* user field holding object layer (0 = off) */
+extern short int betype;
 
 void InvalidateAll (void)
 {
@@ -306,6 +310,7 @@ FILE * marfpt;
 				}
 				break;
 			case CM_ARROWUP:
+				if (GESlide (0, -1)) break;
 				if (mappt==NULL) break;
 				if (ymapoffset>0) ymapoffset--;
 				if ((blockstaggerx || blockstaggery) && ymapoffset&1) ymapoffset--;
@@ -313,6 +318,7 @@ FILE * marfpt;
 				InvalidateAll ();
 				break;
 			case CM_ARROWDOWN:
+				if (GESlide (0, 1)) break;
 				if (mappt==NULL) break;
 				if (ymapoffset<(mapheight-2)) ymapoffset++;
 				if ((blockstaggerx || blockstaggery) && ymapoffset&1) ymapoffset++;
@@ -320,12 +326,14 @@ FILE * marfpt;
 				InvalidateAll ();
 				break;
 			case CM_ARROWLEFT:
+				if (GESlide (-1, 0)) break;
 				if (mappt==NULL) break;
 				if (xmapoffset>0) xmapoffset--;
 				MESetScrollRange (mapwidth-1, mapheight-1, xmapoffset, ymapoffset);
 				InvalidateAll ();
 				break;
 			case CM_ARROWRIGHT:
+				if (GESlide (1, 0)) break;
 				if (mappt==NULL) break;
 				if (xmapoffset<(mapwidth-1)) xmapoffset++;
 				MESetScrollRange (mapwidth-1, mapheight-1, xmapoffset, ymapoffset);
@@ -641,11 +649,13 @@ FILE * marfpt;
 				Rejig ();
 				break;
 			case CM_EDITUNDO:
+				if (betype == 2) { GEUndo (); break; }
 				if (mappt==NULL) break;
 				MEUndo ();
 				InvalidateAll ();
 				break;
 			case CM_TOOLFILL:
+				if (betype == 2) { GEAccelFill (); break; }
 				if (mappt==NULL) break;
 				MEFillMap (0);
 				mapaltered = 1;
@@ -952,11 +962,11 @@ FILE * marfpt;
 				ShellExecute(NULL, "open", szFile, NULL, NULL, SW_SHOW);
 				break;
 			case CM_HELPABOUT:
-				strcpy (szFile, "Mappy for Win32, V1.3.11\n(C)2002 Robin Burrows <mappy@tilemap.co.uk>\n"
-					"http://www.tilemap.co.uk\nor\n"
-					"http://www.geocities.com/rburrowsgc/robmpy.htm\n\n"
-					"Keys in Map Editor: L=line tool, P=lay-path, D/middle-button=drag map, ESC=cancels, E=edit block.\n"
-					"Objects menu: manager (areas/labels), place mode (click places, ctrl+click duplicates, p picks).");
+				strcpy (szFile, "MappyWin32, V1.4.23\n"
+					"(C)2010 Robin Burrows\n\n"
+					"http://www.tilemap.co.uk\n\n"
+					"Lua 5.0.3 Copyright (c) 1994-2007 Lua.org, PUC-Rio\n"
+					"libpng 1.2.24 Copyright (c) 2004, 2006-2007 Glenn Randers-Pehrson");
 				MessageBox (hwnd, szFile, "MappyWin32: About", MB_OK|MB_ICONINFORMATION);
 				break;
 			case CM_TOOLGRID:
@@ -1105,6 +1115,7 @@ FILE * marfpt;
 				InvalidateAll ();
 				break;
 			case CM_PICKBLOCK:
+				if (betype == 2) { GEAccelPick (); break; }
 				if (mappt==NULL) break;
 				MEPickBlock ();
 				InvalidateAll ();
@@ -1383,6 +1394,9 @@ char * iniinfo, * inipos;
 				if (!strncmp (inipos, "keym", 4)) { i = GetEquals(inipos); keym = atoi (inipos+i); }
 				if (!strncmp (inipos, "objectdialoguelabels", 20)) { i = GetEquals(inipos); { int bl = 0, bc = 0; while (inipos[i] && inipos[i]!='\r' && inipos[i]!='\n' && bl<16) { if (inipos[i]==';') { objlabels[bl][bc]=0; bl++; bc = 0; } else if (bc<63) { objlabels[bl][bc++] = inipos[i]; } i++; } if (bl<16) objlabels[bl][bc]=0; } }
 				if (!strncmp (inipos, "sortobjects", 11)) { i = GetEquals(inipos); sortobjects = atoi (inipos+i); }
+				if (!strncmp (inipos, "sortblocks", 10)) { i = GetEquals(inipos); sortblocks = atoi (inipos+i); }
+				if (!strncmp (inipos, "panelpro", 8)) { i = GetEquals(inipos); panelpro = atoi (inipos+i); }
+				if (!strncmp (inipos, "prographbg", 10)) { i = GetEquals(inipos); prographbg = atoi (inipos+i); }
 				if (!strncmp (inipos, "objlayeruser", 12)) { i = GetEquals(inipos); objlayeruser = atoi (inipos+i); }
 				if (!strncmp (inipos, "luafilemenu", 11)) { i = GetEquals(inipos); luafilemenu = atoi (inipos+i); }
 				if (!strncmp (inipos, "lua", 3) && inipos[3] >= '0' && inipos[3] <= '9') {

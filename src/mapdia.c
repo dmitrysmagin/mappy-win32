@@ -446,6 +446,56 @@ unsigned int li;
 		myblkstrpt->unused2 = 1; else myblkstrpt->unused2 = 0;
 	if (SendDlgItemMessage (hwndDlg, IDC_PROPUNUSED3, BM_GETCHECK, 0, 0))
 		myblkstrpt->unused3 = 1; else myblkstrpt->unused3 = 0;
+
+	{
+		int uf = LuaGetStrBlkUser ();
+		int sel = (int) SendDlgItemMessage (hwndDlg, IDC_PROPSTR, CB_GETCURSEL, 0, 0);
+		char tb[256];
+		GetWindowText (GetDlgItem (hwndDlg, IDC_PROPSTR), tb, 255);
+		if (sel >= 0) {
+			const char * old = F14_TstrGet (sel);
+			if (tb[0] && (old == NULL || strcmp (old, tb))) F14_TstrSet (sel, tb);
+		} else if (tb[0]) {
+			sel = F14_TstrCount ();
+			F14_TstrSet (sel, tb);
+		}
+		if (sel >= 0 && uf >= 1 && uf <= 7) {
+			unsigned long v = (unsigned long) sel;
+			if (uf == 1) myblkstrpt->user1 = v;
+			else if (uf == 2) myblkstrpt->user2 = v;
+			else if (uf == 3) myblkstrpt->user3 = (unsigned short) v;
+			else if (uf == 4) myblkstrpt->user4 = (unsigned short) v;
+			else if (uf == 5) myblkstrpt->user5 = (unsigned char) v;
+			else if (uf == 6) myblkstrpt->user6 = (unsigned char) v;
+			else myblkstrpt->user7 = (unsigned char) v;
+		}
+	}
+}
+
+static void DIAFillStrCombo (HWND hwndDlg)
+{
+	BLKSTR * myblkstrpt;
+	int uf, i, n, cur = 0;
+	uf = LuaGetStrBlkUser ();
+	myblkstrpt = (BLKSTR *) blockstrpt;
+	if (myblkstrpt == NULL) return;
+	myblkstrpt += editnum;
+	if (uf == 1) cur = (int) myblkstrpt->user1;
+	else if (uf == 2) cur = (int) myblkstrpt->user2;
+	else if (uf == 3) cur = myblkstrpt->user3;
+	else if (uf == 4) cur = myblkstrpt->user4;
+	else if (uf == 5) cur = myblkstrpt->user5;
+	else if (uf == 6) cur = myblkstrpt->user6;
+	else if (uf == 7) cur = myblkstrpt->user7;
+	n = F14_TstrCount ();
+	SendDlgItemMessage (hwndDlg, IDC_PROPSTR, CB_RESETCONTENT, 0, 0);
+	for (i = 0; i < n; i++) {
+		const char * s = F14_TstrGet (i);
+		SendDlgItemMessage (hwndDlg, IDC_PROPSTR, CB_ADDSTRING, 0,
+			(LPARAM) (s ? s : ""));
+	}
+	if (cur >= 0 && cur < n)
+		SendDlgItemMessage (hwndDlg, IDC_PROPSTR, CB_SETCURSEL, cur, 0);
 }
 
 BOOL CALLBACK DIAPropEditProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -510,6 +560,7 @@ BLKSTR * myblkstrpt;
 				CheckDlgButton (hwndDlg, IDC_PROPDEC, 0);
 				CheckDlgButton (hwndDlg, IDC_PROPHEX, 1);
 			}
+			DIAFillStrCombo (hwndDlg);
 			break;
 		case WM_MEASUREITEM:
 			itempt = (LPMEASUREITEMSTRUCT) lParam;

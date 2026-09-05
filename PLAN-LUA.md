@@ -32,5 +32,5 @@ Reference: `mapwin1423/luascr/`, `mapwin1423/DOCS/luascript.html`, `mapwin1423/D
 - `getPixel`: 8-bit index, else A,R,G,B; `setPixel` INDEX or A,R,G,B.
 
 ## Follow-ups (not blocking Stage 3)
-- `sortblocks=1` → run `BlockSort.lua` when the block window refreshes (get/setBlockSort exist).
+- `sortblocks=1` / `sortobjects=1` run `BlockSort.lua` / `ObjectSort.lua` on panel refresh (Stage 2).
 - In-GUI click-through of every Custom-menu script.

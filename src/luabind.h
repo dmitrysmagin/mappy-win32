@@ -26,5 +26,13 @@ void LuaSetMouseBlock (int x, int y, int x2, int y2);
 int  LuaRunMouseButton (int button, int x, int y);
 void LuaRunBlockProp (int editidx);
 void LuaRunObjectProp (int editidx);
+int LuaGetStrBlkUser (void);
+int LuaGetStrObjUser (void);
+void LuaRefreshBlockSort (void);
+void LuaRefreshObjectSort (void);
+int LuaBlockSortCount (void);
+int LuaBlockSortAt (int i);
+int LuaObjectSortCount (void);
+int LuaObjectSortAt (int i);
 
 #endif

@@ -1,9 +1,8 @@
-/* objedit.c - MapWin32 Pro editors: Object/Area/Label + tile Graph editor.
+/* objedit.c - Object/Area/Label editors and extra graphic dialog.
  *
- * Original names kept where known (mapwin.lst / DOCS/mapwin32pro.html):
- *  dialogs D_OBJECT, D_OBJFNAME; export symbol `objstr` ("OBJSTR %sobjstr[%d]");
- *  value names OBJXPOS..OBJFLAGS; "Object %d", "Objects (%d/%d)",
- *  "Area only\t(no graphic)"; Col: 000000 = no border, 000001 = black.
+ * Dialogs D_OBJECT, D_OBJFNAME; export symbol `objstr` ("OBJSTR %sobjstr[%d]");
+ * value names OBJXPOS..OBJFLAGS; "Object %d", "Objects (%d/%d)",
+ * "Area only\t(no graphic)"; Col: 000000 = no border, 000001 = black.
  *
  * Areas = objects with tileid<0 ("area only"); labels = areas with 0x0 + text.
  * External graphics come from the OBFN file list (any format via IMLoadImage24).
@@ -203,14 +202,25 @@ int zx = zoomon, zd = zoomdiv;
 	if (n > 4096) n = 4096;
 	for (i = 0; i < n; i++) OE_SortIdx[i] = i;
 	if (sortobjects) {
-		int k;
-		for (i = 0; i < n; i++) {
-			for (k = i + 1; k < n; k++) {
-				const F14Obj * a = F14_GetObject (OE_SortIdx[i]);
-				const F14Obj * b = F14_GetObject (OE_SortIdx[k]);
-				if (a != NULL && b != NULL && a->ypos > b->ypos) {
-					int t = OE_SortIdx[i];
-					OE_SortIdx[i] = OE_SortIdx[k]; OE_SortIdx[k] = t;
+		int k, ns;
+		LuaRefreshObjectSort ();
+		ns = LuaObjectSortCount ();
+		if (ns > 0) {
+			int shown = 0;
+			for (i = 0; i < ns && shown < 4096; i++) {
+				int v = LuaObjectSortAt (i);
+				if (v >= 0 && v < n) OE_SortIdx[shown++] = v;
+			}
+			n = shown;
+		} else {
+			for (i = 0; i < n; i++) {
+				for (k = i + 1; k < n; k++) {
+					const F14Obj * a = F14_GetObject (OE_SortIdx[i]);
+					const F14Obj * b = F14_GetObject (OE_SortIdx[k]);
+					if (a != NULL && b != NULL && a->ypos > b->ypos) {
+						int t = OE_SortIdx[i];
+						OE_SortIdx[i] = OE_SortIdx[k]; OE_SortIdx[k] = t;
+					}
 				}
 			}
 		}
@@ -276,13 +286,25 @@ int zx = zoomon, zd = zoomdiv;
 		SelectObject (hdc, hold);
 		SelectObject (hdc, hbrold);
 		DeleteObject (hpen);
-		if (i != F14_CurObject ()) {
-			bc = OE_BorderCol (i);
-			if (bc > 1) {
+		{
+			int uf = LuaGetStrObjUser ();
+			const char * lab = NULL;
+			if (uf >= 1 && uf <= 7) {
+				const int * u = &o->user1;
+				lab = F14_TstrGet (u[uf - 1]);
+			}
+			if (lab && lab[0] && o->gwidth == 0 && o->gheight == 0) {
 				SetBkMode (hdc, TRANSPARENT);
-				SetTextColor (hdc, RGB ((bc >> 16) & 0xFF, (bc >> 8) & 0xFF, bc & 0xFF));
-				sprintf (txt, "Object %d", i);
-				TextOut (hdc, cx + 2, cy + 2, txt, strlen (txt));
+				SetTextColor (hdc, RGB (255, 255, 255));
+				TextOut (hdc, cx + 2, cy + 2, lab, (int) strlen (lab));
+			} else if (i != F14_CurObject ()) {
+				bc = OE_BorderCol (i);
+				if (bc > 1) {
+					SetBkMode (hdc, TRANSPARENT);
+					SetTextColor (hdc, RGB ((bc >> 16) & 0xFF, (bc >> 8) & 0xFF, bc & 0xFF));
+					sprintf (txt, "Object %d", i);
+					TextOut (hdc, cx + 2, cy + 2, txt, (int) strlen (txt));
+				}
 			}
 		}
 	}
@@ -368,6 +390,13 @@ int n, i, px, py;
 		} else {
 			val = (o->show ? 1 : 0) | ((o->flags & 0xFF) << 1);
 		}
+		if (uf >= 1 && uf <= 7 && uf == LuaGetStrObjUser ()) {
+			const char * ts = F14_TstrGet (val);
+			if (ts && ts[0]) {
+				snprintf (buf, nbuf, "%s", ts);
+				return 1;
+			}
+		}
 		snprintf (buf, nbuf, "O%d:%d", i, val);
 		return 1;
 	}
@@ -397,6 +426,46 @@ const int * v;
 }
 
 /* ---------------- D_OBJECT properties ---------------- */
+
+static void OE_FillStrCombo (HWND hwndDlg, const F14Obj * o)
+{
+	int uf, cur = 0, i, n;
+	uf = LuaGetStrObjUser ();
+	if (o != NULL && uf >= 1 && uf <= 7) {
+		const int * u = &o->user1;
+		cur = u[uf - 1];
+	}
+	n = F14_TstrCount ();
+	SendDlgItemMessage (hwndDlg, IDC_OBJSTR, CB_RESETCONTENT, 0, 0);
+	for (i = 0; i < n; i++) {
+		const char * s = F14_TstrGet (i);
+		SendDlgItemMessage (hwndDlg, IDC_OBJSTR, CB_ADDSTRING, 0,
+			(LPARAM) (s ? s : ""));
+	}
+	if (cur >= 0 && cur < n)
+		SendDlgItemMessage (hwndDlg, IDC_OBJSTR, CB_SETCURSEL, cur, 0);
+}
+
+static void OE_ApplyStrCombo (HWND hwndDlg, F14Obj * o)
+{
+	int uf, sel;
+	char tb[256];
+	if (o == NULL) return;
+	uf = LuaGetStrObjUser ();
+	sel = (int) SendDlgItemMessage (hwndDlg, IDC_OBJSTR, CB_GETCURSEL, 0, 0);
+	GetWindowText (GetDlgItem (hwndDlg, IDC_OBJSTR), tb, 255);
+	if (sel >= 0) {
+		const char * old = F14_TstrGet (sel);
+		if (tb[0] && (old == NULL || strcmp (old, tb))) F14_TstrSet (sel, tb);
+	} else if (tb[0]) {
+		sel = F14_TstrCount ();
+		F14_TstrSet (sel, tb);
+	}
+	if (sel >= 0 && uf >= 1 && uf <= 7) {
+		int * u = &o->user1;
+		u[uf - 1] = sel;
+	}
+}
 
 static void OE_FillFileCombo (HWND hwndDlg)
 {
@@ -487,6 +556,7 @@ int i;
 				SetWindowText (GetDlgItem (hwndDlg, IDC_OBJLAYER), txt);
 				sprintf (txt, "Object %d", edidx);
 				SetWindowText (hwndDlg, txt);
+				OE_FillStrCombo (hwndDlg, o);
 			}
 			break;
 		case WM_COMMAND:
@@ -496,6 +566,8 @@ int i;
 				DIAObjFname (GetParent (hwndDlg));
 				OE_FillFileCombo (hwndDlg);
 				break;
+			case IDC_OBJPREV:
+			case IDC_OBJNEXT:
 			case IDOK:
 			{
 				F14Obj o;
@@ -554,9 +626,15 @@ int i;
 					GetWindowText (GetDlgItem (hwndDlg, IDC_OBJLAYER), tb, 80);
 					u[objlayeruser - 1] = atoi (tb);
 				}
+				OE_ApplyStrCombo (hwndDlg, &o);
 				F14_SetObject (edidx, &o);
 				mapaltered = 1;
-				SendMessage (hwndDlg, WM_CLOSE, 0, 0L);
+				if (LOWORD (wParam) == IDC_OBJPREV)
+					SendMessage (hwndDlg, WM_CLOSE, 0, 1L);
+				else if (LOWORD (wParam) == IDC_OBJNEXT)
+					SendMessage (hwndDlg, WM_CLOSE, 0, 2L);
+				else
+					SendMessage (hwndDlg, WM_CLOSE, 0, 0L);
 				break;
 			}
 			case IDCANCEL:
@@ -576,10 +654,16 @@ int i;
 void DIAObjectProps (HWND hwnd, int idx)
 {
 DLGPROC dlgprc;
+int i;
 
-	if (F14_GetObject (idx) == NULL) return;
 	dlgprc = (DLGPROC) MakeProcInstance (DIAObjectPropsProc, hInstance);
-	DialogBoxParam (hInstance, (LPCSTR) "D_OBJECT", hwnd, dlgprc, (LPARAM) idx);
+	i = 1;
+	while (i) {
+		if (F14_GetObject (idx) == NULL) break;
+		i = DialogBoxParam (hInstance, (LPCSTR) "D_OBJECT", hwnd, dlgprc, (LPARAM) idx);
+		if (i == 1) { if (idx > 0) idx--; else i = 0; }
+		else if (i == 2) { if (idx < F14_NumObjects () - 1) idx++; else i = 0; }
+	}
 	FreeProcInstance((FARPROC) dlgprc);
 	return;
 }

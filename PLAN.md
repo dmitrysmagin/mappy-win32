@@ -4,7 +4,7 @@ Source baseline: `src/` (1.3.11 + Tier-1/2 patches).
 Reference: `mapwin1423/` (`mapwin.exe` 1.4.23, `MAPWIN.INI`, `DOCS/vhistory.html`, `DOCS/MAPWIN.HTM`, `DOCS/mapwin32pro.html`, `luascr/`, IDA `mapwin.map` / `mapwin.lst`).
 Chunk preserve: `src/fmp14.c`, `src/fmp14.h` (`EPHD/TSTR/LSTR/OBDT/OBFN`), wired in `src/mapfunc.c`.
 
-Policy: core/editor parity first, Pro editors next, LUA last.
+Policy: core/editor parity first, object/graph editors next, LUA last.
 
 Verified against the 1.4.23 binary (UTF-16 menus, exported symbols, docs). Several items previously marked CANCELLED **are in the EXE**.
 
@@ -26,35 +26,26 @@ Batch 1: 100 layers in memory, zoom 0.25/0.5, onion All + lower layers, `tbarinf
 
 `Adjust Values` **is** implemented (`DIALayerAdj`). Multi-layer `.MAP` import still replaces the current layer only (`MapCustomLoad`).
 
-Other Stage 1 gaps closed here: EPHD applied on load (`ApplyEditorPrefs`); tilemodes already in MPHD reserved1; Resize Map New Left/New Top; Help → MapWin32 Pro / Edit MAPWIN.INI; Grab New Brush + Handle submenu; 32-bit FG/onion alphablend (1.4.19). Still open: NLYR vs our `LY10`–`LY99` (no verified sample; unknown-chunk round-trip).
+Other Stage 1 gaps closed here: EPHD applied on load (`ApplyEditorPrefs`); tilemodes already in MPHD reserved1; Resize Map New Left/New Top; Help → Edit MAPWIN.INI; Grab New Brush + Handle submenu; 32-bit FG/onion alphablend (1.4.19). Still open: NLYR vs our `LY10`–`LY99` (no verified sample; unknown-chunk round-trip).
 
-## Stage 2 — Pro editors PARTIAL
+## Stage 2 — Editors DONE
 
-Object/area/label data path DONE: `objedit.c` dialogs, `OE_DrawObjects`, place/show, OBJSTR export, `OBDT`/`OBFN`.
+Object/area/label data path: `objedit.c` dialogs, `OE_DrawObjects`, place/show, OBJSTR export, `OBDT`/`OBFN`.
 
-### Graph editor (Graph tab in the map window) — IN PROGRESS
+### Graph editor (Graph tab in the map window)
 
-This is the real Pro graph UI (`graphed.c` / `_GEDrawGraphEd` in the binary), not the extra `D_GRAPHEDIT` dialog.
+Layout: tile on the left; FLH/FLV/ROT/CLR/MSK/BLK/REV + Draw size + status along the bottom. Palette / RGB / preview follow `panelpro` (0 none, 1 cluster, 2 bar). `prographbg` sets the window fill.
 
-**Layout pass (matches 1.4.23 screenshot):**
-- Tile canvas on the left; FLH/FLV/ROT/CLR/MSK/BLK/REV + Draw size + status along the **bottom**.
-- Palette 16×16, RGB bars, live map preview **right-aligned** in the map window (`GEComputeLayout` in `src/maped.c`).
-- Palette cells scaled (~20px, shrinks on narrow windows). Title is always `Palette (col N/255)`.
-- RGB bars are click/drag and write `cmappt` (8-bit maps recolour by index; truecolour uses the palette as a swatch store). Decimal + `$hex` under each bar.
-- Corner preview renders the current viewport with `Blockto24` (was an occupancy grid that looked like noise).
-- Palette tools CPY / EXG / SPR / TRN / `?` (pick from tile) wired.
-
-**Still missing vs `mapwin32pro.html` / original Graph tab:**
-- REV as last-draw undo (`ctrl+z`); ours is 180° rotate.
-- Graph-mode mousebuttons (block0=colour0, pick, fill, line).
-- Fill (`f`) / line (`l`) / pick (`p`) keys; ctrl+click find colour in palette.
-- `panelpro` (0=no panel / 1=cluster / 2=bar); `prographbg`.
-- `sortblocks` / `sortobjects` Lua filter hooks.
-- Object properties Text String field; next/prev on brushes and objects.
+- REV / Ctrl+Z undoes the last draw (one level, toggle). CLR fills with the current colour.
+- Graph mousebuttons: current colour, colour 0, pick, fill, line.
+- Keys: fill `f`, line `l`, pick `p`; Ctrl+click finds a colour in the palette. Arrows slide the tile.
+- `?` then click: 8-bit picks the index; truecolour writes the pixel into the current slot (Ctrl = nearest palette).
+- `sortblocks=1` / `sortobjects=1` run `luascr/BlockSort.lua` / `ObjectSort.lua` when those panels refresh.
+- Block and object properties have a Text String combo (writes `STRBLKUSER` / `STROBJUSER`). Object dialog has next/prev. Double-click opens brush rename / object properties. Comma/period already step brushes and objects.
 
 ## Stage 3 — LUA [DONE]
 
-L0–L4 in `PLAN-LUA.md`. Bundled `src/luascr/` scripts use the 1.4.23 `mappy.*` contracts (`getPixel` A,R,G,B / 8-bit index, `createBlock(index)`, `fileRequester`/`doDialogue`, `sendMessage(CM_,0)`, `shellExecute` 5 args, Placer/Area/400+ mouse, BlockProp/ObjectProp, `luafilemenu`). Custom menu is `&Custom`. Remaining polish: `sortblocks` draw filter, in-GUI script pass.
+L0–L4 in `PLAN-LUA.md`. Bundled `src/luascr/` scripts use the 1.4.23 `mappy.*` contracts (`getPixel` A,R,G,B / 8-bit index, `createBlock(index)`, `fileRequester`/`doDialogue`, `sendMessage(CM_,0)`, `shellExecute` 5 args, Placer/Area/400+ mouse, BlockProp/ObjectProp, `luafilemenu`). Custom menu is `&Custom`. `sortblocks` / `sortobjects` draw filters are in Stage 2. Remaining polish: in-GUI script pass.
 
 ## Stage 4 — Polish / release
 

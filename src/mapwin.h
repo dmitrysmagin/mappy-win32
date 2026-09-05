@@ -103,6 +103,11 @@ HWND CreateMapEditorWindow (HWND);
 HWND MEGetHWND (void);
 void MECopyLayerToUndo (short int *src);
 void MECopyUndoToLayer (short int *dst);
+void GEUndo (void);
+int GESlide (int dx, int dy);
+int GEAccelFill (void);
+int GEAccelPick (void);
+int GEAccelLine (void);
 /* blocked.c prototypes */
 void BEResizeWind (int, int);
 void BENewBlock (void);
@@ -126,7 +131,7 @@ void FmpChunkDelete (int idx);
 int FmpChunkGetVal (int idx, int off);
 void FmpChunkSetVal (int idx, int off, int val);
 int IMLoadImage24 (char *, unsigned char **, int *, int *);
-/* objedit.c prototypes (Pro object/area/label + graph editors) */
+/* objedit.c prototypes */
 void DIAObjectProps (HWND, int);
 void DIAObjectMgr (HWND);
 void DIAObjFname (HWND);
