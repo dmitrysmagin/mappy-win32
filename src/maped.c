@@ -142,10 +142,16 @@ void MEUndo (void)
 void MECopyToUndo (void)
 {
 	if (mappt==NULL) return;
-	if (undobuff1==NULL) { undobuff1 = malloc (mapwidth*mapheight*2);
-		if (undobuff1==NULL) return; memset (undobuff1, 0, mapwidth*mapheight*2); }
-	if (undobuff2==NULL) { undobuff2 = malloc (mapwidth*mapheight*2);
-		if (undobuff2==NULL) return; memset (undobuff2, 0, mapwidth*mapheight*2); }
+	if (undobuff1==NULL) {
+		undobuff1 = malloc (mapwidth*mapheight*2);
+		if (undobuff1==NULL) return;
+		memset (undobuff1, 0, mapwidth*mapheight*2);
+	}
+	if (undobuff2==NULL) {
+		undobuff2 = malloc (mapwidth*mapheight*2);
+		if (undobuff2==NULL) return;
+		memset (undobuff2, 0, mapwidth*mapheight*2);
+	}
 	memcpy (undobuff1, mappt, mapwidth*mapheight*2);
 }
 
@@ -2281,7 +2287,8 @@ PAINTSTRUCT ps;
 		MEBrushRect (hwnd, xblk, yblk, xblk, yblk);
 		mebrushx = xblk; mebrushx2 = mebrushx;
 		mebrushy = yblk; mebrushy2 = mebrushy; }
-/* deliberately run into mousemove */
+		/* first paint click also updates the hover cell */
+		__attribute__((fallthrough));
 	case WM_MOUSEMOVE:
 		if (mappt==NULL) return 0;
 		if (dragmode) {

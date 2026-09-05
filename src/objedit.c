@@ -488,7 +488,7 @@ char txt[300];
 	}
 }
 
-BOOL CALLBACK DIAObjectPropsProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAObjectPropsProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 char txt[300];
 static int edidx = 0;
@@ -657,18 +657,15 @@ int i;
 
 void DIAObjectProps (HWND hwnd, int idx)
 {
-DLGPROC dlgprc;
 int i;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIAObjectPropsProc, hInstance);
 	i = 1;
 	while (i) {
 		if (F14_GetObject (idx) == NULL) break;
-		i = DialogBoxParam (hInstance, (LPCSTR) "D_OBJECT", hwnd, dlgprc, (LPARAM) idx);
+		i = DialogBoxParam (hInstance, (LPCSTR) "D_OBJECT", hwnd, AsDlgProc(DIAObjectPropsProc), (LPARAM) idx);
 		if (i == 1) { if (idx > 0) idx--; else i = 0; }
 		else if (i == 2) { if (idx < F14_NumObjects () - 1) idx++; else i = 0; }
 	}
-	FreeProcInstance((FARPROC) dlgprc);
 	return;
 }
 
@@ -691,7 +688,7 @@ char txt[64];
 	SetWindowText (hwndDlg, txt);
 }
 
-BOOL CALLBACK DIAObjectMgrProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAObjectMgrProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int sel, ni;
 
@@ -789,15 +786,12 @@ int sel, ni;
 
 void DIAObjectMgr (HWND hwnd)
 {
-DLGPROC dlgprc;
 
 	if (mappt == NULL) {
 		MessageBox (hwnd, "Load or create a map first.", "Objects", MB_OK|MB_ICONINFORMATION);
 		return;
 	}
-	dlgprc = (DLGPROC) MakeProcInstance (DIAObjectMgrProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_OBJMGR", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_OBJMGR", hwnd, AsDlgProc(DIAObjectMgrProc));
 	return;
 }
 
@@ -815,7 +809,7 @@ int n, i;
 	}
 }
 
-BOOL CALLBACK DIAObjFnameProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAObjFnameProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int sel, i;
 
@@ -882,11 +876,8 @@ int sel, i;
 
 void DIAObjFname (HWND hwnd)
 {
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIAObjFnameProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_OBJFNAME", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_OBJFNAME", hwnd, AsDlgProc(DIAObjFnameProc));
 	return;
 }
 
@@ -1095,7 +1086,7 @@ int sw, sh, x, y, topdown = 0;
 	OE_GfxRefresh (hwndDlg);
 }
 
-BOOL CALLBACK DIAGraphEditProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAGraphEditProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 char txt[80];
 LPMEASUREITEMSTRUCT itempt;
@@ -1276,14 +1267,11 @@ LPDRAWITEMSTRUCT drawpt;
 
 void DIAGraphEdit (HWND hwnd)
 {
-DLGPROC dlgprc;
 
 	if (mappt == NULL || blockgfxpt == NULL) {
 		MessageBox (hwnd, "Load or create a map first.", "Graphic Editor", MB_OK|MB_ICONINFORMATION);
 		return;
 	}
-	dlgprc = (DLGPROC) MakeProcInstance (DIAGraphEditProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_GRAPHEDIT", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_GRAPHEDIT", hwnd, AsDlgProc(DIAGraphEditProc));
 	return;
 }

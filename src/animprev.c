@@ -128,7 +128,8 @@ int i;
 	}
 	free (maplpDDSTiles); maplpDDSTiles = NULL;
 	}
-	if (paratile!=NULL) IDirectDrawSurface2_Release (paratile); paratile = NULL;
+	if (paratile!=NULL) IDirectDrawSurface2_Release (paratile);
+	paratile = NULL;
 }
 
 int MapHighTo8 (void)
@@ -1270,15 +1271,17 @@ char mytext[80];
 	return DDENUMRET_OK;
 }
 
-BOOL CALLBACK DIAAPSetupProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAAPSetupProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i;
 char textbuf[80];
 
 	switch (msg) {
 		case WM_INITDIALOG:
-			if (parastr<0) parastr = 0; if (parastr>=numblockstr) parastr = numblockstr-1;
-			if (apfps<0) apfps = 0; if (apfps>500) apfps = 500;
+			if (parastr<0) parastr = 0;
+			if (parastr>=numblockstr) parastr = numblockstr-1;
+			if (apfps<0) apfps = 0;
+			if (apfps>500) apfps = 500;
 			sprintf (textbuf, "%d", apfps);
 			SetWindowText (GetDlgItem (hwndDlg, IDC_APRVLFPS), textbuf);
 			sprintf (textbuf, "%d", parastr);
@@ -1338,7 +1341,8 @@ char textbuf[80];
 
 				GetWindowText (GetDlgItem (hwndDlg, IDC_APRVBSTR), textbuf, 80);
 				parastr = atoi (textbuf);
-				if (parastr<0) parastr = 0; if (parastr>=numblockgfx) parastr = numblockgfx-1;
+				if (parastr<0) parastr = 0;
+				if (parastr>=numblockgfx) parastr = numblockgfx-1;
 //				GetWindowText (GetDlgItem (hwndDlg, IDC_APRVTTRU), textbuf, 80);
 //				sscanf (textbuf, "%X", &aptranhi);
 //				if (aptranhi<0) aptranhi = 0; if (aptranhi>0xFFFFFF) aptranhi = 0xFFFFFF;
@@ -1372,11 +1376,8 @@ char textbuf[80];
 
 void APSetup (HWND hwnd, int apthedepth)
 {
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIAAPSetupProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_APSETUP", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_APSETUP", hwnd, AsDlgProc(DIAAPSetupProc));
 }
 
 void APCleanup (void)
@@ -1396,7 +1397,8 @@ void APDisplayMode (char * modestr)
 int i, j;
 
 	i = 0; j = 0;
-	if (modestr[i] != '\"') return; i++;
+	if (modestr[i] != '\"') return;
+	i++;
 	while (modestr[i] != '\"') {
 		apcurrentmode[j] = modestr[i];
 		if (i>64) return;

@@ -12,6 +12,7 @@
 #include "lualib.h"
 
 #include "mapwin.h"
+#include "compat.h"
 #include "mapdefs.h"
 #include "fmp.h"
 #include "fmp14.h"
@@ -1540,7 +1541,7 @@ static int run_custom_dialogue (lua_State *LS)
 		p = put_ustr (p, luadlg.items[i].title);
 		*p++ = 0;
 	}
-	r = (int) DialogBoxIndirect (hInstance, dt, MapGetMainHWND (), (DLGPROC) LuaCustomDlgProc);
+	r = (int) DialogBoxIndirect (hInstance, dt, MapGetMainHWND (), AsDlgProc(LuaCustomDlgProc));
 	lua_pushnumber (LS, win_to_mmb (r));
 	return 1;
 }
@@ -1567,7 +1568,7 @@ static int m_doDialogue (lua_State *LS)
 		req_edit[sizeof (req_edit) - 1] = 0;
 	}
 	type = narg >= 4 ? (int) lua_tonumber (LS, 4) : 1;
-	r = (int) DialogBox (hInstance, "D_LUAREQ", MapGetMainHWND (), (DLGPROC) LuaReqProc);
+	r = (int) DialogBox (hInstance, "D_LUAREQ", MapGetMainHWND (), AsDlgProc(LuaReqProc));
 	lua_pushnumber (LS, win_to_mmb (r));
 	if (r != IDOK) {
 		lua_pushstring (LS, req_edit);

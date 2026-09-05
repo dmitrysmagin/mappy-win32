@@ -3065,7 +3065,8 @@ short int * mybrshpt, * mymappt, * mymap2pt;
 	if (curbrsh<1 || curbrsh>MAXBRSH) return -1;
 	if (x1<0 || x2<0 || y1<0 || y2<0) return -1;
 	if (x1>=mapwidth || x2>=mapwidth || y1>=mapheight || y2>=mapheight) return -1;
-	if (brshpt[curbrsh-1]!=NULL) free (brshpt[curbrsh-1]); brshpt[curbrsh-1] = NULL;
+	if (brshpt[curbrsh-1]!=NULL) free (brshpt[curbrsh-1]);
+	brshpt[curbrsh-1] = NULL;
 
 	brshpt[curbrsh-1] = malloc ((((x2-x1)+1)*((y2-y1)+1)*2)+4);
 	if (brshpt[curbrsh-1]==NULL) return -1;
@@ -3097,7 +3098,8 @@ short int * mybrshpt;
 BLKSTR * myblkstrpt;
 
 	if (curbrsh<1 || curbrsh>MAXBRSH) return -1;
-	if (brshpt[curbrsh-1]!=NULL) free (brshpt[curbrsh-1]); brshpt[curbrsh-1] = NULL;
+	if (brshpt[curbrsh-1]!=NULL) free (brshpt[curbrsh-1]);
+	brshpt[curbrsh-1] = NULL;
 
 	brshpt[curbrsh-1] = malloc ((bswidth*bsheight*2)+4);
 	if (brshpt[curbrsh-1]==NULL) return -1;
@@ -3296,7 +3298,7 @@ int iw, ih, x, y, g, s;
 unsigned char * cache;
 int * g2s;
 int nl, best, bi;
-long bestd, dd;
+long long bestd, dd;
 int mwpx = mapwidth*blockwidth, mhpx = mapheight*blockheight;
 
 	if (mappt==NULL || blockgfxpt==NULL || blockstrpt==NULL) return -1;
@@ -3325,7 +3327,7 @@ int mwpx = mapwidth*blockwidth, mhpx = mapheight*blockheight;
 	if (nl<0) { free (cache); free (g2s); free (img); return -1; }
 	for (y=0;y<mapheight;y++) {
 		for (x=0;x<mapwidth;x++) {
-			bestd = (long) 1<<62; bi = 0; best = 0;
+			bestd = (1LL << 62); bi = 0; best = 0;
 			for (g=0;g<numblockgfx;g++) {
 				int px, py;
 				unsigned char * gp = cache+g*blockwidth*blockheight*3;
@@ -3369,7 +3371,8 @@ long int * templpt;
 	{
 		for (i=0;i<mapwidth;i++)
 		{
-			if (*mymappt>=(curstr)) (*mymappt)++; mymappt++;
+			if (*mymappt>=(curstr)) (*mymappt)++;
+			mymappt++;
 		}
 	} } }
 	for (k=0;k<MAXBRSH;k++) {
@@ -3442,7 +3445,8 @@ long int * templpt;
 	templpt = (long int *) animstrpt;
 	while (templpt!=(long int *) myanpt)
 	{ if (*templpt>(((int)curstr)*BLOCKSTRSIZE)) *templpt-=BLOCKSTRSIZE;
-		else if (*templpt==(((int)curstr)*BLOCKSTRSIZE)) *templpt = 0; templpt++; }
+		else if (*templpt==(((int)curstr)*BLOCKSTRSIZE)) *templpt = 0;
+		templpt++; }
 	}
 
 	numblockstr--; if (curstr==numblockstr) curstr--;
@@ -3493,7 +3497,8 @@ long int * templpt;
 	{
 		for (i=0;i<mapwidth;i++)
 		{
-			if (*mymappt>=(curstr)) (*mymappt)++; mymappt++;
+			if (*mymappt>=(curstr)) (*mymappt)++;
+			mymappt++;
 		}
 	} } }
 	for (k=0;k<MAXBRSH;k++) {

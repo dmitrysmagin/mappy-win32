@@ -119,7 +119,7 @@ static char * gbname;
 static char expname[512];
 
 
-BOOL CALLBACK DIANewMapProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIANewMapProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i;
 char textbuf[80];
@@ -236,7 +236,7 @@ char textbuf[80];
 	return -1;
 }
 
-BOOL CALLBACK DIANewMapSimpleProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIANewMapSimpleProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 char textbuf[80];
 
@@ -499,7 +499,7 @@ static void DIAFillStrCombo (HWND hwndDlg)
 		SendDlgItemMessage (hwndDlg, IDC_PROPSTR, CB_SETCURSEL, cur, 0);
 }
 
-BOOL CALLBACK DIAPropEditProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAPropEditProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 char mytext[80];
 LPMEASUREITEMSTRUCT itempt;
@@ -712,7 +712,7 @@ ANISTR * myanimpt;
 	return (myanimpt->anendoff-myanimpt->anstartoff)/4;
 }
 
-BOOL CALLBACK DIAAnimEditProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAAnimEditProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 char mytext[80];
 LPMEASUREITEMSTRUCT itempt;
@@ -932,7 +932,7 @@ ANISTR * myanimpt;
 	return -1;
 }
 
-BOOL CALLBACK DIAPickGfxProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAPickGfxProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 long int * templpt;
 int i, j, k, l, m;
@@ -947,7 +947,7 @@ LPDRAWITEMSTRUCT drawpt;
 BLKSTR * myblkstr;
 ANISTR * myanimpt;
 char textbuf[256];
-char * partpt;
+char * partpt = "";
 
 	switch (msg) {
 		case WM_INITDIALOG:
@@ -974,7 +974,6 @@ char * partpt;
 					pgfxnum = (myblkstr->fgoff3)/(blockwidth*blockheight*((blockdepth+1)/8));
 					break;
 				case 4:
-					partpt = NULL;
 					myanimpt = (ANISTR *) (animstrpt+ANDTMEM);
 					myanimpt--; myanimpt -= editnum; templpt = (long int *) ((animstrpt+ANDTMEM)+(myanimpt->anstartoff));
 					templpt--;
@@ -982,7 +981,6 @@ char * partpt;
 					break;
 				case 5:
 				default:
-					partpt = NULL;
 					myanimpt = (ANISTR *) (animstrpt+ANDTMEM);
 					myanimpt--; myanimpt -= editnum; templpt = (long int *) ((animstrpt+ANDTMEM)+(myanimpt->anstartoff));
 					templpt--;
@@ -1146,7 +1144,7 @@ char * partpt;
 	return -1;
 }
 
-BOOL CALLBACK DIAResizeProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAResizeProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 char textbuf[80];
 
@@ -1228,7 +1226,7 @@ char textbuf[80];
 	return -1;
 }
 
-BOOL CALLBACK DIAExportProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAExportProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i;
 char mytext[80];
@@ -1292,7 +1290,7 @@ char mytext[80];
 	return -1;
 }
 
-BOOL CALLBACK DIAEditInfoProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAEditInfoProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i, j, k, l;
 ANISTR * myanpt;
@@ -1303,7 +1301,7 @@ char szFilter[80];
 char szFile[256];
 char szFileTitle[256];
 char szInitDir[256];
-char mytext[256];
+char mytext[280];
 
 	switch (msg) {
 		case WM_INITDIALOG:
@@ -1333,7 +1331,7 @@ char mytext[256];
 			sprintf (mytext, "%d", (int) clickmask);
 			SetWindowText (GetDlgItem (hwndDlg, IDC_INFOCLICKNUM), mytext);
 
-			sprintf (mytext, "Filename: %s", mapfilename);
+			snprintf (mytext, sizeof (mytext), "Filename: %s", mapfilename);
 			SetWindowText (GetDlgItem (hwndDlg, IDC_INFONAME), mytext);
 			totalmapmem = 0;
 			i = 0; for (j=0;j<MAXMAPLAYERS;j++) { if (mapmappt[j]!=NULL) i++; }
@@ -1555,7 +1553,7 @@ char mytext[256];
 	return -1;
 }
 
-BOOL CALLBACK DIALayerOnionProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIALayerOnionProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i;
 char textbuf[80];
@@ -1610,7 +1608,7 @@ char textbuf[80];
 	return -1;
 }
 
-BOOL CALLBACK DIALayerSlideProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIALayerSlideProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i, sldir, slnum, x, y, slwrap;
 short int tmps;
@@ -1722,7 +1720,7 @@ char textbuf[80];
 	return -1;
 }
 
-BOOL CALLBACK DIAImportNumberProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAImportNumberProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i;
 char textbuf[80];
@@ -1763,7 +1761,7 @@ char textbuf[80];
 	return -1;
 }
 
-BOOL CALLBACK DIARangeEditBlocksProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIARangeEditBlocksProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 unsigned int li, incr;
 long int bstmp;
@@ -1890,29 +1888,26 @@ BLKSTR * myblkstrpt;
 
 					GetWindowText (GetDlgItem (hwndDlg, IDC_GLOBNEWBG), textbuf, 80);
 					if (textbuf[0]) {
-						li = atoi (textbuf);
-						li += incr;
-						if (li >=0 && li < numblockgfx)
-							myblkstrpt->bgoff = (long int) li*blockwidth*blockheight*((blockdepth+1)/8);
+						int gfxid = atoi (textbuf) + (int) incr;
+						if (gfxid >= 0 && gfxid < numblockgfx)
+							myblkstrpt->bgoff = (long int) gfxid*blockwidth*blockheight*((blockdepth+1)/8);
 						else
 							MessageBox (hwndDlg, "Illegal graphic number!", "Range Edit Blocks", MB_OK|MB_ICONEXCLAMATION);
 
 					}
 					GetWindowText (GetDlgItem (hwndDlg, IDC_GLOBNEWFG), textbuf, 80);
 					if (textbuf[0]) {
-						li = atoi (textbuf);
-						li += incr;
-						if (li >=0 && li < numblockgfx)
-							myblkstrpt->fgoff = (long int) li*blockwidth*blockheight*((blockdepth+1)/8);
+						int gfxid = atoi (textbuf) + (int) incr;
+						if (gfxid >= 0 && gfxid < numblockgfx)
+							myblkstrpt->fgoff = (long int) gfxid*blockwidth*blockheight*((blockdepth+1)/8);
 						else
 							MessageBox (hwndDlg, "Illegal graphic number!", "Range Edit Blocks", MB_OK|MB_ICONEXCLAMATION);
 					}
 					GetWindowText (GetDlgItem (hwndDlg, IDC_GLOBNEWFG2), textbuf, 80);
 					if (textbuf[0]) {
-						li = atoi (textbuf);
-						li += incr;
-						if (li >=0 && li < numblockgfx)
-							myblkstrpt->fgoff2 = (long int) li*blockwidth*blockheight*((blockdepth+1)/8);
+						int gfxid = atoi (textbuf) + (int) incr;
+						if (gfxid >= 0 && gfxid < numblockgfx)
+							myblkstrpt->fgoff2 = (long int) gfxid*blockwidth*blockheight*((blockdepth+1)/8);
 						else
 							MessageBox (hwndDlg, "Illegal graphic number!", "Range Edit Blocks", MB_OK|MB_ICONEXCLAMATION);
 					}
@@ -1936,7 +1931,7 @@ BLKSTR * myblkstrpt;
 	return -1;
 }
 
-BOOL CALLBACK DIAGrabBrushBSProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAGrabBrushBSProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i, j, k, l;
 char textbuf[80];
@@ -1985,7 +1980,7 @@ char textbuf[80];
 	return -1;
 }
 
-BOOL CALLBACK DIABrushRenameProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIABrushRenameProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg) {
 		case WM_INITDIALOG:
@@ -2016,7 +2011,6 @@ BOOL CALLBACK DIABrushRenameProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM 
 int DIANewProject (HWND hwnd)
 {
 int i;
-DLGPROC dlgprc;
 
 	if (MessageBox (hwnd, "There are two dialogues for creating a new map\n"
 		"'Advanced' is the standard dialogue and allows all values to be chosen\n"
@@ -2024,15 +2018,11 @@ DLGPROC dlgprc;
 		"Click 'YES' to use Advanced, or 'NO' to use Easy", "Map Editor: New map", MB_ICONINFORMATION|MB_YESNO) == IDYES) {
 		i = 2;
 	} else {
-		dlgprc = (DLGPROC) MakeProcInstance (DIANewMapSimpleProc, hInstance);
-		i = DialogBox (hInstance, (LPCSTR) "D_NEWMAPS", hwnd, dlgprc);
-		FreeProcInstance((FARPROC) dlgprc);
+		i = DialogBox (hInstance, (LPCSTR) "D_NEWMAPS", hwnd, AsDlgProc(DIANewMapSimpleProc));
 	}
 
 	if (i == 2) {
-		dlgprc = (DLGPROC) MakeProcInstance (DIANewMapProc, hInstance);
-		i = DialogBox (hInstance, (LPCSTR) "D_NEWMAP", hwnd, dlgprc);
-		FreeProcInstance((FARPROC) dlgprc);
+		i = DialogBox (hInstance, (LPCSTR) "D_NEWMAP", hwnd, AsDlgProc(DIANewMapProc));
 	}
 
 	if (i!=-1) {
@@ -2060,12 +2050,10 @@ DLGPROC dlgprc;
 int DIAPickBlockGfx (HWND hwnd, int gpart)
 {
 int i, j;
-DLGPROC dlgprc;
 BLKSTR *myblkstr;
 
 	newframes[0] = -1;
-	dlgprc = (DLGPROC) MakeProcInstance (DIAPickGfxProc, hInstance);
-	i = DialogBoxParam (hInstance, (LPCSTR) "D_PICKER", hwnd, dlgprc, gpart);
+	i = DialogBoxParam (hInstance, (LPCSTR) "D_PICKER", hwnd, AsDlgProc(DIAPickGfxProc), gpart);
 	if (i!=-1) {
 		switch (gpart) {
 			case 0:
@@ -2095,19 +2083,16 @@ BLKSTR *myblkstr;
 				break;
 		}
 	}
-	FreeProcInstance((FARPROC) dlgprc);
 	return 0;
 }
 
 int DIAEditProperties (HWND hwnd, int btoedit)
 {
 int i;
-DLGPROC dlgprc;
 
 	editnum = btoedit;
-	dlgprc = (DLGPROC) MakeProcInstance (DIAPropEditProc, hInstance);
 	i = 1; while (i) {
-		i = DialogBox (hInstance, (LPCSTR) "D_PROPEDIT", hwnd, dlgprc);
+		i = DialogBox (hInstance, (LPCSTR) "D_PROPEDIT", hwnd, AsDlgProc(DIAPropEditProc));
 		if (i==1) if (editnum>0) editnum--;
 		if (i==2) if (editnum<(numblockstr-1)) editnum++;
 		if (i==3) DIAPickBlockGfx (hwnd, 0);
@@ -2115,41 +2100,34 @@ DLGPROC dlgprc;
 		if (i==5) DIAPickBlockGfx (hwnd, 2);
 		if (i==6) DIAPickBlockGfx (hwnd, 3);
 	}
-	FreeProcInstance((FARPROC) dlgprc);
 	return 0;
 }
 
 int DIAEditAnimProperties (HWND hwnd, int btoedit)
 {
 int i;
-DLGPROC dlgprc;
 
 	editnum = btoedit; editpoint = 0;
-	dlgprc = (DLGPROC) MakeProcInstance (DIAAnimEditProc, hInstance);
 	i = 1; while (i) {
-		i = DialogBox (hInstance, (LPCSTR) "D_ANIMEDIT", hwnd, dlgprc);
+		i = DialogBox (hInstance, (LPCSTR) "D_ANIMEDIT", hwnd, AsDlgProc(DIAAnimEditProc));
 		if (i==1) DIAPickBlockGfx (hwnd, 4);
 		if (i==2) DIAPickBlockGfx (hwnd, 5);
 	}
-	FreeProcInstance((FARPROC) dlgprc);
 	return 0;
 }
 
 int DIAResizeMap (HWND hwnd)
 {
 int i;
-DLGPROC dlgprc;
 
 	if (mappt==NULL) return -1;
-	dlgprc = (DLGPROC) MakeProcInstance (DIAResizeProc, hInstance);
-	i = DialogBox (hInstance, (LPCSTR) "D_RESIZE", hwnd, dlgprc);
+	i = DialogBox (hInstance, (LPCSTR) "D_RESIZE", hwnd, AsDlgProc(DIAResizeProc));
 	if (i>=0) {
 		if (newmapwidth<3 || newmapheight<3 || newmapwidth>10000 || newmapheight>10000)
 			MessageBox (hwnd, "The new map size was not valid, the map has not been affected", "Resize:", MB_OK|MB_ICONINFORMATION);
 		else { if (ResizeMap (newmapwidth, newmapheight, i))
 			MessageBox (hwnd, "There was a memory error, please exit immediately, do not save this map", "Resize:", MB_OK|MB_ICONEXCLAMATION); }
 	}
-	FreeProcInstance((FARPROC) dlgprc);
 	return 0;
 }
 
@@ -2372,7 +2350,6 @@ unsigned long int * darkenpt;
 int DIAExport (HWND hwnd, char * name)
 {
 int i, j, k, l, m, bprow;
-DLGPROC dlgprc;
 FILE * fpt;
 ANISTR * myanpt;
 BLKSTR * myblk;
@@ -2382,9 +2359,7 @@ unsigned char * palpt;
 	if (mappt==NULL) return -1;
 	strcpy (expname, name);
 //	MessageBox (hwnd, expname, "Debug", MB_OK);
-	dlgprc = (DLGPROC) MakeProcInstance (DIAExportProc, hInstance);
-	i = DialogBox (hInstance, (LPCSTR) "D_EXPORT", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	i = DialogBox (hInstance, (LPCSTR) "D_EXPORT", hwnd, AsDlgProc(DIAExportProc));
 	if (i==-1) return 0;
 	bprow = i&0xFF;
 	i>>=8;
@@ -2568,82 +2543,61 @@ unsigned char * palpt;
 
 void DIAEditInfo (HWND hwnd)
 {
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIAEditInfoProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_MAPINFO", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_MAPINFO", hwnd, AsDlgProc(DIAEditInfoProc));
 	return;
 }
 
 void DIALayerOnion (HWND hwnd)
 {
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIALayerOnionProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_OSKIN", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_OSKIN", hwnd, AsDlgProc(DIALayerOnionProc));
 	return;
 }
 
 void DIALayerSlide (HWND hwnd)
 {
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIALayerSlideProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_SLIDE", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_SLIDE", hwnd, AsDlgProc(DIALayerSlideProc));
 	return;
 }
 
 int DIAImportNumber (HWND hwnd)
 {
 int i;
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIAImportNumberProc, hInstance);
-	i = DialogBox (hInstance, (LPCSTR) "D_IMPNUM", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	i = DialogBox (hInstance, (LPCSTR) "D_IMPNUM", hwnd, AsDlgProc(DIAImportNumberProc));
 	return i;
 }
 
 void DIARangeEditBlocks (HWND hwnd)
 {
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIARangeEditBlocksProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_PROPGLOB", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_PROPGLOB", hwnd, AsDlgProc(DIARangeEditBlocksProc));
 	return;
 }
 
 void DIAGrabBrushBS (HWND hwnd)
 {
-DLGPROC dlgprc;
 
 	if (curbrsh<1 || curbrsh>8) {
 		MessageBox (hwnd, "Select brush number to grab to first", "Grab Brush from sequence",
 			MB_ICONINFORMATION|MB_OK);
 		return;
 	}
-	dlgprc = (DLGPROC) MakeProcInstance (DIAGrabBrushBSProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_GRABBS", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_GRABBS", hwnd, AsDlgProc(DIAGrabBrushBSProc));
 	return;
 }
 
 void DIAGetBrushName (HWND hwnd, char * bname)
 {
-DLGPROC dlgprc;
 
 	gbname = bname;
-	dlgprc = (DLGPROC) MakeProcInstance (DIABrushRenameProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_BRNAME", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_BRNAME", hwnd, AsDlgProc(DIABrushRenameProc));
 	return;
 }
 
-BOOL CALLBACK DIADividersProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIADividersProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 char textbuf[80];
 
@@ -2691,15 +2645,12 @@ char textbuf[80];
 
 void DIADividers (HWND hwnd)
 {
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIADividersProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_DIVIDER", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_DIVIDER", hwnd, AsDlgProc(DIADividersProc));
 	return;
 }
 
-BOOL CALLBACK DIALayerGotoProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIALayerGotoProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 char textbuf[80];
 int i;
@@ -2739,15 +2690,12 @@ int i;
 int DIALayerGoto (HWND hwnd)
 {
 int i;
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIALayerGotoProc, hInstance);
-	i = DialogBox (hInstance, (LPCSTR) "D_LAYERNUM", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	i = DialogBox (hInstance, (LPCSTR) "D_LAYERNUM", hwnd, AsDlgProc(DIALayerGotoProc));
 	return i;
 }
 
-BOOL CALLBACK DIALayerRenameProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIALayerRenameProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 const char * oldn;
 
@@ -2785,11 +2733,8 @@ const char * oldn;
 
 void DIALayerRename (HWND hwnd)
 {
-DLGPROC dlgprc;
 
-	dlgprc = (DLGPROC) MakeProcInstance (DIALayerRenameProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_LAYERNAME", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_LAYERNAME", hwnd, AsDlgProc(DIALayerRenameProc));
 	return;
 }
 
@@ -2800,7 +2745,7 @@ DLGPROC dlgprc;
 static int txf[24];
 static char txprefix[64];
 
-BOOL CALLBACK DIAExportTextProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAExportTextProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 int i;
 static const int ids[15] = {
@@ -2872,7 +2817,6 @@ BLKSTR * bp;
 
 int DIAExportText (HWND hwnd, char * name)
 {
-DLGPROC dlgprc;
 OPENFILENAME ofn;
 char szFilter[64], szFile[256], szFileTitle[256];
 char outname[300];
@@ -2888,9 +2832,7 @@ short int nlayers;
 
 	if (mappt==NULL) return -1;
 	memset (txf, 0, sizeof (txf));
-	dlgprc = (DLGPROC) MakeProcInstance (DIAExportTextProc, hInstance);
-	i = DialogBox (hInstance, (LPCSTR) "D_TXTEXP", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	i = DialogBox (hInstance, (LPCSTR) "D_TXTEXP", hwnd, AsDlgProc(DIAExportTextProc));
 	if (i!=1) return 0;
 
 	strcpy (outname, name);
@@ -3067,7 +3009,7 @@ extern short int numblockgfx, numblockstr;
 extern short int mapwidth, mapheight;
 extern char * blockstrpt;
 
-BOOL CALLBACK DIAResizeBlkProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAResizeBlkProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 char txt[32];
 int neww, newh, newd;
@@ -3154,15 +3096,12 @@ int neww, newh, newd;
 
 void DIAResizeBlk (HWND hwnd)
 {
-DLGPROC dlgprc;
 
 	if (mappt == NULL) {
 		MessageBox (hwnd, "Load or create a map first.", "Resize Block Dimensions", MB_OK|MB_ICONINFORMATION);
 		return;
 	}
-	dlgprc = (DLGPROC) MakeProcInstance (DIAResizeBlkProc, hInstance);
-	DialogBox (hInstance, (LPCSTR) "D_RESIZET", hwnd, dlgprc);
-	FreeProcInstance((FARPROC) dlgprc);
+	DialogBox (hInstance, (LPCSTR) "D_RESIZET", hwnd, AsDlgProc(DIAResizeBlkProc));
 	return;
 }
 
@@ -3288,7 +3227,7 @@ static const char * showuser_labels[] = {
 };
 #define SHOWUSER_COUNT 9
 
-BOOL CALLBACK DIAShowUserProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIAShowUserProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	int i;
 	extern int showuser;
@@ -3322,7 +3261,7 @@ BOOL CALLBACK DIAShowUserProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPa
 
 void DIAShowUser (HWND hwnd)
 {
-	DialogBox (hInstance, (LPCSTR) "D_SHOWUSER", hwnd, (DLGPROC)DIAShowUserProc);
+	DialogBox (hInstance, (LPCSTR) "D_SHOWUSER", hwnd, AsDlgProc(DIAShowUserProc));
 }
 
 /* ---- D_CUSTOMBTN: Custom Mouse Buttons ---- */
@@ -3335,7 +3274,7 @@ static const char * btn_actions[] = {
 
 extern int mb_l, mb_m, mb_r, mb_x1, mb_x2, mb_x3, mb_x4;
 
-BOOL CALLBACK DIACustomBtnProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIACustomBtnProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	int i, sel;
 	int ids[7] = { IDC_CUSTBTN0, IDC_CUSTBTN1, IDC_CUSTBTN2, IDC_CUSTBTN3,
@@ -3378,12 +3317,12 @@ BOOL CALLBACK DIACustomBtnProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lP
 
 void DIACustomBtn (HWND hwnd)
 {
-	DialogBox (hInstance, (LPCSTR) "D_CUSTOMBTN", hwnd, (DLGPROC)DIACustomBtnProc);
+	DialogBox (hInstance, (LPCSTR) "D_CUSTOMBTN", hwnd, AsDlgProc(DIACustomBtnProc));
 }
 
 /* ---- D_LYRADJ: Layer Adjust ---- */
 
-BOOL CALLBACK DIALayerAdjProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIALayerAdjProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	extern short int * mappt;
 	extern short int mapwidth, mapheight;
@@ -3426,7 +3365,7 @@ BOOL CALLBACK DIALayerAdjProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPa
 
 void DIALayerAdj (HWND hwnd)
 {
-	DialogBox (hInstance, (LPCSTR) "D_LYRADJ", hwnd, (DLGPROC)DIALayerAdjProc);
+	DialogBox (hInstance, (LPCSTR) "D_LYRADJ", hwnd, AsDlgProc(DIALayerAdjProc));
 }
 
 /* ---- D_REMOVE: Remove Unused/Duplicate ---- */
@@ -3437,7 +3376,7 @@ extern void DestroyUnusedGraphics (void);
 extern void RemoveDuplicateGraphics (void);
 extern void RemoveDuplicateBlocks (void);
 
-BOOL CALLBACK DIRemoveProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DIRemoveProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg) {
 	case WM_INITDIALOG:
@@ -3473,7 +3412,7 @@ BOOL CALLBACK DIRemoveProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam
 
 void DIRemove (HWND hwnd)
 {
-	DialogBox (hInstance, (LPCSTR) "D_REMOVE", hwnd, (DLGPROC)DIRemoveProc);
+	DialogBox (hInstance, (LPCSTR) "D_REMOVE", hwnd, AsDlgProc(DIRemoveProc));
 }
 
 

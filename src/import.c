@@ -4,18 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "mapwin.h"
-
-extern short int blockwidth, blockheight, blockdepth, numblockgfx, numblockstr;
-extern long int fgcolour;
-extern char * blockgfxpt, * blockstrpt;
-extern char * altgfxpt;
-/* import.c */
-#define  STRICT
-#include <windows.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <setjmp.h>
 #include "mapwin.h"
 
@@ -51,6 +39,9 @@ typedef void (*png_get_IHDR_fn)(void *, void *, png_uint_32_ *, png_uint_32_ *,
 typedef void (*png_get_PLTE_fn)(void *, void *, png_colorp_ *, int *);
 typedef png_bytepp_ (*png_get_rows_fn)(void *, void *);
 typedef void (*png_destroy_read_struct_fn)(void **, void **, void **);
+
+/* FARPROC vs typed fn: go through void * to silence -Wcast-function-type */
+#define IMP_GPA(type, hmod, name) ((type)(void *)GetProcAddress((hmod), (name)))
 
 /* libpng transform flags (png.h) */
 #define PNG_TR_STRIP_16 0x0001
@@ -104,16 +95,16 @@ RGBQUAD * rq;
 		MessageBox (NULL, "PNG import needs LIBPNG12.DLL (or LIBPNG13.DLL) and it could not be loaded.\nConvert the image to BMP or PCX first.", "Map Editor: Import", MB_OK|MB_ICONINFORMATION);
 		return -1;
 	}
-	p_sig_cmp = (png_sig_cmp_fn) GetProcAddress (hpng, "png_sig_cmp");
-	p_create_read = (png_create_read_struct_fn) GetProcAddress (hpng, "png_create_read_struct");
-	p_create_info = (png_create_info_struct_fn) GetProcAddress (hpng, "png_create_info_struct");
-	p_init_io = (png_init_io_fn) GetProcAddress (hpng, "png_init_io");
-	p_set_sig = (png_set_sig_bytes_fn) GetProcAddress (hpng, "png_set_sig_bytes");
-	p_read_png = (png_read_png_fn) GetProcAddress (hpng, "png_read_png");
-	p_get_IHDR = (png_get_IHDR_fn) GetProcAddress (hpng, "png_get_IHDR");
-	p_get_PLTE = (png_get_PLTE_fn) GetProcAddress (hpng, "png_get_PLTE");
-	p_get_rows = (png_get_rows_fn) GetProcAddress (hpng, "png_get_rows");
-	p_destroy = (png_destroy_read_struct_fn) GetProcAddress (hpng, "png_destroy_read_struct");
+	p_sig_cmp = IMP_GPA (png_sig_cmp_fn, hpng, "png_sig_cmp");
+	p_create_read = IMP_GPA (png_create_read_struct_fn, hpng, "png_create_read_struct");
+	p_create_info = IMP_GPA (png_create_info_struct_fn, hpng, "png_create_info_struct");
+	p_init_io = IMP_GPA (png_init_io_fn, hpng, "png_init_io");
+	p_set_sig = IMP_GPA (png_set_sig_bytes_fn, hpng, "png_set_sig_bytes");
+	p_read_png = IMP_GPA (png_read_png_fn, hpng, "png_read_png");
+	p_get_IHDR = IMP_GPA (png_get_IHDR_fn, hpng, "png_get_IHDR");
+	p_get_PLTE = IMP_GPA (png_get_PLTE_fn, hpng, "png_get_PLTE");
+	p_get_rows = IMP_GPA (png_get_rows_fn, hpng, "png_get_rows");
+	p_destroy = IMP_GPA (png_destroy_read_struct_fn, hpng, "png_destroy_read_struct");
 	if (!p_sig_cmp || !p_create_read || !p_create_info || !p_init_io || !p_set_sig ||
 		!p_read_png || !p_get_IHDR || !p_get_PLTE || !p_get_rows || !p_destroy) {
 		fclose (fpt); FreeLibrary (hpng); return -1;
@@ -227,7 +218,7 @@ unsigned char * outb;
 
 	hme = LoadLibrary ("MAPEXT.DLL");
 	if (hme==NULL) return -1;
-	pdec = (MPYDecodeBMP_fn) GetProcAddress (hme, "MPYDecodeBMP");
+	pdec = IMP_GPA (MPYDecodeBMP_fn, hme, "MPYDecodeBMP");
 	if (pdec==NULL) { FreeLibrary (hme); return -1; }
 	outb = malloc (iw*ih*4+0x2710);
 	if (outb==NULL) { FreeLibrary (hme); return -1; }

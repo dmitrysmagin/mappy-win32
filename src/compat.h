@@ -16,6 +16,11 @@
 #define FreeProcInstance(p) ((void)0)
 #endif
 
+/* MinGW typedefs DLGPROC as FARPROC (INT_PTR (*)(void)). Cast through void *
+ * so a real INT_PTR CALLBACK proc can be passed to DialogBox without
+ * -Wincompatible-pointer-types / -Wcast-function-type. */
+#define AsDlgProc(fn) ((DLGPROC)(void *)(fn))
+
 /* Pointer alignment check without truncating to 32-bit int on Win64 */
 static inline int mappy_ptr_is_odd(const void *p) {
     return (((uintptr_t)p) & 1) ? 1 : 0;
