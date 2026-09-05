@@ -15,7 +15,7 @@ HINSTANCE hInstance;
 HWND hwnd;
 char defpname[256];
 static HMENU hMenu = NULL;
-static char szAppname[] = "Mappy - Win32";
+static char szAppname[] = "MapWin32";
 static char argvline[256];
 static char argluascript[256];
 static int curlayer = 0;
@@ -220,10 +220,18 @@ void Rejig (void)
 	UpdateToggleMenus ();
 	MEUpdateScrollVis ();
 	BEUpdateScrollVis ();
-	if (tbarname[0]) {
-		SetWindowText(hwnd, tbarname);
-	} else {
-		SetWindowText(hwnd, "Mappy - Win32");
+	{
+		char title[MAX_PATH + 32];
+		char full[MAX_PATH];
+		const char *path = mapfilename;
+		if (mapfilename[0]) {
+			if (GetFullPathNameA (mapfilename, MAX_PATH, full, NULL))
+				path = full;
+			sprintf (title, "%s - MapWin32", path);
+		} else {
+			strcpy (title, "MapWin32");
+		}
+		SetWindowText (hwnd, title);
 	}
 	InvalidateAll ();
 }
