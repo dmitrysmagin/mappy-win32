@@ -93,6 +93,17 @@ int F14_DecodeEPHD(const unsigned char *chunk, int bodysize, int is_lsb)
 int F14_HasEPHD(void) { return ephd.present; }
 int F14_EphdSize(void) { return ephd.present ? ephd.bodysize : 0; }
 
+void F14_EnsureEPHD(void)
+{
+	if (ephd.present) {
+		if (ephd.bodysize < 40) ephd.bodysize = 40;
+		return;
+	}
+	memset(&ephd, 0, sizeof(ephd));
+	ephd.present = 1;
+	ephd.bodysize = 40;
+}
+
 int F14_EphdGet(int field)
 {
 	if (!ephd.present || field < 0 || field >= F14_EPHD_NFIELDS) return 0;

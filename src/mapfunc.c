@@ -172,6 +172,16 @@ GENHEAD genheader; /* kept for compat; NOT written directly (see fmp.h) */
 FmpUnknownChunk *chunklist = NULL;
 int isopillars = 0, isoreveal = 0, flippedtiles = 0;
 int wnesmode = 0, rotatedtiles = 0;
+int resize_left = 0, resize_top = 0;	/* 1.4.13 New Left / New Top */
+
+int MapGetCurLayer (void);	/* mapwin.c */
+void MapSetCurLayer (int ly);
+void ApplyEditorPrefs (void);
+int SaveProjectEx (int skipgfx);
+extern int onion, oniondark, onionlower;
+static int map_keepgfx = 0;	/* FMA reload: keep current BGFX */
+extern int showuser, divideron, dividergapx, dividergapy;
+extern long dividercol;
 
 short int * mappt = NULL;
 char * blockgfxpt = NULL;
@@ -651,6 +661,15 @@ int DecodeMPHD (unsigned char * mdatpt)
 	else clickmask = 0;
 	if (MapGetchksz (mdatpt-4) > 38) isopillars = (short) MapGetshort (mdatpt+38);
 	else isopillars = 0;
+	/* 1.4.3 tilemodes packed in reserved1 (offset +8) */
+	if (MapGetchksz (mdatpt-4) > 10) {
+		int tm = MapGetshort (mdatpt+8);
+		if (tm) {
+			flippedtiles = (tm & 1) ? 1 : 0;
+			rotatedtiles = (tm & 2) ? 1 : 0;
+			wnesmode = (tm & 4) ? 1 : 0;
+		}
+	}
 
 	logit ("mapwidth=%d\nmapheight=%d\nblockwidth=%d\nblockheight=%d\nblockdepth=%d\nblockstrsize=%d\nnumblockstr=%d\nnumblockgfx=%d\n",
 		mapwidth, mapheight, blockwidth, blockheight, blockdepth, blockstrsize, numblockstr, numblockgfx);
@@ -1164,13 +1183,38 @@ void FmpChunkSetVal (int idx, int off, int val)
 	body[off] = (unsigned char) val;
 }
 
+int MapIsFmaName (const char *name)
+{
+int n;
+	if (name==NULL) return 0;
+	n = (int) strlen (name);
+	if (n < 4) return 0;
+	name += n - 4;
+	return (!strcmp (name, ".fma") || !strcmp (name, ".FMA") || !strcmp (name, ".Fma"));
+}
+
+int FindFreeBrush (void)
+{
+int i;
+	for (i=0;i<MAXBRSH;i++)
+		if (brshpt[i]==NULL) return i+1;
+	return 0;
+}
+
 int MapDecode (FILE * mfpt, int mpfilesize)
 {
 int chkdn;
 unsigned char * fmappospt;
 char mphdr[8];
+char * held_gfx = NULL;
+int held_ngfx = 0;
 
 	logit ("MapDecode\n");
+	if (map_keepgfx && blockgfxpt!=NULL) {
+		held_gfx = blockgfxpt;
+		held_ngfx = numblockgfx;
+		blockgfxpt = NULL;
+	}
 	FreeAll ();
 	logit ("After FreeAll\n");
 	mpfilesize -= 12;
@@ -1178,6 +1222,7 @@ char mphdr[8];
 
 		if (fread (mphdr, 1, 8, mfpt) != 8) {
 			merror = ER_OUTOFMEM;
+			if (held_gfx) free (held_gfx);
 			FreeAll ();
 			return -1;
 		}
@@ -1185,6 +1230,7 @@ char mphdr[8];
 		memcpy (fmappospt, mphdr, 8);
 		if (fread (fmappospt+8, 1, MapGetchksz(mphdr+4), mfpt) != MapGetchksz(mphdr+4)) {
 			merror = ER_MAPLOADERROR;
+			if (held_gfx) free (held_gfx);
 			FreeAll ();
 			return -1;
 		}
@@ -1220,9 +1266,22 @@ char mphdr[8];
 		free (fmappospt);
 		logit ("Left = %d bytes\n", mpfilesize);
 
-		if (merror != ER_NONE) { FreeAll (); return -1; }
+		if (merror != ER_NONE) {
+			if (held_gfx) { free (held_gfx); held_gfx = NULL; }
+			FreeAll ();
+			return -1;
+		}
+	}
+	if (held_gfx) {
+		if (blockgfxpt==NULL) {
+			blockgfxpt = held_gfx;
+			if (numblockgfx<=0) numblockgfx = (short int) held_ngfx;
+		} else {
+			free (held_gfx);
+		}
 	}
 	SetTranspColour ();
+	ApplyEditorPrefs ();
 	return 0;
 }
 
@@ -1266,7 +1325,11 @@ int mapfilesize;
 
 	if (merror != ER_NONE) { fclose (fpt); return -1; }
 
+	map_keepgfx = 0;
+	if (MapIsFmaName (mapfilename) && blockgfxpt!=NULL)
+		map_keepgfx = 1;
 	mretval = MapDecode (fpt, mapfilesize);
+	map_keepgfx = 0;
 	fclose (fpt);
 //	if (dbgfpt != NULL) { logit ("MapLoad done\n"); fclose (dbgfpt); dbgfpt = NULL; }
 	return mretval;
@@ -1432,7 +1495,48 @@ int rlepos, runlen;
 	return 0;
 }
 
+static void CaptureEditorPrefs (void)
+{
+	F14_EnsureEPHD ();
+	F14_EphdSet (F14_EPHD_SHOWUSER, showuser);
+	F14_EphdSet (F14_EPHD_ONION, onion);
+	F14_EphdSet (F14_EPHD_ONIONDARK, oniondark);
+	F14_EphdSet (F14_EPHD_ONIONLOW, onionlower);
+	F14_EphdSet (F14_EPHD_CURLAYER, MapGetCurLayer ());
+	F14_EphdSet (F14_EPHD_DIVON, divideron);
+	F14_EphdSet (F14_EPHD_DIVGAPX, dividergapx);
+	F14_EphdSet (F14_EPHD_DIVGAPY, dividergapy);
+	F14_EphdSet (F14_EPHD_DIVCOL, (int) dividercol);
+}
+
+void ApplyEditorPrefs (void)
+{
+	int v;
+	if (!F14_HasEPHD ()) return;
+	v = F14_EphdGet (F14_EPHD_SHOWUSER);
+	if (v >= 0 && v <= 16) showuser = v;
+	onion = F14_EphdGet (F14_EPHD_ONION);
+	if (onion < 0) onion = 0;
+	if (onion > ONION_ALL) onion = ONION_ALL;
+	oniondark = F14_EphdGet (F14_EPHD_ONIONDARK) ? 1 : 0;
+	onionlower = F14_EphdGet (F14_EPHD_ONIONLOW) ? 1 : 0;
+	v = F14_EphdGet (F14_EPHD_CURLAYER);
+	if (v >= 0 && v < MAXMAPLAYERS && GetLayerpt (v) != NULL)
+		MapSetCurLayer (v);
+	divideron = F14_EphdGet (F14_EPHD_DIVON) ? 1 : 0;
+	v = F14_EphdGet (F14_EPHD_DIVGAPX);
+	if (v >= 8 && v <= 4096) dividergapx = v;
+	v = F14_EphdGet (F14_EPHD_DIVGAPY);
+	if (v >= 8 && v <= 4096) dividergapy = v;
+	dividercol = (long) F14_EphdGet (F14_EPHD_DIVCOL);
+}
+
 int SaveProject (void)
+{
+	return SaveProjectEx (0);
+}
+
+int SaveProjectEx (int skipgfx)
 {
 /* attempts to save project file name and path in mapfilename */
 char backupname[128];
@@ -1459,6 +1563,8 @@ int * myanseqpt;
 	if (mapfilename[0]==0) merror = ER_MAPSAVEERROR;
 
 	if (merror) return 0;
+
+	CaptureEditorPrefs ();
 
 	strcpy (backupname, mapfilename);
 	j = 0; for (i=0;i<(strlen(backupname));i++) { if (backupname[i]=='.') j = i; }
@@ -1517,7 +1623,7 @@ int * myanseqpt;
 	mphdinfo.maptype=maptype;
 	mphdinfo.mapwidth=mapwidth;
 	mphdinfo.mapheight=mapheight;
-	mphdinfo.reserved1=0;
+	mphdinfo.reserved1=(short int)((flippedtiles?1:0)|(rotatedtiles?2:0)|(wnesmode?4:0));
 	mphdinfo.reserved2=0;
 	mphdinfo.blockwidth=blockwidth;
 	mphdinfo.blockheight=blockheight;
@@ -1680,10 +1786,10 @@ int * myanseqpt;
 
 	/* 1.4 chunks, 1.4 file order (EDHD, EPHD, [TSTR,] LSTR, CMAP, ...).
 	 * Each is presence-guarded, so pre-1.4 maps save exactly as before. */
-	if (F14_HasEPHD()) {
-		if (F14_SaveEPHD (filept, mapislsb))
-		{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
-	}
+	/* Always write EPHD so showuser/onion/curlayer/dividers round-trip. */
+	F14_EnsureEPHD ();
+	if (F14_SaveEPHD (filept, mapislsb))
+	{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 	if (F14_HasTSTR()) {
 		if (F14_SaveTSTR (filept))
 		{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
@@ -1862,7 +1968,7 @@ int * myanseqpt;
 		}
 	}
 
-	if (altgfxpt != NULL) {
+	if (altgfxpt != NULL && !skipgfx) {
 		genheader.id1='A'; genheader.id2='G'; genheader.id3='F'; genheader.id4='X';
 		if ((numblockgfx*blockheight*blockwidth)&1)
 			genheader.headsize=byteswapl((unsigned long)((numblockgfx*blockheight*blockwidth)+1));
@@ -1892,6 +1998,7 @@ int * myanseqpt;
 			{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; }
 	}
 
+	if (!skipgfx) {
 	genheader.id1='B'; genheader.id2='G'; genheader.id3='F'; genheader.id4='X';
 	if (sdepth==15) genheader.headsize=byteswapl((unsigned long)(numblockgfx*blockheight*blockwidth*2)); else
 	{
@@ -1911,6 +2018,7 @@ int * myanseqpt;
 	if ((numblockgfx*blockheight*blockwidth*(blockdepth/8))&1)
 	{ if (fwrite (blockgfxpt, 1, 1, filept)!=1)
 	{ merror = ER_MAPSAVEERROR; fclose (filept); return -1; } }
+	}
 
 	for (i=0;i<MAXMAPLAYERS;i++) { if (mapmappt[i]!=NULL) {
 	if (i == 0) {
@@ -2225,6 +2333,22 @@ int i, j, istrt, iend, iadd, jstrt, jend, jadd;
 	}
 }
 
+/* 1.4.19: 32-bit overlays use source alpha (byte 0), RGB in 1..3. */
+static void Blend32Over (unsigned char * dest, const unsigned char * src)
+{
+unsigned a;
+	if (src[1]==transred && src[2]==transgreen && src[3]==transblue) return;
+	a = src[0];
+	if (a==0) return;
+	if (a>=255) {
+		dest[0] = src[3]; dest[1] = src[2]; dest[2] = src[1];
+		return;
+	}
+	dest[0] = (unsigned char) ((src[3]*(int)a + dest[0]*(255-(int)a))/255);
+	dest[1] = (unsigned char) ((src[2]*(int)a + dest[1]*(255-(int)a))/255);
+	dest[2] = (unsigned char) ((src[1]*(int)a + dest[2]*(255-(int)a))/255);
+}
+
 void OverBlock (unsigned char * blkgfxpt, unsigned char * destpt, int xoff, int yoff, int linesize, int isopart)
 {
 int i, j, istrt, iend, iadd, jstrt, jend, jadd;
@@ -2309,10 +2433,7 @@ int i, j, istrt, iend, iadd, jstrt, jend, jadd;
 		break;
 	case 32:
 		for (i=istrt;i!=iend;i+=iadd) {	for (j=jstrt;j!=jend;j+=jadd) {
-		if (!(*(blkgfxpt+1)==transred && *(blkgfxpt+2)==transgreen && *(blkgfxpt+3)==transblue)) {
-		destpt[(i*linesize)+(j*3)] = blkgfxpt[3];
-		destpt[(i*linesize)+(j*3+1)] = blkgfxpt[2];
-		destpt[(i*linesize)+(j*3+2)] = blkgfxpt[1]; }
+		Blend32Over (destpt+(i*linesize)+(j*3), blkgfxpt);
 		blkgfxpt+=4; }
 		if (isopart && !flippedtiles) blkgfxpt += blockwidth*2;
 		}
@@ -3741,6 +3862,57 @@ BLKSTR * mystrpt;
 	}
 }
 
+void RemoveMarkerGraphics (void)
+{
+BLKSTR * mystrpt;
+int i;
+
+	if (blockstrpt==NULL || blockgfxpt==NULL) return;
+	mystrpt = (BLKSTR *) blockstrpt;
+	for (i=0;i<numblockstr;i++) {
+		mystrpt->fgoff3 = 0;
+		mystrpt++;
+	}
+	DestroyUnusedGraphics ();
+}
+
+void AutoSetBGTransparency (void)
+{
+BLKSTR * myblkstrpt;
+unsigned char * myautgfxpt;
+int i, j;
+
+	if (blockgfxpt==NULL || blockstrpt==NULL) return;
+	myblkstrpt = (BLKSTR *) blockstrpt;
+	for (i=0;i<numblockstr;i++) {
+		if (i == 0) myblkstrpt->trigger = 1;
+		else myblkstrpt->trigger = 0;
+		myautgfxpt = (unsigned char *) (blockgfxpt+myblkstrpt->bgoff);
+		for (j=0;j<(blockwidth*blockheight);j++) {
+			switch (blockdepth) {
+				case 8:
+					if (*myautgfxpt == trans8bit) myblkstrpt->trigger = 1;
+					myautgfxpt++;
+					break;
+				case 15:
+				case 16:
+					if ((*(myautgfxpt)==trans16hi && *(myautgfxpt+1)==trans16low)) myblkstrpt->trigger = 1;
+					myautgfxpt += 2;
+					break;
+				case 24:
+					if ((*myautgfxpt==transred && *(myautgfxpt+1)==transgreen && *(myautgfxpt+2)==transblue)) myblkstrpt->trigger = 1;
+					myautgfxpt += 3;
+					break;
+				case 32:
+					if ((*(myautgfxpt+1)==transred && *(myautgfxpt+2)==transgreen && *(myautgfxpt+3)==transblue)) myblkstrpt->trigger = 1;
+					myautgfxpt += 4;
+					break;
+			}
+		}
+		myblkstrpt++;
+	}
+}
+
 int ResizeMap (int neww, int newh, int mapc)
 {
 int i, j, k;
@@ -3753,6 +3925,12 @@ short int * temppt, * spt, * dpt;
 		memset (temppt, 0, neww*newh*2);
 
 		sxoff = 0; syoff = 0; dxoff = 0; dyoff = 0;
+		if (mapc==0) {
+			sxoff = (short int) resize_left;
+			syoff = (short int) resize_top;
+			if (sxoff<0) { dxoff = (short int) (-sxoff); sxoff = 0; }
+			if (syoff<0) { dyoff = (short int) (-syoff); syoff = 0; }
+		} else {
 		if ((mapc==1) || (mapc==4) || (mapc==7)) {
 		sxoff = 0; dxoff = 0; }
 		if ((mapc==3) || (mapc==6) || (mapc==9)) {
@@ -3768,20 +3946,30 @@ short int * temppt, * spt, * dpt;
 		if ((mapc==7) || (mapc==8) || (mapc==9)) {
 		dyoff = newh-mapheight; if (dyoff<0) dyoff = 0;
 		syoff = mapheight-newh; if (syoff<0) syoff = 0; }
+		}
 
-		if (newh>mapheight) j = mapheight; else j = newh; while (j)
+		{
+		int copyh, copyw;
+		copyh = newh - dyoff;
+		if (copyh > (mapheight - syoff)) copyh = mapheight - syoff;
+		if (copyh < 0) copyh = 0;
+		copyw = neww - dxoff;
+		if (copyw > (mapwidth - sxoff)) copyw = mapwidth - sxoff;
+		if (copyw < 0) copyw = 0;
+		j = copyh; while (j)
 		{
 			spt = mapmappt[k]; dpt = temppt;
 			spt += sxoff; spt += syoff*mapwidth;
 			dpt += dxoff; dpt += dyoff*neww;
 			syoff++; dyoff++;
-			if (neww>mapwidth) i = mapwidth; else i = neww;
+			i = copyw;
 			while (i)
 			{
 				*dpt = *spt; spt++; dpt++;
 				i--;
 			}
 			j--;
+		}
 		}
 		free (mapmappt[k]); mapmappt[k] = temppt; } }
 

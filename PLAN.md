@@ -12,21 +12,21 @@ Verified against the 1.4.23 binary (UTF-16 menus, exported symbols, docs). Sever
 
 Batch 1: 100 layers in memory, zoom 0.25/0.5, onion All + lower layers, `tbarinfo` 0–6, block labels, `wnesmode`, rotated-tile blit, wheel-to-window, PNG/MAPEXT import, text export, useful functions (halve / 16→8 / big picture), brush handles, key/mouse maps, drop routing, resize tiles, remove duplicate gfx/blocks.
 
-**Stage 1b CANCELLED was wrong — these exist in 1.4.23 and are still missing here:**
+**Stage 1b DONE** (menus were stubbed; handlers + behaviour now match 1.4.23):
 
 | Original (menu / symbol) | Notes |
 |---|---|
-| **Save FMP without graphics (.FMA)** | MapTools → Useful functions. Menu string in EXE. |
-| **Remove Marker graphics…** | Layer menu. `_RemoveMarkerGraphics` in `mapwin.map`. |
-| **Layer Bank** (0–9 … 90–99) | Layer menu banks. We only list 0–7 + Go-to-layer. |
-| **Flipped tiles mode** menu toggle | INI-only here; original has MapTools item. |
-| **Background Layers darkened** | Layer menu item (1.4.7); we only have the onion checkbox. |
-| **Auto set BG transparency** | Useful functions item; we only have the Range Edit button. |
-| **`luafilemenu=1`** | Replaces File items with `luascr/luafile*.lua`. INI key unused. |
+| **Save FMP without graphics (.FMA)** | Useful functions. `SaveProjectEx(1)` omits BGFX/AGFX. Open FMA after an FMP to keep graphics. |
+| **Remove Marker graphics…** | Layer menu. Clears FG3 then `DestroyUnusedGraphics`. |
+| **Layer Bank** (0–9 … 90–99) | Layer menu shows the current bank of 10 layers. |
+| **Flipped tiles mode** | MapTools toggle (also INI / MPHD reserved1). |
+| **Background Layers darkened** | Layer menu toggle (`oniondark`). |
+| **Auto set BG transparency** | Useful functions + Range Edit button. |
+| **`luafilemenu=1`** | Stage 3: File items run `luascr/luafile*.lua` when present. |
 
 `Adjust Values` **is** implemented (`DIALayerAdj`). Multi-layer `.MAP` import still replaces the current layer only (`MapCustomLoad`).
 
-Other Stage 1 gaps vs binary: NLYR vs our `LY10`–`LY99` (not 1.4.23-compatible); EPHD not applied on load (showuser/onion/curlayer/dividers); tilemodes not stored in FMP; 32-bit blit is colourkey not alphablend (1.4.19); Resize Map missing New Left/New Top; Help → MapWin32 Pro / Edit MAPWIN.INI; Grab New Brush + Handle submenu; Custom menu (we inject Scripts).
+Other Stage 1 gaps closed here: EPHD applied on load (`ApplyEditorPrefs`); tilemodes already in MPHD reserved1; Resize Map New Left/New Top; Help → MapWin32 Pro / Edit MAPWIN.INI; Grab New Brush + Handle submenu; 32-bit FG/onion alphablend (1.4.19). Still open: NLYR vs our `LY10`–`LY99` (no verified sample; unknown-chunk round-trip).
 
 ## Stage 2 — Pro editors PARTIAL
 

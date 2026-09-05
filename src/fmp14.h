@@ -65,17 +65,27 @@ int F14_SaveOBFN(FILE *f);
 int F14_EphdGet(int field);          /* 0..15, see F14_EPHD_* below */
 void F14_EphdSet(int field, int v);
 int F14_EphdSize(void);              /* stored body size (32 or 40) */
+void F14_EnsureEPHD(void);           /* create 40-byte EPHD if missing */
 
 /* EPHD field ids (offsets below are body-relative byte offsets) */
-#define F14_EPHD_S0  0   /* +0  short */
-#define F14_EPHD_S1  1   /* +2  short */
-#define F14_EPHD_S2  2   /* +4  short */
-#define F14_EPHD_S3  3   /* +6  short */
-#define F14_EPHD_S4  4   /* +8  short */
-#define F14_EPHD_S5  5   /* +10 short */
-#define F14_EPHD_S6  6   /* +12 short */
-#define F14_EPHD_L0  7   /* +16 long  */
-#define F14_EPHD_S7  8   /* +20 short (present if size > 0x1F) */
+#define F14_EPHD_S0  0   /* +0  short  showuser */
+#define F14_EPHD_S1  1   /* +2  short  onion */
+#define F14_EPHD_S2  2   /* +4  short  oniondark */
+#define F14_EPHD_S3  3   /* +6  short  onionlower */
+#define F14_EPHD_S4  4   /* +8  short  curlayer */
+#define F14_EPHD_S5  5   /* +10 short  divideron */
+#define F14_EPHD_S6  6   /* +12 short  dividergapx */
+#define F14_EPHD_L0  7   /* +16 long   dividercol */
+#define F14_EPHD_SHOWUSER  F14_EPHD_S0
+#define F14_EPHD_ONION     F14_EPHD_S1
+#define F14_EPHD_ONIONDARK F14_EPHD_S2
+#define F14_EPHD_ONIONLOW  F14_EPHD_S3
+#define F14_EPHD_CURLAYER  F14_EPHD_S4
+#define F14_EPHD_DIVON     F14_EPHD_S5
+#define F14_EPHD_DIVGAPX   F14_EPHD_S6
+#define F14_EPHD_DIVCOL    F14_EPHD_L0
+#define F14_EPHD_S7  8   /* +20 short dividergapy (present if size > 0x1F) */
+#define F14_EPHD_DIVGAPY   F14_EPHD_S7
 #define F14_EPHD_S8  9   /* +22 short (present if size > 0x1F) */
 #define F14_EPHD_L1  10  /* +24 long  (present if size > 0x1F) */
 #define F14_EPHD_S9  11  /* +28 short (present if size > 0x1F) */

@@ -19,6 +19,7 @@ static char szAppname[] = "Mappy - Win32";
 static char argvline[256];
 static char argluascript[256];
 static int curlayer = 0;
+static int layerbank = 0;	/* Layer menu bank 0..9 (layers 0-9 .. 90-99) */
 
 extern unsigned char transred, transgreen, transblue, trans8bit;
 extern char * blockstrpt, *blockgfxpt;
@@ -131,70 +132,77 @@ int i;
 	}
 }
 
-void RejigLayerMenu (int lyernum)
+static void RefreshLayerBankMenu (void)
 {
-int li;
+int li, slot, id;
 char mtxt[80];
 const char * lname;
 
+	if (hMenu==NULL) return;
+	if (layerbank<0) layerbank = 0;
+	if (layerbank>9) layerbank = 9;
+	for (slot=0;slot<10;slot++) {
+		id = CM_LAYERSEL+slot;
+		li = layerbank*10+slot;
+		CheckMenuItem (hMenu, id, MF_UNCHECKED);
+		if (GetLayerpt (li)==NULL)
+			EnableMenuItem (hMenu, id, MF_BYCOMMAND|MF_GRAYED);
+		else
+			EnableMenuItem (hMenu, id, MF_BYCOMMAND|MF_ENABLED);
+		lname = F14_LayerName (li);
+		if (lname!=NULL && lname[0])
+			sprintf (mtxt, "Layer %d (%s)", li, lname);
+		else
+			sprintf (mtxt, "Layer %d", li);
+		ModifyMenu (hMenu, id, MF_BYCOMMAND|MF_STRING, id, mtxt);
+		if (li==curlayer)
+			CheckMenuItem (hMenu, id, MF_CHECKED);
+	}
+	for (slot=0;slot<10;slot++)
+		CheckMenuItem (hMenu, CM_LAYERBANK0+slot, (slot==layerbank) ? MF_CHECKED : MF_UNCHECKED);
+}
+
+static void UpdateToggleMenus (void)
+{
+	if (hMenu==NULL) return;
+	CheckMenuItem (hMenu, CM_TOOLFLIPPED, flippedtiles ? MF_CHECKED : MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_LAYERDARK, oniondark ? MF_CHECKED : MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_TOOLROTATED, rotatedtiles ? MF_CHECKED : MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_TOOLWNES, wnesmode ? MF_CHECKED : MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_TOOLPILLARS, isopillars ? MF_CHECKED : MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_TOOLREVEAL, isoreveal ? MF_CHECKED : MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_BRUSHHANDLETL, (brushhandle==0) ? MF_CHECKED : MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_BRUSHHANDLETR, (brushhandle==1) ? MF_CHECKED : MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_BRUSHHANDLEBL, (brushhandle==2) ? MF_CHECKED : MF_UNCHECKED);
+	CheckMenuItem (hMenu, CM_BRUSHHANDLEBR, (brushhandle==3) ? MF_CHECKED : MF_UNCHECKED);
+}
+
+void RejigLayerMenu (int lyernum)
+{
 	if (mappt==NULL) return;
 	if (ChangeLayer (lyernum)<0) {
 		MessageBox (hwnd, "Can't change to this layer, doesn't exist", "Map Editor: Layers", MB_OK|MB_ICONEXCLAMATION);
 		curlayer = 0;
+		layerbank = 0;
+		RefreshLayerBankMenu ();
 		InvalidateAll();
 		return;
 	}
-	CheckMenuItem (hMenu, CM_LAYER0, MF_UNCHECKED);
-	CheckMenuItem (hMenu, CM_LAYER1, MF_UNCHECKED);
-	CheckMenuItem (hMenu, CM_LAYER2, MF_UNCHECKED);
-	CheckMenuItem (hMenu, CM_LAYER3, MF_UNCHECKED);
-	CheckMenuItem (hMenu, CM_LAYER4, MF_UNCHECKED);
-	CheckMenuItem (hMenu, CM_LAYER5, MF_UNCHECKED);
-	CheckMenuItem (hMenu, CM_LAYER6, MF_UNCHECKED);
-	CheckMenuItem (hMenu, CM_LAYER7, MF_UNCHECKED);
-
-	/* grey layers that don't exist; annotate 0..7 with LSTR names */
-	for (li=0;li<8;li++) {
-		if (GetLayerpt (li)==NULL)
-			EnableMenuItem (hMenu, CM_LAYER0+li, MF_BYCOMMAND|MF_GRAYED);
-		else
-			EnableMenuItem (hMenu, CM_LAYER0+li, MF_BYCOMMAND|MF_ENABLED);
-		lname = F14_LayerName (li);
-		if (lname!=NULL && lname[0]) {
-			sprintf (mtxt, "Layer %d (%s)", li, lname);
-			ModifyMenu (hMenu, CM_LAYER0+li, MF_BYCOMMAND|MF_STRING, CM_LAYER0+li, mtxt);
-		}
-	}
-
-	switch (lyernum)
-	{
-		case 0:
-			CheckMenuItem (hMenu, CM_LAYER0, MF_CHECKED);
-			break;
-		case 1:
-			CheckMenuItem (hMenu, CM_LAYER1, MF_CHECKED);
-			break;
-		case 2:
-			CheckMenuItem (hMenu, CM_LAYER2, MF_CHECKED);
-			break;
-		case 3:
-			CheckMenuItem (hMenu, CM_LAYER3, MF_CHECKED);
-			break;
-		case 4:
-			CheckMenuItem (hMenu, CM_LAYER4, MF_CHECKED);
-			break;
-		case 5:
-			CheckMenuItem (hMenu, CM_LAYER5, MF_CHECKED);
-			break;
-		case 6:
-			CheckMenuItem (hMenu, CM_LAYER6, MF_CHECKED);
-			break;
-		case 7:
-			CheckMenuItem (hMenu, CM_LAYER7, MF_CHECKED);
-			break;
-	}
+	curlayer = lyernum;
+	layerbank = lyernum / 10;
+	RefreshLayerBankMenu ();
 	MEDestroyUndoBuffs();
 	InvalidateAll ();
+}
+
+int MapGetCurLayer (void)
+{
+	return curlayer;
+}
+
+void MapSetCurLayer (int ly)
+{
+	curlayer = ly;
 }
 
 void Rejig (void)
@@ -205,6 +213,7 @@ void Rejig (void)
 		RejigBrshMenu (curbrsh);
 		RejigLayerMenu (curlayer);
 	}
+	UpdateToggleMenus ();
 	MEUpdateScrollVis ();
 	BEUpdateScrollVis ();
 	if (tbarname[0]) {
@@ -263,17 +272,31 @@ FILE * marfpt;
 			if (objshow) CheckMenuItem (hMenu, CM_OBJSHOW, MF_CHECKED);
 			else CheckMenuItem (hMenu, CM_OBJSHOW, MF_UNCHECKED);
 			CheckMenuItem (hMenu, CM_OBJPLACE, MF_UNCHECKED);
+			UpdateToggleMenus ();
 		}
 		SendMessage (hwnd, WM_COMMAND, 99, 0L);
 		break;
 	case WM_COMMAND:
 		if (luafilemenu && LuaFileMenuRun (LOWORD(wParam)))
 			break;
-		switch (LOWORD(wParam)) {
+		{
+		int cmd = LOWORD(wParam);
+		if (cmd >= CM_LAYERSEL && cmd < CM_LAYERSEL+10) {
+			if (mappt==NULL) break;
+			curlayer = layerbank*10 + (cmd - CM_LAYERSEL);
+			RejigLayerMenu (curlayer);
+			break;
+		}
+		if (cmd >= CM_LAYERBANK0 && cmd < CM_LAYERBANK0+10) {
+			layerbank = cmd - CM_LAYERBANK0;
+			RefreshLayerBankMenu ();
+			break;
+		}
+		switch (cmd) {
 			case 99:
 				if (argvline[0]!=0) {
 					strcpy (mapfilename, argvline);
-					LoadProject (); curlayer = 0; Rejig ();
+					LoadProject (); Rejig ();
 					argvline[0]=0;
 					/* Run deferred Lua script after map is loaded */
 					if (argluascript[0]) {
@@ -335,6 +358,10 @@ FILE * marfpt;
 					if (mapaltered) { if (MessageBox (hwnd, "Warning:\nCurrent map has been altered but not saved, load anyway?",
 						"Map Editor", MB_OKCANCEL | MB_ICONQUESTION)==IDCANCEL) break;
 					}
+					if (MapIsFmaName (szFile) && blockgfxpt==NULL) {
+						MessageBox (hwnd, "Load the FMP that has the graphics first, then open the FMA file (type the full name in the requester).", "Map Editor", MB_OK|MB_ICONINFORMATION);
+						break;
+					}
 					strcpy (mapfilename, szFile); MEDestroyUndoBuffs();
 					if (!strcmp ((mapfilename+strlen(mapfilename))-4, ".map") ||
 						!strcmp ((mapfilename+strlen(mapfilename))-4, ".MAP") ||
@@ -342,7 +369,7 @@ FILE * marfpt;
 						MapCustomLoad (mapfilename, hwnd);
 					}
 					else LoadProject ();
-					curlayer = 0; onion = 0; oniondark = 0; Rejig ();
+					Rejig ();
 				}
 				break;
 			case CM_FILESAVE:
@@ -708,6 +735,17 @@ FILE * marfpt;
 				}
 				megetabrush = 1;
 				break;
+			case CM_BRUSHGRABNEW:
+				if (mappt==NULL) break;
+				i = FindFreeBrush ();
+				if (i==0) {
+					MessageBox (hwnd, "All 16 brush slots are used. Destroy a brush first.", "Grab New Brush", MB_ICONINFORMATION|MB_OK);
+					break;
+				}
+				curbrsh = (short int) i;
+				RejigBrshMenu (curbrsh);
+				megetabrush = 1;
+				break;
 			case CM_BRUSHGRABNT:
 				if (mappt==NULL) break;
 				if (pastebrushnt) {
@@ -754,11 +792,16 @@ FILE * marfpt;
 			case CM_BRUSH16: curbrsh = 16; RejigBrshMenu (curbrsh);	break;
 			case CM_BRUSHHANDLE:
 				brushhandle = (brushhandle+1)&3;
-				MessageBox (hwnd, brushhandle==0 ? "Brush handle: top-left" :
-					brushhandle==1 ? "Brush handle: top-right" :
-					brushhandle==2 ? "Brush handle: bottom-left" : "Brush handle: bottom-right",
-					"Brush Handle", MB_OK|MB_ICONINFORMATION);
+				UpdateToggleMenus ();
 				break;
+			case CM_BRUSHHANDLETL:
+				brushhandle = 0; UpdateToggleMenus (); break;
+			case CM_BRUSHHANDLETR:
+				brushhandle = 1; UpdateToggleMenus (); break;
+			case CM_BRUSHHANDLEBL:
+				brushhandle = 2; UpdateToggleMenus (); break;
+			case CM_BRUSHHANDLEBR:
+				brushhandle = 3; UpdateToggleMenus (); break;
 			case CM_LAYER0:
 				curlayer = 0; RejigLayerMenu (curlayer);
 				break;
@@ -823,6 +866,20 @@ FILE * marfpt;
 				if (mappt==NULL) break;
 //				if (blockstaggerx || blockstaggery) { MessageBox (hwnd, "Unable to onionskin (only on non-staggered maps)", "Onionskin", MB_OK); break; }
 				DIALayerOnion (hwnd);
+				UpdateToggleMenus ();
+				InvalidateAll ();
+				break;
+			case CM_LAYERDARK:
+				oniondark = 1-oniondark;
+				UpdateToggleMenus ();
+				InvalidateAll ();
+				break;
+			case CM_LAYERMARKER:
+				if (mappt==NULL) break;
+				if (MessageBox (hwnd, "Clear FG3 (marker) overlays on all blocks and remove leftover graphics?",
+					"Remove Marker graphics", MB_OKCANCEL|MB_ICONQUESTION)!=IDOK) break;
+				RemoveMarkerGraphics ();
+				mapaltered = 1;
 				InvalidateAll ();
 				break;
 			case CM_LAYERCLEAR:
@@ -888,6 +945,10 @@ FILE * marfpt;
 				break;
 			case CM_HELPCONTENTS:
 				sprintf (szFile, "%sMAPWIN.HTM", defpname);
+				ShellExecute(NULL, "open", szFile, NULL, NULL, SW_SHOW);
+				break;
+			case CM_HELPINI:
+				sprintf (szFile, "%sMAPWIN.INI", defpname);
 				ShellExecute(NULL, "open", szFile, NULL, NULL, SW_SHOW);
 				break;
 			case CM_HELPABOUT:
@@ -962,9 +1023,61 @@ FILE * marfpt;
 				break;
 			case CM_TOOLROTATED:
 				rotatedtiles = 1-rotatedtiles;
-				if (rotatedtiles) CheckMenuItem (hMenu, CM_TOOLROTATED, MF_CHECKED);
-				else CheckMenuItem (hMenu, CM_TOOLROTATED, MF_UNCHECKED);
+				UpdateToggleMenus ();
 				InvalidateAll ();
+				break;
+			case CM_TOOLFLIPPED:
+				flippedtiles = 1-flippedtiles;
+				UpdateToggleMenus ();
+				InvalidateAll ();
+				break;
+			case CM_TOOLAUTOBG:
+				if (mappt==NULL || blockgfxpt==NULL) break;
+				AutoSetBGTransparency ();
+				mapaltered = 1;
+				MessageBox (hwnd, "BG transparency set on every block whose BG graphic uses the transparent colour.",
+					"Auto set BG transparency", MB_OK|MB_ICONINFORMATION);
+				InvalidateAll ();
+				break;
+			case CM_TOOLSAVEFMA:
+				if (mappt==NULL) { MessageBox (hwnd, "No map to save!", "Map Editor", MB_OK|MB_ICONEXCLAMATION); break; }
+				szFile[0] = 0; szFileTitle[0] = 0; szInitDir[0] = 0;
+				memset (szFilter, 0, sizeof (szFilter));
+				{
+					char *fp = szFilter;
+					strcpy (fp, "FMA maps (*.FMA)"); fp += strlen(fp)+1;
+					strcpy (fp, "*.fma");
+				}
+				if (mapfilename[0]) {
+					strcpy (szFile, mapfilename);
+					i = (int) strlen (szFile);
+					while (i>0 && szFile[i]!='.') i--;
+					if (i>0) strcpy (szFile+i, ".fma");
+					else strcat (szFile, ".fma");
+				}
+				memset(&ofn, 0, sizeof(OPENFILENAME));
+				ofn.lStructSize = sizeof(OPENFILENAME);
+				ofn.hwndOwner = hwnd;
+				ofn.lpstrFilter = szFilter;
+				ofn.nFilterIndex = 1;
+				ofn.lpstrFile= szFile;
+				ofn.nMaxFile = sizeof(szFile);
+				ofn.lpstrFileTitle = szFileTitle;
+				ofn.nMaxFileTitle = sizeof(szFileTitle);
+				ofn.lpstrInitialDir = szInitDir;
+				ofn.lpstrDefExt = "fma";
+				ofn.Flags = OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+				if (GetSaveFileName(&ofn)) {
+					char savedname[256];
+					strcpy (savedname, mapfilename);
+					strcpy (mapfilename, szFile);
+					i = (int) strlen (mapfilename);
+					if (i<4 || (strcmp(mapfilename+i-4,".fma") && strcmp(mapfilename+i-4,".FMA") && strcmp(mapfilename+i-4,".Fma")))
+						strcat (mapfilename, ".fma");
+					if (SaveProjectEx (1))
+						MessageBox (hwnd, "Error saving FMA (map without graphics).", "Map Editor", MB_OK|MB_ICONEXCLAMATION);
+					strcpy (mapfilename, savedname);
+				}
 				break;
 			case CM_TOOLPILLARS:
 				isopillars = 1-isopillars;
@@ -997,11 +1110,12 @@ FILE * marfpt;
 				InvalidateAll ();
 				break;
 			default:
-				if (LOWORD(wParam) >= 7000 && LOWORD(wParam) < 7000 + numluascript) {
-					int si = LOWORD(wParam) - 7000;
+				if (cmd >= 7000 && cmd < 7000 + numluascript) {
+					int si = cmd - 7000;
 					if (luascriptmenu[si][0]) LuaRunScript (luascriptmenu[si]);
 				}
 				break;
+		}
 		}
 		break;
 	case WM_SIZE:
@@ -1054,13 +1168,18 @@ FILE * marfpt;
 			if (!dropname[0]) break;
 			dext = dropname+strlen(dropname)-4;
 			if (strcmp (dext, ".fmp") && strcmp (dext, ".FMP") && strcmp (dext, ".Fmp") &&
+				strcmp (dext, ".fma") && strcmp (dext, ".FMA") && strcmp (dext, ".Fma") &&
 				strcmp (dext, ".map") && strcmp (dext, ".MAP") && strcmp (dext, ".Map") &&
 				strcmp (dext, ".bmp") && strcmp (dext, ".BMP") && strcmp (dext, ".Bmp") &&
 				strcmp (dext, ".pcx") && strcmp (dext, ".PCX") && strcmp (dext, ".Pcx") &&
 				strcmp (dext, ".png") && strcmp (dext, ".PNG") && strcmp (dext, ".Png") &&
 				strcmp (dext, ".mar") && strcmp (dext, ".MAR") && strcmp (dext, ".Mar") &&
 				strcmp (dext, ".lua") && strcmp (dext, ".LUA") && strcmp (dext, ".Lua")) {
-				MessageBox (hwnd, "Unrecognised file type (need .FMP, .MAP, .BMP, .PCX, .PNG or .MAR).\nMap name not changed.", "Map Editor", MB_OK|MB_ICONINFORMATION);
+				MessageBox (hwnd, "Unrecognised file type (need .FMP, .FMA, .MAP, .BMP, .PCX, .PNG or .MAR).\nMap name not changed.", "Map Editor", MB_OK|MB_ICONINFORMATION);
+				break;
+			}
+			if (MapIsFmaName (dropname) && blockgfxpt==NULL) {
+				MessageBox (hwnd, "Load the FMP that has the graphics first, then drop the FMA.", "Map Editor", MB_OK|MB_ICONINFORMATION);
 				break;
 			}
 			MEDestroyUndoBuffs();
@@ -1114,7 +1233,7 @@ FILE * marfpt;
 			} else {
 				LoadProject();
 			}
-			curlayer = 0; onion = 0; oniondark = 0; Rejig();
+			Rejig();
 			mapaltered = 0;
 			InvalidateAll();
 		}

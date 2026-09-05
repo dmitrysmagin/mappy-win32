@@ -85,6 +85,7 @@ extern char authorinfo3[70];
 extern char novctext[70];
 extern unsigned char trans8bit, transred, transgreen, transblue;
 extern unsigned char trans16hi, trans16low;
+extern int resize_left, resize_top;
 
 static int editnum, pgfxnum, editpoint, pickwhat, totalmapmem, hexordec;
 static int propedit_haspos = 0; /* remember Block Properties pos across reopen */
@@ -1105,6 +1106,8 @@ char textbuf[80];
 			SetWindowText (GetDlgItem (hwndDlg, IDC_RESIZEWIDTH), textbuf);
 			sprintf (textbuf, "%d", mapheight);
 			SetWindowText (GetDlgItem (hwndDlg, IDC_RESIZEHEIGHT), textbuf);
+			SetWindowText (GetDlgItem (hwndDlg, IDC_RESIZELEFT), "0");
+			SetWindowText (GetDlgItem (hwndDlg, IDC_RESIZETOP), "0");
 			break;
 		case WM_COMMAND:
 		switch (LOWORD(wParam))
@@ -1150,7 +1153,14 @@ char textbuf[80];
 				newmapwidth = (short int) atoi (textbuf);
 				GetWindowText (GetDlgItem (hwndDlg, IDC_RESIZEHEIGHT), textbuf, 80);
 				newmapheight = (short int) atoi (textbuf);
-				SendMessage (hwndDlg, WM_CLOSE, 0, editnum);
+				GetWindowText (GetDlgItem (hwndDlg, IDC_RESIZELEFT), textbuf, 80);
+				resize_left = atoi (textbuf);
+				GetWindowText (GetDlgItem (hwndDlg, IDC_RESIZETOP), textbuf, 80);
+				resize_top = atoi (textbuf);
+				if (resize_left || resize_top)
+					SendMessage (hwndDlg, WM_CLOSE, 0, 0);
+				else
+					SendMessage (hwndDlg, WM_CLOSE, 0, editnum);
 				break;
 			case IDCANCEL:
 				SendMessage (hwndDlg, WM_CLOSE, 0, -1L);
@@ -1708,7 +1718,6 @@ long int bstmp;
 int i, j, hdswap;
 char textbuf[80];
 BLKSTR * myblkstrpt;
-unsigned char * myautgfxpt;
 
 	switch (msg) {
 		case WM_INITDIALOG:
@@ -1764,36 +1773,7 @@ unsigned char * myautgfxpt;
 //				DIAFillUsers (hwndDlg);
 				break;
 			case IDC_GLOBAUTOBG:
-				if (blockgfxpt == NULL) break;
-				if (blockstrpt == NULL) break;
-				myblkstrpt = (BLKSTR *) blockstrpt;
-				for (i=0;i<numblockstr;i++) {
-					if (i == 0) myblkstrpt->trigger = 1;
-					else myblkstrpt->trigger = 0;
-					myautgfxpt = (unsigned char *) (blockgfxpt+myblkstrpt->bgoff);
-					for (j=0;j<(blockwidth*blockheight);j++) {
-						switch (blockdepth) {
-							case 8:
-								if (*myautgfxpt == trans8bit) myblkstrpt->trigger = 1;
-								myautgfxpt++;
-								break;
-							case 15:
-							case 16:
-								if ((*(myautgfxpt)==trans16hi && *(myautgfxpt+1)==trans16low)) myblkstrpt->trigger = 1;
-								myautgfxpt += 2;
-								break;
-							case 24:
-								if ((*myautgfxpt==transred && *(myautgfxpt+1)==transgreen && *(myautgfxpt+2)==transblue)) myblkstrpt->trigger = 1;
-								myautgfxpt += 3;
-								break;
-							case 32:
-								if ((*(myautgfxpt+1)==transred && *(myautgfxpt+2)==transgreen && *(myautgfxpt+3)==transblue)) myblkstrpt->trigger = 1;
-								myautgfxpt += 4;
-								break;
-						}
-					}
-					myblkstrpt++;
-				}
+				AutoSetBGTransparency ();
 				MessageBox (hwndDlg, "Autoset done", "Range Edit Blocks", MB_OK|MB_ICONINFORMATION);
 				break;
 			case IDOK:
@@ -2111,7 +2091,7 @@ DLGPROC dlgprc;
 	if (mappt==NULL) return -1;
 	dlgprc = (DLGPROC) MakeProcInstance (DIAResizeProc, hInstance);
 	i = DialogBox (hInstance, (LPCSTR) "D_RESIZE", hwnd, dlgprc);
-	if (i>0) {
+	if (i>=0) {
 		if (newmapwidth<3 || newmapheight<3 || newmapwidth>10000 || newmapheight>10000)
 			MessageBox (hwnd, "The new map size was not valid, the map has not been affected", "Resize:", MB_OK|MB_ICONINFORMATION);
 		else { if (ResizeMap (newmapwidth, newmapheight, i))
