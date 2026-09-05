@@ -436,7 +436,7 @@ int IMImportBlocks (char *imname, int imstyle)
 {
 int i, j, k, l, noblock, altnumb, isapcx, lastblockg, lastblocks;
 FILE * fpt;
-unsigned char * bmppt, * bmdatapt, * destpt, * srcpt, * srcpt2, * imcmappt, * mempt;
+unsigned char * bmppt, * bmdatapt, * destpt, * srcpt, * srcpt2, * imcmappt, * mempt, * pcxfile;
 unsigned char red, green, blue;
 long int filesize;
 BITMAPFILEHEADER * bfh;
@@ -459,6 +459,7 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 	fclose (fpt);
 
 	isapcx = 0;
+	pcxfile = NULL;
 	if (!strcmp (imname+strlen(imname)-4, ".png") ||
 		!strcmp (imname+strlen(imname)-4, ".PNG") ||
 		!strcmp (imname+strlen(imname)-4, ".Png")) {
@@ -472,8 +473,10 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 		!strcmp (imname+strlen(imname)-4, ".Pcx")) {
 
 		isapcx = 1;
-		mempt = bmppt;
+		pcxfile = bmppt;
+		mempt = pcxfile;
 		bmppt = malloc (sizeof (BITMAPINFOHEADER));
+		if (bmppt == NULL) { free (pcxfile); return -1; }
 		bmihpt = (BITMAPINFOHEADER *) (bmppt);
 
 		mempt += 4;
@@ -499,6 +502,7 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 		bmihpt->biBitCount = mempt[1] * 8;          /* how many colour planes? */
 		if ((bmihpt->biBitCount != 8) && (bmihpt->biBitCount != 24)) {
 			free (bmppt);
+			free (pcxfile);
 			return -1;
 		}
 
@@ -507,7 +511,7 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 		mempt += 62;
 
 		bmdatapt = (unsigned char *) malloc ((bmihpt->biBitCount/8)*(bmihpt->biWidth+4)*bmihpt->biHeight);
-		if (bmdatapt == NULL) return -1;
+		if (bmdatapt == NULL) { free (bmppt); free (pcxfile); return -1; }
 
 		decode_pcx (mempt, filesize, bmdatapt, bmihpt->biWidth, bmihpt->biHeight, bmihpt->biBitCount, k);
 //		memset (bmdatapt, 0xF0, bmihpt->biWidth*bmihpt->biHeight);
@@ -626,12 +630,12 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 								numblockstr++; }
 							if (imstyle == -2) {
 								altnumb++;
-								if (altnumb == numblockgfx) { free (bmppt); if (isapcx) free (bmdatapt); return 0; }
+								if (altnumb == numblockgfx) { free (bmppt); if (isapcx) { free (bmdatapt); free (pcxfile); } return 0; }
 							} else {
 								numblockgfx++;
 							}
 							if (noblock) { lastblockg = numblockgfx; lastblocks = numblockstr; }
-							if (imstyle == 1) { free (bmppt); if (isapcx) free (bmdatapt); return 0; }
+							if (imstyle == 1) { free (bmppt); if (isapcx) { free (bmdatapt); free (pcxfile); } return 0; }
 							if (imstyle > 1) imstyle--;
 						}
 						srcpt += (bmihpt->biWidth*blockheight);
@@ -644,7 +648,7 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 				if (imskip == 2) { numblockgfx = lastblockg; numblockstr = lastblocks; }
 				break;
 			case 24:
-				if (blockdepth == 8) { free (bmppt); if (isapcx) free (bmdatapt); return -1; }
+				if (blockdepth == 8) { free (bmppt); if (isapcx) { free (bmdatapt); free (pcxfile); } return -1; }
 				bmihpt->biWidth*=3; bmihpt->biWidth+=3; bmihpt->biWidth&=-4;
 				srcpt = bmdatapt + (bmihpt->biWidth*bmihpt->biHeight);
 				srcpt2 = srcpt;
@@ -696,7 +700,7 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 								numblockstr++; }
 							numblockgfx++;
 							if (noblock) { lastblockg = numblockgfx; lastblocks = numblockstr; }
-							if (imstyle==1) { free (bmppt); if (isapcx) free (bmdatapt); return 0; }
+							if (imstyle==1) { free (bmppt); if (isapcx) { free (bmdatapt); free (pcxfile); } return 0; }
 							if (imstyle>1) imstyle--;
 						}
 						srcpt += (bmihpt->biWidth*blockheight);
@@ -710,7 +714,7 @@ RGBQUAD * myrgbpt, * myrgbpt2;
 				break;
 		}
 
-	if (isapcx) free (bmdatapt);
+	if (isapcx) { free (bmdatapt); free (pcxfile); }
 	free (bmppt);
 	if (imstyle == -2) return -1;
 	return 0;

@@ -360,28 +360,33 @@ int i;
 int CreateMapLayer (void)
 {
 int i;
+short int * np;
 
 	if (mapmappt[MAXMAPLAYERS-1]!=NULL) return -1;
+	if (maplayer+1>=MAXMAPLAYERS) return -1;
+	np = (short int *) malloc ((size_t)mapwidth*(size_t)mapheight*2);
+	if (np==NULL) return -1;
+	memset (np, 0, (size_t)mapwidth*(size_t)mapheight*2);
 	maplayer++;
-	if (maplayer>=MAXMAPLAYERS) { maplayer--; return -1; }
 	for (i=MAXMAPLAYERS-1;i>maplayer;i--) mapmappt[i] = mapmappt[i-1];
-	mapmappt[maplayer] = (short int *) malloc (mapwidth*mapheight*2);
-	if (mapmappt[maplayer]==NULL) return -1;
-	else { memset (mapmappt[maplayer], 0, mapwidth*mapheight*2); return maplayer; }
+	mapmappt[maplayer] = np;
+	return maplayer;
 }
 
 int DuplicateMapLayer (void)
 {
 int i;
+short int * np;
+
 	if (mapmappt[MAXMAPLAYERS-1]!=NULL) return -1;
 	if (mapmappt[maplayer]==NULL) return -1;
-	/* shift layers up */
+	if (maplayer+1>=MAXMAPLAYERS) return -1;
+	np = (short int *) malloc ((size_t)mapwidth*(size_t)mapheight*2);
+	if (np==NULL) return -1;
 	for (i=MAXMAPLAYERS-1;i>maplayer+1;i--) mapmappt[i] = mapmappt[i-1];
-	/* create new layer after current */
 	maplayer++;
-	mapmappt[maplayer] = (short int *) malloc (mapwidth*mapheight*2);
-	if (mapmappt[maplayer]==NULL) { maplayer--; return -1; }
-	memcpy (mapmappt[maplayer], mapmappt[maplayer-1], mapwidth*mapheight*2);
+	mapmappt[maplayer] = np;
+	memcpy (np, mapmappt[maplayer-1], (size_t)mapwidth*(size_t)mapheight*2);
 	return maplayer;
 }
 
@@ -436,16 +441,17 @@ int CreateNewMap (int newmw, int newmh, int newmd, int newbw, int newbh, int new
 	FreeAll ();
 
 	cmappt = (unsigned char *) malloc (3*256);
-	if (cmappt==NULL) return -1;
+	if (cmappt==NULL) { FreeAll (); return -1; }
 	*cmappt=0; *(cmappt+1)=0; *(cmappt+2)=0;
 	*(cmappt+(256*3)-3)=255; *(cmappt+(256*3)-2)=255; *(cmappt+(256*3)-1)=255;
 
 	blockgfxpt = (void *) malloc (BKGFXMEM);
-	if (blockgfxpt==NULL) return -1;
+	if (blockgfxpt==NULL) { FreeAll (); return -1; }
 	blockstrpt = (void *) malloc (BKDTMEM);
-	if (blockstrpt==NULL) return -1;
-	mappt = (short int *) malloc (newmw*newmh*2);
-	if (mappt==NULL) return -1;
+	if (blockstrpt==NULL) { FreeAll (); return -1; }
+	if (newmw < 1 || newmh < 1) { FreeAll (); return -1; }
+	mappt = (short int *) malloc ((size_t)newmw*(size_t)newmh*2);
+	if (mappt==NULL) { FreeAll (); return -1; }
 	mapmappt[0] = mappt; maplayer = 0;
 
 	if (newmd==15) memset (blockgfxpt, 0, (newbw*newbh*2));
@@ -638,6 +644,9 @@ int DecodeMPHD (unsigned char * mdatpt)
 	blockstrsize = (short) MapGetshort (mdatpt+18);
 	numblockstr = (short) MapGetshort (mdatpt+20);
 	numblockgfx = (short) MapGetshort (mdatpt+22);
+	if (mapwidth < 1 || mapheight < 1 || mapwidth > 10000 || mapheight > 10000)
+		{ merror = ER_MAPLOADERROR; return -1; }
+	if (blockstrsize < 1) { merror = ER_MAPLOADERROR; return -1; }
 
 	if (MapGetchksz (mdatpt-4) > 24) {
 		transred = mdatpt[25];
@@ -711,7 +720,10 @@ char * mynamept;
 		for (i=0;i<8;i++)
 		{
 			j = MapGetshort (mybrshpt); j *= MapGetshort (mybrshpt+2); j *= 2; j += 4;
-			brshpt[i] = malloc (j); j /= 2; mybrsh2pt = brshpt[i];
+			if (j < 4) { merror = ER_MAPLOADERROR; return -1; }
+			brshpt[i] = malloc (j);
+			if (brshpt[i]==NULL) { merror = ER_OUTOFMEM; return -1; }
+			j /= 2; mybrsh2pt = brshpt[i];
 			*mybrsh2pt = (short) MapGetshort (mybrshpt);
 			mybrsh2pt++;
 			*mybrsh2pt = (short) MapGetshort (mybrshpt+2);
@@ -754,7 +766,10 @@ char * mynamept;
 		if (k > MAXBRSH) k = MAXBRSH;
 		for (i=8;i<k;i++) {
 			j = MapGetshort (mybrshpt); j *= MapGetshort (mybrshpt+2); j *= 2; j += 4;
-			brshpt[i] = malloc (j); j /= 2; mybrsh2pt = brshpt[i];
+			if (j < 4) { merror = ER_MAPLOADERROR; return -1; }
+			brshpt[i] = malloc (j);
+			if (brshpt[i]==NULL) { merror = ER_OUTOFMEM; return -1; }
+			j /= 2; mybrsh2pt = brshpt[i];
 			*mybrsh2pt = (short) MapGetshort (mybrshpt);
 			mybrsh2pt++;
 			*mybrsh2pt = (short) MapGetshort (mybrshpt+2);
@@ -789,39 +804,33 @@ char * mynamept;
 	return 0;
 }
 
+static void AthrCopyField (char * dst, int dstsz, unsigned char * src, int * i, int chksz)
+{
+	int j = 0;
+	if (dstsz < 1) return;
+	dst[0] = 0;
+	while (*i < chksz) {
+		unsigned char c = src[*i];
+		(*i)++;
+		if (c == 0) { dst[j] = 0; return; }
+		if (j < dstsz - 1) dst[j++] = (char) c;
+	}
+	dst[j] = 0;
+}
+
 int DecodeATHR (unsigned char * mdatpt)
 {
-int i, j;
+	int i, chksz;
 
 	logit ("ATHR: %d bytes.\n", MapGetchksz (mdatpt+4));
+	chksz = MapGetchksz (mdatpt+4);
+	if (chksz < 0) { merror = ER_MAPLOADERROR; return -1; }
 	mdatpt += 8;
-	i = 0; while (i < MapGetchksz (mdatpt-4))
-	{
-		authorname[i]=mdatpt[i];
-		if (mdatpt[i]==0) break;
-		i++;
-	}
-	i++; j = 0;
-	while (i < MapGetchksz (mdatpt-4))
-	{
-		authorinfo1[j]=mdatpt[i];
-		if (mdatpt[i]==0) break;
-		i++; j++;
-	}
-	i++; j = 0;
-	while (i < MapGetchksz (mdatpt-4))
-	{
-		authorinfo2[j]=mdatpt[i];
-		if (mdatpt[i]==0) break;
-		i++; j++;
-	}
-	i++; j = 0;
-	while (i < MapGetchksz (mdatpt-4))
-	{
-		authorinfo3[j]=mdatpt[i];
-		if (mdatpt[i]==0) break;
-		i++; j++;
-	}
+	i = 0;
+	AthrCopyField (authorname, (int) sizeof (authorname), mdatpt, &i, chksz);
+	AthrCopyField (authorinfo1, (int) sizeof (authorinfo1), mdatpt, &i, chksz);
+	AthrCopyField (authorinfo2, (int) sizeof (authorinfo2), mdatpt, &i, chksz);
+	AthrCopyField (authorinfo3, (int) sizeof (authorinfo3), mdatpt, &i, chksz);
 	return 0;
 }
 
@@ -845,9 +854,14 @@ BLKSTR * myblkpt;
 	blockstrpt = malloc (BKDTMEM);
 	if (blockstrpt==NULL) { merror = ER_OUTOFMEM; return -1; }
 
+	if (blockstrsize < 1) { merror = ER_MAPLOADERROR; return -1; }
 	myblkpt = (BLKSTR *) blockstrpt;
 	j = MapGetchksz (mdatpt-4);
+	if (j < 0) { merror = ER_MAPLOADERROR; return -1; }
 	i = 0; while (i < j) {
+		if (i + 32 > j) break;
+		if ((unsigned char *)(myblkpt + 1) > (unsigned char *)blockstrpt + BKDTMEM)
+			{ merror = ER_MAPLOADERROR; return -1; }
 		myblkpt->bgoff = (int) MapGetlong (mdatpt+i);
 		myblkpt->fgoff = (int) MapGetlong (mdatpt+i+4);
 		myblkpt->fgoff2 = (int) MapGetlong (mdatpt+i+8);
@@ -886,9 +900,13 @@ ANISTR * myanistrpt;
 unsigned char * mdatendpt;
 int * myseqpt;
 
-	logit ("ANDT: %d bytes.\n", MapGetchksz (mdatpt+4));
-	mdatpt += 8;
-	mdatendpt = mdatpt+MapGetchksz(mdatpt-4);
+	{
+		int andtsz = MapGetchksz (mdatpt+4);
+		logit ("ANDT: %d bytes.\n", andtsz);
+		if (andtsz < 16 || andtsz > ANDTMEM) { merror = ER_MAPLOADERROR; return -1; }
+		mdatpt += 8;
+		mdatendpt = mdatpt + andtsz;
+	}
 
 	animstrpt = malloc (ANDTMEM);
 	if (animstrpt == NULL) { merror = ER_OUTOFMEM; return -1; }
@@ -896,16 +914,19 @@ int * myseqpt;
 
 	aniadjust = 0;
 	myanistrpt = (ANISTR *) (mdatendpt);
-	while (1) {
-		aniadjust ++; //= (16-(FMP_ANI_MEMUNIT));
+	while ((unsigned char *) myanistrpt > mdatpt) {
+		aniadjust ++;
 		myanistrpt--;
 		if (myanistrpt->antype == AN_END) break;
 	}
+	if ((unsigned char *) myanistrpt <= mdatpt || myanistrpt->antype != AN_END)
+		{ merror = ER_MAPLOADERROR; return -1; }
 
 	logit ("Aniadjust = %d\n", aniadjust);
 
 	myanistrpt = (ANISTR *) (animstrpt+ANDTMEM);
-	while (1) {
+	while ((unsigned char *) myanistrpt > (unsigned char *) animstrpt &&
+		mdatendpt >= mdatpt + 16) {
 		myanistrpt--;
 		mdatendpt -= 16;
 		myanistrpt->antype = mdatendpt[0];
@@ -931,9 +952,14 @@ int * myseqpt;
       myanistrpt->ancuroff, myanistrpt->anstartoff, myanistrpt->anendoff);
 		if (myanistrpt->antype == AN_END) break;
 	}
+	if ((unsigned char *) myanistrpt >= (unsigned char *) animstrpt + ANDTMEM ||
+		myanistrpt->antype != AN_END)
+		{ merror = ER_MAPLOADERROR; return -1; }
 
 	myseqpt = (int *) myanistrpt;
 	while (mdatendpt > mdatpt) {
+		if ((unsigned char *) myseqpt <= (unsigned char *) animstrpt)
+			{ merror = ER_MAPLOADERROR; return -1; }
 		myseqpt--;
 		mdatendpt -= 4;
 		if (maptype == 0)
@@ -956,10 +982,12 @@ int DecodeAGFX (unsigned char * mdatpt)
 
 int DecodeBGFX (unsigned char * mdatpt)
 {
-	logit ("BGFX: %d bytes.\n", MapGetchksz (mdatpt+4));
+	int chksz = MapGetchksz (mdatpt+4);
+	logit ("BGFX: %d bytes.\n", chksz);
+	if (chksz < 0 || chksz > BKGFXMEM) { merror = ER_MAPLOADERROR; return -1; }
 	blockgfxpt = malloc (BKGFXMEM);
 	if (blockgfxpt==NULL) { merror = ER_OUTOFMEM; return -1; }
-	memcpy (blockgfxpt, mdatpt+8, MapGetchksz(mdatpt+4));
+	memcpy (blockgfxpt, mdatpt+8, (size_t) chksz);
 	return 0;
 }
 
@@ -970,103 +998,96 @@ int DecodeNOVC (unsigned char * mdatpt)
 	return 0;
 }
 
-int DecodeLayer (unsigned char * mdatpt, int lnum)
+static int DecodeLayerData (unsigned char * data, int nbytes, int lnum)
 {
-int i, j, k, l;
-short int * mymappt, * mymap2pt;
+int i, j, k, l, cells, written;
+unsigned char * end;
+short int * dest, * src;
 
 	if (lnum<0 || lnum>=MAXMAPLAYERS) return -1;
-	logit ("Layer %d: %d bytes.\n", lnum, MapGetchksz (mdatpt+4));
+	if (mapwidth < 1 || mapheight < 1 || nbytes < 0)
+		{ merror = ER_MAPLOADERROR; return -1; }
+	if (maptype == 0 && blockstrsize < 1)
+		{ merror = ER_MAPLOADERROR; return -1; }
+	logit ("Layer %d: %d bytes.\n", lnum, nbytes);
+	cells = ((int) mapwidth) * ((int) mapheight);
 	if (mapmappt[lnum]!=NULL) free (mapmappt[lnum]);
-	mapmappt[lnum] = malloc (mapwidth*mapheight*sizeof(short int));
+	mapmappt[lnum] = malloc ((size_t)cells * sizeof(short int));
 	if (mapmappt[lnum] == NULL) { merror = ER_OUTOFMEM; return -1; }
+	memset (mapmappt[lnum], 0, (size_t)cells * sizeof(short int));
 	logit ("Maptype=%d\n", maptype);
 
-	mdatpt += 8;
-	mymappt = mapmappt[lnum];
-	if (maptype == 0) {
-	logit ("Maptype==0\n");
-	for (j=0;j<mapheight;j++) {
-		for (i=0;i<mapwidth;i++) {
-			*mymappt = (short int) MapGetshort (mdatpt);
-			if (*mymappt >= 0) { *mymappt /= blockstrsize; }
-			else { *mymappt /= 16; *mymappt *= FMP_ANI_MEMUNIT; }
-			mdatpt+=2; mymappt++;
+	end = data + nbytes;
+	dest = mapmappt[lnum];
+	written = 0;
+
+	if (maptype == 0 || maptype == 1) {
+		for (j=0;j<mapheight;j++) {
+			for (i=0;i<mapwidth;i++) {
+				if (data + 2 > end) { merror = ER_MAPLOADERROR; return -1; }
+				*dest = (short int) MapGetshort (data);
+				if (maptype == 0) {
+					if (*dest >= 0) *dest /= blockstrsize;
+					else { *dest /= 16; *dest *= FMP_ANI_MEMUNIT; }
+				} else {
+					if (*dest < 0) *dest *= FMP_ANI_MEMUNIT;
+				}
+				data += 2; dest++; written++;
+			}
+		}
+	} else if (maptype == 2 || maptype == 3) {
+		for (j=0;j<mapheight;j++) {
+			for (i=0;i<mapwidth;) {
+				if (data + 2 > end) { merror = ER_MAPLOADERROR; return -1; }
+				k = (int) MapGetshort (data);
+				data += 2;
+				if (k > 0) {
+					while (k) {
+						if (i >= mapwidth || written >= cells || data + 2 > end)
+							{ merror = ER_MAPLOADERROR; return -1; }
+						*dest = (short int) MapGetshort (data);
+						if (*dest < 0) *dest *= FMP_ANI_MEMUNIT;
+						dest++; data += 2;
+						i++; k--; written++;
+					}
+				} else if (k < 0) {
+					if (data + 2 > end) { merror = ER_MAPLOADERROR; return -1; }
+					if (maptype == 2) {
+						l = (int) MapGetshort (data); data += 2;
+						while (k) {
+							if (i >= mapwidth || written >= cells)
+								{ merror = ER_MAPLOADERROR; return -1; }
+							*dest = (short int) l;
+							if (*dest < 0) *dest *= FMP_ANI_MEMUNIT;
+							dest++; i++; k++; written++;
+						}
+					} else {
+						l = (int) MapGetshort (data); data += 2;
+						src = dest + l;
+						while (k) {
+							if (i >= mapwidth || written >= cells)
+								{ merror = ER_MAPLOADERROR; return -1; }
+							if (src < mapmappt[lnum] || src >= mapmappt[lnum] + cells)
+								{ merror = ER_MAPLOADERROR; return -1; }
+							*dest = *src;
+							if (*dest < 0) *dest *= FMP_ANI_MEMUNIT;
+							dest++; src++; i++; k++; written++;
+						}
+					}
+				}
+			}
 		}
 	}
-	} else {
-	if (maptype == 1) {
-	logit ("Maptype==1\n");
-	for (j=0;j<mapheight;j++) {
-		for (i=0;i<mapwidth;i++) {
-			*mymappt = (short int) MapGetshort (mdatpt);
-			logit ("%d-", *mymappt);
-			if (*mymappt < 0) { *mymappt *= FMP_ANI_MEMUNIT; }
-			mdatpt+=2; mymappt++;
-		}
-		logit ("\n");
-	}
-	} else {
-	if (maptype == 2) {
-	logit ("Maptype==2\n");
-	for (j=0;j<mapheight;j++) {
-		logit ("\nLine %d: ", j);
-		for (i=0;i<mapwidth;) {
-			k = (int) MapGetshort (mdatpt);
-			mdatpt += 2;
-			if (k > 0) {
-			logit ("%dC : ", k);
-				while (k) {
-					*mymappt = (short int) MapGetshort (mdatpt);
-					if (*mymappt < 0) { *mymappt *= FMP_ANI_MEMUNIT; }
-					mymappt++; mdatpt += 2;
-					i++; k--;
-				}
-			} else {
-			if (k < 0) {
-			logit ("%dR : ", k);
-				l = (int) MapGetshort (mdatpt); mdatpt += 2;
-				while (k) {
-					*mymappt = (short int) l;
-					if (*mymappt < 0) { *mymappt *= FMP_ANI_MEMUNIT; }
-					mymappt++;
-					i++; k++;
-				}
-			} else {
-			} }
-		}
-	}
-	} else {
-	if (maptype == 3) {
-	logit ("Maptype==3\n");
-	for (j=0;j<mapheight;j++) {
-		for (i=0;i<mapwidth;) {
-			k = (int) MapGetshort (mdatpt);
-			mdatpt += 2;
-			if (k > 0) {
-				while (k) {
-					*mymappt = (short int) MapGetshort (mdatpt);
-					if (*mymappt < 0) { *mymappt *= FMP_ANI_MEMUNIT; }
-					mymappt++; mdatpt += 2;
-					i++; k--;
-				}
-			} else {
-			if (k < 0) {
-				mymap2pt = mymappt + (int) MapGetshort (mdatpt); mdatpt += 2;
-				while (k) {
-					*mymappt = *mymap2pt;
-					if (*mymappt < 0) { *mymappt *= FMP_ANI_MEMUNIT; }
-					mymappt++; mymap2pt++;
-					i++; k++;
-				}
-			} else {
-			} }
-		}
-	}
-	} } } }
 
 	if (lnum == 0) { mappt = mapmappt[lnum]; maplayer = 0; }
 	return 0;
+}
+
+int DecodeLayer (unsigned char * mdatpt, int lnum)
+{
+	int chksz = MapGetchksz (mdatpt+4);
+	if (chksz < 0) { merror = ER_MAPLOADERROR; return -1; }
+	return DecodeLayerData (mdatpt+8, chksz, lnum);
 }
 
 int DecodeNULL (unsigned char * mdatpt)
@@ -1226,13 +1247,29 @@ int held_ngfx = 0;
 			FreeAll ();
 			return -1;
 		}
-		fmappospt = malloc (MapGetchksz(mphdr+4)+8);
-		memcpy (fmappospt, mphdr, 8);
-		if (fread (fmappospt+8, 1, MapGetchksz(mphdr+4), mfpt) != MapGetchksz(mphdr+4)) {
-			merror = ER_MAPLOADERROR;
-			if (held_gfx) free (held_gfx);
-			FreeAll ();
-			return -1;
+		{
+			int chksz = MapGetchksz(mphdr+4);
+			if (chksz < 0 || chksz > 64*1024*1024) {
+				merror = ER_MAPLOADERROR;
+				if (held_gfx) free (held_gfx);
+				FreeAll ();
+				return -1;
+			}
+			fmappospt = malloc ((size_t)chksz + 8);
+			if (fmappospt==NULL) {
+				merror = ER_OUTOFMEM;
+				if (held_gfx) free (held_gfx);
+				FreeAll ();
+				return -1;
+			}
+			memcpy (fmappospt, mphdr, 8);
+			if (fread (fmappospt+8, 1, (size_t)chksz, mfpt) != (size_t)chksz) {
+				free (fmappospt);
+				merror = ER_MAPLOADERROR;
+				if (held_gfx) free (held_gfx);
+				FreeAll ();
+				return -1;
+			}
 		}
 
 		chkdn = 0;
@@ -1247,10 +1284,14 @@ int held_ngfx = 0;
 		if (!strncmp (fmappospt, "NLYR", 4)) {
 			int nlyr, nloff;
 			chkdn = 1;
-			if (F14_NlyrInfo (fmappospt, MapGetchksz (fmappospt+4), mapislsb, &nlyr, &nloff) == 0)
-				DecodeLayer (fmappospt + nloff, nlyr);
-			else
-				DecodeNULL (fmappospt);
+			{
+				int body = MapGetchksz (fmappospt+4);
+				if (F14_NlyrInfo (fmappospt, body, mapislsb, &nlyr, &nloff) == 0 &&
+					nloff >= 0 && nloff < body)
+					DecodeLayerData (fmappospt + 8 + nloff, body - nloff, nlyr);
+				else
+					DecodeNULL (fmappospt);
+			}
 		}
 		if (!strncmp (fmappospt, "CMAP", 4)) { chkdn = 1; DecodeCMAP (fmappospt); }
 		if (!strncmp (fmappospt, "BKDT", 4)) { chkdn = 1; DecodeBKDT (fmappospt); }
@@ -1455,7 +1496,8 @@ int x, y;
 short int * rlemem;
 int rlepos, runlen;
 
-	rlemem = malloc (((int) mapwidth)*((int) mapheight)*8);
+	rlemem = malloc ((size_t)((int) mapwidth)*((int) mapheight)*8);
+	if (rlemem==NULL) { merror = ER_OUTOFMEM; return -1; }
 	rlepos = 0;
 	for (y=0;y<mapheight;y++) {
 		for (x=0;x<mapwidth;) {
@@ -1494,9 +1536,9 @@ int rlepos, runlen;
 
 	genheader.headsize = byteswapl((unsigned long)(rlepos * 2));
 	if (fmp_write_genheader(filept)!=0)
-	{ merror = ER_MAPSAVEERROR; fclose (filept); free (rlemem); return -1; }
+	{ merror = ER_MAPSAVEERROR; free (rlemem); return -1; }
 	if (fwrite (rlemem, 1, (size_t)rlepos*2, wpt) != (size_t)rlepos*2)
-	{ merror = ER_MAPSAVEERROR; fclose (filept); free (rlemem); return -1; }
+	{ merror = ER_MAPSAVEERROR; free (rlemem); return -1; }
 	free (rlemem);
 	return 0;
 }
@@ -1568,7 +1610,7 @@ int * myanseqpt;
 	if (numblockgfx==0) merror = ER_MAPSAVEERROR;
 	if (mapfilename[0]==0) merror = ER_MAPSAVEERROR;
 
-	if (merror) return 0;
+	if (merror) return -1;
 
 	CaptureEditorPrefs ();
 
@@ -2065,12 +2107,12 @@ int * myanseqpt;
 		if (RleLayer (mapmappt[i], filept)) merror = ER_MAPSAVEERROR;
 	} else {
 		if (fmp_write_genheader(filept)!=0)
-		{ merror = ER_MAPSAVEERROR; fclose (filept); }
-		if (i >= 8) {
+		{ merror = ER_MAPSAVEERROR; }
+		if (!merror && i >= 8) {
 			if (F14_WriteNLYRPrefix (filept, i, mapwidth, mapheight, mapislsb))
-			{ merror = ER_MAPSAVEERROR; fclose (filept); }
+			{ merror = ER_MAPSAVEERROR; }
 		}
-		{ /* endian-safe BODY/LYR: file shorts obey mapislsb */
+		if (!merror) { /* endian-safe BODY/LYR: file shorts obey mapislsb */
 			int cells = ((int)mapwidth)*((int)mapheight);
 			if (!mapislsb) {
 				int ci;
@@ -2079,14 +2121,14 @@ int * myanseqpt;
 					mapmappt[i][ci] = (short)((v >> 8) | (v << 8));
 				}
 				if (fwrite ((char *)mapmappt[i], 1, (size_t)cells*2, filept)!=(size_t)cells*2)
-				{ merror = ER_MAPSAVEERROR; fclose (filept); }
+				{ merror = ER_MAPSAVEERROR; }
 				for (ci = 0; ci < cells; ci++) {
 					unsigned short v = (unsigned short)mapmappt[i][ci];
 					mapmappt[i][ci] = (short)((v >> 8) | (v << 8));
 				}
 			} else {
 				if (fwrite ((char *)mapmappt[i], 1, (size_t)cells*2, filept)!=(size_t)cells*2)
-				{ merror = ER_MAPSAVEERROR; fclose (filept); }
+				{ merror = ER_MAPSAVEERROR; }
 			}
 		}
 	}
@@ -2102,10 +2144,10 @@ int * myanseqpt;
 			if (mapmappt[i][j] >= 0) mapmappt[i][j] /= BLOCKSTRSIZE;
 		}
 	}
-	if (merror) return -1;
+	if (merror) { fclose (filept); return -1; }
 	} }
 
-	if (merror) return -1;
+	if (merror) { fclose (filept); return -1; }
 
 	fseek (filept, 0, SEEK_END);
 	{
@@ -4005,8 +4047,9 @@ short int * mymappt, * mybrshpt;
 	if (curbrsh>0 && curbrsh<=MAXBRSH) {
 		if ((blockstaggerx || blockstaggery) && y&1) y--;
 		mybrshpt = brshpt[curbrsh-1];
-		if (brshpt==NULL) {
+		if (mybrshpt==NULL || mybrshpt[0] < 1 || mybrshpt[1] < 1) {
 			curbrsh = 0; curanim = -1; curstr = 0;
+			mybrshpt = NULL;
 		} else {
 			mybrushwidth = *mybrshpt; mybrshpt++;
 			mybrushheight = *mybrshpt; mybrshpt++;

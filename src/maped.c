@@ -2120,13 +2120,7 @@ PAINTSTRUCT ps;
 				pathcx = xblk; pathcy = yblk;
 				MECopyToUndo ();
 				curplacetile = -1;
-				if (curbrsh>0 && curbrsh<=MAXBRSH) {
-					PlaceTile (xblk, yblk);
-				} else if (curanim>=0) {
-					*(mappt+xblk+yblk*mapwidth) = -((curanim+1)*FMP_ANI_MEMUNIT);
-				} else {
-					*(mappt+xblk+yblk*mapwidth) = curstr;
-				}
+				PlaceTile (xblk, yblk);
 				mapaltered = 1;
 				if (blockstaggerx || blockstaggery) InvalidateRgn (mhwnd, NULL, FALSE);
 				else MEDrawUnderTile (hwnd, xblk, yblk);

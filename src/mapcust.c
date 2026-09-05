@@ -22,6 +22,20 @@ short int mcmapdefwidth = 120, mcmapdefheight = 72;
 int mcblkstaggerx, mcblkstaggery, mcblkclickmask;
 int csvadjust = 0;
 
+static void mc_replace_ext (char * name, const char * ext)
+{
+	size_t n = strlen (name);
+	if (n >= 4) strcpy (name + n - 4, ext);
+	else strcat (name, ext);
+}
+
+static int mc_fail_after_new (FILE * fpt)
+{
+	if (fpt) fclose (fpt);
+	FreeAll ();
+	return -1;
+}
+
 void MapCustSetDefBMPName (char * defname)
 {
 int i;
@@ -72,10 +86,11 @@ char szInitDir[256];
 
 		modemsb = 0;
 		first_arpos = -1;
+		memset (mapoutput, 0, sizeof (mapoutput));
 		mcname = malloc (strlen (loadname)+8);
 		if (mcname == NULL) return -1;
 		strcpy (mcname, loadname);
-		strcpy (mcname+strlen(mcname)-4, ".MAP");
+		mc_replace_ext (mcname, ".MAP");
 		fpt = fopen (mcname, "rb");
 		if (fpt==NULL) { free (mcname); return -1; }
 
@@ -87,11 +102,11 @@ char szInitDir[256];
 		strcpy (szFile, mcdefBMPname);
 		bmfpt = fopen (mcdefBMPname, "rb");
 		if (bmfpt == NULL) {
-			strcpy (mcname+strlen(mcname)-4, ".BMP");
+			mc_replace_ext (mcname, ".BMP");
 			strcpy (szFile, mcname);
 			bmfpt = fopen (mcname, "rb");
 			if (bmfpt == NULL) {
-			strcpy (mcname+strlen(mcname)-4, ".PCX");
+			mc_replace_ext (mcname, ".PCX");
 			strcpy (szFile, mcname);
 			bmfpt = fopen (mcname, "rb");
 			if (bmfpt == NULL) {
@@ -158,20 +173,19 @@ char szInitDir[256];
 					i++;
 					break;
 				case 'w':
+					i++;
+					if (mapformat[i] < '1' || mapformat[i] > '4') { fclose (fpt); return -1; }
+					memset (mapoutput, 0, sizeof (mapoutput));
 					if (modemsb == 1) {
-						i++; if (mapformat[i] >= '1' && mapformat[i] <= '4') {
-							if (fread (&mapoutput[4-(mapformat[i]-'0')],
-									1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
-								fclose (fpt); return -1;
-							}
+						if (fread (&mapoutput[4-(mapformat[i]-'0')],
+								1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+							fclose (fpt); return -1;
 						}
 						newmw = (short int) mapoutput[3];
 						newmw |= (((short int) mapoutput[2])<<8);
 					} else {
-						i++; if (mapformat[i] >= '1' && mapformat[i] <= '4') {
-							if (fread (mapoutput, 1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
-								fclose (fpt); return -1;
-							}
+						if (fread (mapoutput, 1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+							fclose (fpt); return -1;
 						}
 						newmw = (short int) mapoutput[0];
 						newmw |= (((short int) mapoutput[1])<<8);
@@ -179,20 +193,19 @@ char szInitDir[256];
 					i++;
 					break;
 				case 'h':
+					i++;
+					if (mapformat[i] < '1' || mapformat[i] > '4') { fclose (fpt); return -1; }
+					memset (mapoutput, 0, sizeof (mapoutput));
 					if (modemsb == 1) {
-						i++; if (mapformat[i] >= '1' && mapformat[i] <= '4') {
-							if (fread (&mapoutput[4-(mapformat[i]-'0')],
-									1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
-								fclose (fpt); return -1;
-							}
+						if (fread (&mapoutput[4-(mapformat[i]-'0')],
+								1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+							fclose (fpt); return -1;
 						}
 						newmh = (short int) mapoutput[3];
 						newmh |= (((short int) mapoutput[2])<<8);
 					} else {
-						i++; if (mapformat[i] >= '1' && mapformat[i] <= '4') {
-							if (fread (mapoutput, 1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
-								fclose (fpt); return -1;
-							}
+						if (fread (mapoutput, 1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+							fclose (fpt); return -1;
 						}
 						newmh = (short int) mapoutput[0];
 						newmh |= (((short int) mapoutput[1])<<8);
@@ -231,13 +244,13 @@ char szInitDir[256];
 		i = 0; while (mapformat[i] != 0) {
 				if (mapformat[i] == 'a') {
 					i++;
-					if (layeridx >= MAXMAPLAYERS) { fclose (fpt); return -1; }
+					if (layeridx >= MAXMAPLAYERS) return mc_fail_after_new (fpt);
 					if (layeridx == 0) {
 						mymappt = mappt;
 					} else {
 						if (mapmappt[layeridx] == NULL) {
 							mapmappt[layeridx] = (short int *) malloc ((size_t)mapwidth*(size_t)mapheight*2);
-							if (mapmappt[layeridx] == NULL) { fclose (fpt); return -1; }
+							if (mapmappt[layeridx] == NULL) return mc_fail_after_new (fpt);
 							memset (mapmappt[layeridx], 0, (size_t)mapwidth*(size_t)mapheight*2);
 						}
 						mymappt = mapmappt[layeridx];
@@ -252,11 +265,11 @@ char szInitDir[256];
 					mapoutput[3] = 0; mapoutput[2] = 0; mapoutput[1] = 0; mapoutput[0] = 0;
 					if (modemsb == 1) {
 						while (j) {
-							if (mapformat[i] >= '1' && mapformat[i] <= '4') {
-								if (fread (&mapoutput[4-(mapformat[i]-'0')],
-									1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
-									fclose (fpt); return -1;
-								}
+							if (mapformat[i] < '1' || mapformat[i] > '4')
+								return mc_fail_after_new (fpt);
+							if (fread (&mapoutput[4-(mapformat[i]-'0')],
+								1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+								return mc_fail_after_new (fpt);
 							}
 							k = ((int) mapoutput[3]);
 							k |= ((((int) mapoutput[2]) & 0xFF)<<8);
@@ -271,11 +284,11 @@ char szInitDir[256];
 						}
 					} else {
 						while (j) {
-							if (mapformat[i] >= '1' && mapformat[i] <= '4') {
-								if (fread (&mapoutput[0],
-									1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
-									fclose (fpt); return -1;
-								}
+							if (mapformat[i] < '1' || mapformat[i] > '4')
+								return mc_fail_after_new (fpt);
+							if (fread (&mapoutput[0],
+								1, mapformat[i]-'0', fpt) != mapformat[i]-'0') {
+								return mc_fail_after_new (fpt);
 							}
 							k = ((int) mapoutput[0]);
 							k |= ((((int) mapoutput[1]) & 0xFF)<<8);
@@ -313,7 +326,7 @@ char * mcname;
 		mcname = malloc (strlen (savename)+8);
 		if (mcname == NULL) return -1;
 		strcpy (mcname, savename);
-		strcpy (mcname+strlen(mcname)-4, ".MAP");
+		mc_replace_ext (mcname, ".MAP");
 		fpt = fopen (mcname, "wb");
 		free (mcname);
 		if (fpt==NULL) return -1;

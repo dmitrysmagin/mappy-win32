@@ -142,6 +142,14 @@ static int BEMapDisp (int disp)
 	return disp;
 }
 
+static int BEMaxScrollRow (void)
+{
+	int n = BEVisibleCount ();
+	if (bebpr < 1) bebpr = 1;
+	if (n < 1) return 0;
+	return (n - 1) / bebpr;
+}
+
 void BESetScrollRange (void)
 {
 	int total;
@@ -173,6 +181,7 @@ void BESetScrollRange (void)
 	} else {
 		SetWindowText (bhwnd, title);
 	}
+	if (bebpr < 1) bebpr = 1;
 	SetScrollRange (bhwnd, SB_VERT, 0, (total > 0) ? ((total - 1) / bebpr) : 0, FALSE);
 	if (beyoff > ((total - 1) / bebpr)) beyoff = (total - 1) / bebpr;
 	if (beyoff < 0) beyoff = 0;
@@ -512,7 +521,7 @@ PAINTSTRUCT ps;
 		break;
 	case WM_VSCROLL:
 		BERefreshSort ();
-		i = (short int) BEVisibleCount ();
+		i = (short int) BEMaxScrollRow ();
 		switch (LOWORD(wParam)) {
 			case SB_TOP:
 			beyoff = 0;
@@ -521,18 +530,18 @@ PAINTSTRUCT ps;
 			if (beyoff>0) beyoff--;
 			break;
 			case SB_LINEDOWN:
-			if (beyoff<(i-1)) beyoff++;
+			if (beyoff<i) beyoff++;
 			break;
 			case SB_PAGEUP:
 			beyoff-=10;
 			if (beyoff<0) beyoff = 0;
 			break;
 			case SB_PAGEDOWN:
-			if (beyoff<(i-2)) beyoff+=10;
-			if (beyoff>(i-1)) beyoff=i-1;
+			if (beyoff<(i-1)) beyoff+=10;
+			if (beyoff>i) beyoff=i;
 			break;
 			case SB_BOTTOM:
-			beyoff = i-1;
+			beyoff = i;
 			if (beyoff<0) beyoff = 0;
 			break;
 			case SB_THUMBPOSITION:
@@ -667,10 +676,10 @@ PAINTSTRUCT ps;
 			int bdelta = (short)HIWORD(wParam);
 			int bstep = (bdelta>0) ? -mwheelblks : mwheelblks;
 			BERefreshSort ();
-			i = (short int) BEVisibleCount ();
+			i = (short int) BEMaxScrollRow ();
 			beyoff += (short int) bstep;
 			if (beyoff<0) beyoff = 0;
-			if (beyoff>(i-1)) beyoff = (short int)(i-1);
+			if (beyoff>i) beyoff = i;
 			SetScrollPos (bhwnd, SB_VERT, beyoff, TRUE);
 			InvalidateRgn (bhwnd, NULL, FALSE);
 		}

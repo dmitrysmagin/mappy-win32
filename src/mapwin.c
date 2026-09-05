@@ -383,7 +383,10 @@ FILE * marfpt;
 					if (!strcmp ((mapfilename+strlen(mapfilename))-4, ".map") ||
 						!strcmp ((mapfilename+strlen(mapfilename))-4, ".MAP") ||
 						!strcmp ((mapfilename+strlen(mapfilename))-4, ".Map")) {
-						MapCustomLoad (mapfilename, hwnd);
+						if (MapCustomLoad (mapfilename, hwnd)) {
+							MessageBox (hwnd, "Error loading map", "Map Editor", MB_OK | MB_ICONEXCLAMATION);
+							mapfilename[0] = 0;
+						}
 					}
 					else LoadProject ();
 					Rejig ();
@@ -1217,7 +1220,10 @@ FILE * marfpt;
 			if (!strcmp((mapfilename+strlen(mapfilename))-4, ".map") ||
 				!strcmp((mapfilename+strlen(mapfilename))-4, ".MAP") ||
 				!strcmp((mapfilename+strlen(mapfilename))-4, ".Map")) {
-				MapCustomLoad(mapfilename, hwnd);
+				if (MapCustomLoad(mapfilename, hwnd)) {
+					MessageBox (hwnd, "Error loading map", "Map Editor", MB_OK | MB_ICONEXCLAMATION);
+					mapfilename[0] = 0;
+				}
 			} else if (!strcmp((mapfilename+strlen(mapfilename))-4, ".bmp") ||
 				!strcmp((mapfilename+strlen(mapfilename))-4, ".BMP") ||
 				!strcmp((mapfilename+strlen(mapfilename))-4, ".Bmp") ||
