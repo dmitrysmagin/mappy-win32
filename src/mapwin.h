@@ -104,6 +104,8 @@ HWND CreateGraphEditorWindow (HWND);
 HWND MEGetHWND (void);
 HWND GEGetHWND (void);
 void GEShowMode (int show);
+int GEPaletteDlgMessage (MSG * msg);
+void GERefreshPalette (void);
 void MECopyLayerToUndo (short int *src);
 void MECopyUndoToLayer (short int *dst);
 void GEUndo (void);

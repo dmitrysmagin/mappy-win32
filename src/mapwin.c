@@ -101,6 +101,7 @@ void InvalidateAll (void)
 	InvalidateRgn (hwnd, NULL, FALSE);
 	if (MEGetHWND () != NULL) InvalidateRgn (MEGetHWND (), NULL, FALSE);
 	if (GEGetHWND () != NULL) InvalidateRgn (GEGetHWND (), NULL, FALSE);
+	GERefreshPalette ();
 }
 
 static void DoBackup (void)
@@ -1519,6 +1520,8 @@ char * iniinfo, * inipos;
 	}
 
 	while (GetMessage(&msg, NULL, 0, 0)) {
+		if (GEPaletteDlgMessage (&msg))
+			continue;
 		if (TranslateAccelerator( hwnd, haccel, (LPMSG)&msg ) == 0) {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);

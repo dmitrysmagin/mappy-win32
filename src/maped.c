@@ -1,9 +1,12 @@
 #define  STRICT
 #include <windows.h>
+#include <commctrl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "mapwin.h"
+#include "mapdefs.h"
+#include "compat.h"
 #include "luabind.h"
 
 #ifndef WM_DPICHANGED
@@ -38,10 +41,13 @@ long int anendoff;	/* Points to end of blkstr offsets list */
 
 static HWND mhwnd = NULL;
 static HWND ghwnd = NULL;
+static HWND palhwnd = NULL;
 static HWND ge_toolbtn[7] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 static HWND ge_dsbtn[4] = { NULL, NULL, NULL, NULL };
 static HWND ge_dslbl = NULL, ge_status = NULL;
 static HFONT ge_font = NULL;
+static int pal_syncing = 0;
+static int pal_hex = 0;		/* 0 = decimal RGB fields, 1 = $XX hex */
 static char szMapEdname[] = "Map Editor";
 static char szGraphEdname[] = "Graphic Editor";
 #define IDC_GETOOL0	2200
@@ -50,7 +56,14 @@ static char szGraphEdname[] = "Graphic Editor";
 #define IDC_GESTATUS	2221
 #define GETOOL_COUNT	7
 static int GE_thickness = 1;
+static int GE_gfxcol = 0;
+static int GE_paint = 0;
+static int GE_palop = 0;		/* 1=CPY 2=EXG 3=SPR 4=pick-from-tile */
+static int GE_palsrc = 0;
 static int GE_FindBlockForGraphic (int gfx);
+static void GEGetColRGB (int * r, int * g, int * b);
+static void GESetColChan (int chan, int v);
+static void GEPaletteOp (int dest);
 static int painton = 0, gettingbrush = 0;
 static short int * undobuff1, * undobuff2;
 int megetabrush = 0, onion = 0, oniondark = 0, onionlower = 0;
@@ -186,9 +199,16 @@ HWND GEGetHWND (void)
 	return ghwnd;
 }
 
+static void PalSyncFromColor (void);
+static void PalSyncButtons (void);
+static void PalSetFont (HWND dlg);
+static void GEPlacePalette (HWND graph);
+static int GEPaletteWidth (HWND hwnd);
+
 static void GEInvalidate (void)
 {
 	if (ghwnd != NULL) InvalidateRect (ghwnd, NULL, FALSE);
+	GERefreshPalette ();
 }
 
 static int GEGetDpi (HWND hwnd)
@@ -233,6 +253,7 @@ static void GEEnsureUiFont (HWND hwnd)
 		if (ge_toolbtn[i]) SendMessage (ge_toolbtn[i], WM_SETFONT, (WPARAM) ge_font, TRUE);
 	for (i = 0; i < 4; i++)
 		if (ge_dsbtn[i]) SendMessage (ge_dsbtn[i], WM_SETFONT, (WPARAM) ge_font, TRUE);
+	if (palhwnd) PalSetFont (palhwnd);
 	(void) hwnd;
 }
 
@@ -347,12 +368,474 @@ void GEShowMode (int show)
 			GELayoutToolbar (ghwnd);
 			GEUpdateToolbar ();
 			GEUpdateStatus ();
+			GEPlacePalette (ghwnd);
 			InvalidateRect (ghwnd, NULL, FALSE);
 			SetFocus (ghwnd);
 		}
 	} else {
 		if (ghwnd) ShowWindow (ghwnd, SW_HIDE);
 		if (mhwnd) ShowWindow (mhwnd, SW_SHOW);
+	}
+}
+
+static int GEPaletteCols (void)
+{
+	return (panelpro == 2) ? 32 : 16;
+}
+
+static int GEPaletteRows (void)
+{
+	return (panelpro == 2) ? 8 : 16;
+}
+
+static int GEPaletteWidth (HWND hwnd)
+{
+	int dpi = GEGetDpi (hwnd);
+	int cols = GEPaletteCols ();
+	int cell = MulDiv ((panelpro == 2) ? 10 : 14, dpi, 96);
+	int w, minw;
+	if (cell < 8) cell = 8;
+	w = cols * cell + MulDiv (20, dpi, 96);
+	minw = MulDiv (168, dpi, 96);
+	if (w < minw) w = minw;
+	return w;
+}
+
+static void PalSetFont (HWND dlg)
+{
+	HWND child;
+	if (ge_font == NULL || dlg == NULL) return;
+	child = GetWindow (dlg, GW_CHILD);
+	while (child) {
+		SendMessage (child, WM_SETFONT, (WPARAM) ge_font, TRUE);
+		child = GetWindow (child, GW_HWNDNEXT);
+	}
+}
+
+static void PalSyncButtons (void)
+{
+	if (palhwnd == NULL) return;
+	pal_syncing = 1;
+	CheckDlgButton (palhwnd, IDC_PALCPY, (GE_palop == 1) ? BST_CHECKED : BST_UNCHECKED);
+	CheckDlgButton (palhwnd, IDC_PALEXG, (GE_palop == 2) ? BST_CHECKED : BST_UNCHECKED);
+	CheckDlgButton (palhwnd, IDC_PALSPR, (GE_palop == 3) ? BST_CHECKED : BST_UNCHECKED);
+	CheckDlgButton (palhwnd, IDC_PALPICK, (GE_palop == 4) ? BST_CHECKED : BST_UNCHECKED);
+	pal_syncing = 0;
+}
+
+static void PalSyncFromColor (void)
+{
+	char txt[64];
+	int r, g, b;
+	if (palhwnd == NULL || pal_syncing) return;
+	pal_syncing = 1;
+	GEGetColRGB (&r, &g, &b);
+	sprintf (txt, "Palette (col %d/255)", GE_gfxcol);
+	SetDlgItemText (palhwnd, IDC_PALTITLE, txt);
+	SendDlgItemMessage (palhwnd, IDC_PALTBARR, TBM_SETPOS, TRUE, 255 - r);
+	SendDlgItemMessage (palhwnd, IDC_PALTBARG, TBM_SETPOS, TRUE, 255 - g);
+	SendDlgItemMessage (palhwnd, IDC_PALTBARB, TBM_SETPOS, TRUE, 255 - b);
+	if (pal_hex) {
+		sprintf (txt, "$%02X", r);
+		SetDlgItemText (palhwnd, IDC_PALDECR, txt);
+		sprintf (txt, "$%02X", g);
+		SetDlgItemText (palhwnd, IDC_PALDECG, txt);
+		sprintf (txt, "$%02X", b);
+		SetDlgItemText (palhwnd, IDC_PALDECB, txt);
+	} else {
+		sprintf (txt, "%d", r);
+		SetDlgItemText (palhwnd, IDC_PALDECR, txt);
+		sprintf (txt, "%d", g);
+		SetDlgItemText (palhwnd, IDC_PALDECG, txt);
+		sprintf (txt, "%d", b);
+		SetDlgItemText (palhwnd, IDC_PALDECB, txt);
+	}
+	SendDlgItemMessage (palhwnd, IDC_PALUDR, UDM_SETPOS, 0, MAKELPARAM (r, 0));
+	SendDlgItemMessage (palhwnd, IDC_PALUDG, UDM_SETPOS, 0, MAKELPARAM (g, 0));
+	SendDlgItemMessage (palhwnd, IDC_PALUDB, UDM_SETPOS, 0, MAKELPARAM (b, 0));
+	CheckDlgButton (palhwnd, IDC_PALHEXVIEW, pal_hex ? BST_CHECKED : BST_UNCHECKED);
+	InvalidateRect (GetDlgItem (palhwnd, IDC_PALGRID), NULL, FALSE);
+	pal_syncing = 0;
+}
+
+void GERefreshPalette (void)
+{
+	if (palhwnd != NULL && IsWindowVisible (palhwnd))
+		PalSyncFromColor ();
+}
+
+static void PalColorChanged (void)
+{
+	mapaltered = 1;
+	if (ghwnd) InvalidateRect (ghwnd, NULL, FALSE);
+	PalSyncFromColor ();
+	BEInvalidate ();
+}
+
+static void PalArmOp (int op)
+{
+	if (GE_palop == op) GE_palop = 0;
+	else {
+		GE_palop = op;
+		GE_palsrc = GE_gfxcol;
+	}
+	PalSyncButtons ();
+}
+
+static void PalClickSwatch (int ci)
+{
+	if (ci < 0) ci = 0;
+	if (ci > 255) ci = 255;
+	if (GE_palop >= 1 && GE_palop <= 3) {
+		GEPaletteOp (ci);
+		GE_gfxcol = ci;
+	} else {
+		GE_gfxcol = ci;
+		if (GE_palop != 4) GE_palop = 0;
+	}
+	PalSyncButtons ();
+	PalSyncFromColor ();
+	if (ghwnd) InvalidateRect (ghwnd, NULL, FALSE);
+}
+
+static void PalApplyTrans (void)
+{
+	if (cmappt == NULL || GE_gfxcol < 0 || GE_gfxcol > 255) return;
+	if (blockdepth == 8) {
+		cmappt[GE_gfxcol * 3] = cmappt[trans8bit * 3];
+		cmappt[GE_gfxcol * 3 + 1] = cmappt[trans8bit * 3 + 1];
+		cmappt[GE_gfxcol * 3 + 2] = cmappt[trans8bit * 3 + 2];
+	} else {
+		cmappt[GE_gfxcol * 3] = transred;
+		cmappt[GE_gfxcol * 3 + 1] = transgreen;
+		cmappt[GE_gfxcol * 3 + 2] = transblue;
+	}
+	GE_palop = 0;
+	PalSyncButtons ();
+	PalColorChanged ();
+}
+
+static int PalParseValue (HWND dlg, int id)
+{
+	char txt[16], * p;
+	int v, hex;
+	GetDlgItemText (dlg, id, txt, (int) sizeof (txt));
+	p = txt;
+	hex = pal_hex;
+	if (p[0] == '$' || p[0] == '#') {
+		p++;
+		hex = 1;
+	}
+	v = (int) strtol (p, NULL, hex ? 16 : 10);
+	if (v < 0) v = 0;
+	if (v > 255) v = 255;
+	return v;
+}
+
+static void PalLayoutDialog (HWND dlg)
+{
+	RECT rc;
+	int dpi, cw, ch, m, titleh, btnh, barh, edith, checkh, spinw, gap;
+	int cols, rows, cell, gridw, gridh, gx, gy, i, x, y, bw;
+	static const int btns[] = { IDC_PALCPY, IDC_PALEXG, IDC_PALSPR, IDC_PALTRN, IDC_PALPICK };
+	static const int bars[] = { IDC_PALTBARR, IDC_PALTBARG, IDC_PALTBARB };
+	static const int lbls[] = { IDC_PALLBLR, IDC_PALLBLG, IDC_PALLBLB };
+	static const int vals[] = { IDC_PALDECR, IDC_PALDECG, IDC_PALDECB };
+	static const int uds[] = { IDC_PALUDR, IDC_PALUDG, IDC_PALUDB };
+
+	if (dlg == NULL) return;
+	GetClientRect (dlg, &rc);
+	cw = rc.right - rc.left;
+	ch = rc.bottom - rc.top;
+	dpi = GEGetDpi (dlg);
+	m = MulDiv (6, dpi, 96);
+	titleh = MulDiv (16, dpi, 96);
+	btnh = MulDiv (22, dpi, 96);
+	barh = MulDiv (72, dpi, 96);
+	edith = MulDiv (20, dpi, 96);
+	checkh = MulDiv (16, dpi, 96);
+	spinw = MulDiv (16, dpi, 96);
+	gap = MulDiv (4, dpi, 96);
+	cols = GEPaletteCols ();
+	rows = GEPaletteRows ();
+
+	MoveWindow (GetDlgItem (dlg, IDC_PALTITLE), m, gap, cw - m * 2, titleh, TRUE);
+
+	gy = gap + titleh + gap;
+	gridw = cw - m * 2;
+	cell = gridw / cols;
+	if (cell < 8) cell = 8;
+	if (cell > MulDiv (20, dpi, 96)) cell = MulDiv (20, dpi, 96);
+	gridw = cell * cols;
+	gridh = cell * rows;
+	{
+		int leftover = ch - gy - btnh - gap - MulDiv (12, dpi, 96) - barh
+			- gap - edith - gap - checkh - m;
+		if (leftover < 0) leftover = 0;
+		if (gridh > leftover && leftover >= rows * 8) {
+			cell = leftover / rows;
+			if (cell < 8) cell = 8;
+			gridw = cell * cols;
+			gridh = cell * rows;
+		}
+	}
+	gx = (cw - gridw) / 2;
+	if (gx < m) gx = m;
+	MoveWindow (GetDlgItem (dlg, IDC_PALGRID), gx, gy, gridw, gridh, TRUE);
+
+	y = gy + gridh + gap;
+	bw = (cw - m * 2 - gap * 4) / 5;
+	if (bw < MulDiv (24, dpi, 96)) bw = MulDiv (24, dpi, 96);
+	x = m;
+	for (i = 0; i < 5; i++) {
+		MoveWindow (GetDlgItem (dlg, btns[i]), x, y, bw, btnh, TRUE);
+		x += bw + gap;
+	}
+
+	y += btnh + gap;
+	{
+		int colw = (cw - m * 2) / 3;
+		int lblh = MulDiv (12, dpi, 96);
+		for (i = 0; i < 3; i++) {
+			int cx = m + i * colw;
+			int fieldw = colw - gap - spinw;
+			if (fieldw < MulDiv (20, dpi, 96)) fieldw = MulDiv (20, dpi, 96);
+			MoveWindow (GetDlgItem (dlg, lbls[i]), cx, y, colw, lblh, TRUE);
+			MoveWindow (GetDlgItem (dlg, bars[i]), cx, y + lblh, colw - gap, barh, TRUE);
+			MoveWindow (GetDlgItem (dlg, vals[i]), cx, y + lblh + barh + gap, fieldw, edith, TRUE);
+			SetWindowPos (GetDlgItem (dlg, uds[i]), HWND_TOP,
+				cx + fieldw, y + lblh + barh + gap, spinw, edith,
+				SWP_SHOWWINDOW);
+		}
+		y += lblh + barh + gap + edith + gap;
+	}
+	MoveWindow (GetDlgItem (dlg, IDC_PALHEXVIEW), m, y, cw - m * 2, checkh, TRUE);
+}
+
+static void GEPlacePalette (HWND graph)
+{
+	RECT rc;
+	int palw, toolh, pw, ph;
+	if (palhwnd == NULL || graph == NULL) return;
+	GetClientRect (graph, &rc);
+	pw = rc.right - rc.left;
+	ph = rc.bottom - rc.top;
+	toolh = GEToolbarHeight (graph);
+	if (panelpro == 0 || betype != BETYPE_GRAPH) {
+		ShowWindow (palhwnd, SW_HIDE);
+		return;
+	}
+	palw = GEPaletteWidth (graph);
+	if (palw > pw / 2) palw = pw / 2;
+	if (palw < 120) palw = 120;
+	MoveWindow (palhwnd, pw - palw, 0, palw, ph - toolh, TRUE);
+	PalLayoutDialog (palhwnd);
+	ShowWindow (palhwnd, SW_SHOW);
+	PalSyncButtons ();
+	PalSyncFromColor ();
+}
+
+static LRESULT CALLBACK PalGridWndProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg) {
+	case WM_PAINT: {
+		PAINTSTRUCT ps;
+		HDC hdc = BeginPaint (hwnd, &ps);
+		RECT rc;
+		int cols, rows, cw, ch, cell, cx, cy, ci;
+		GetClientRect (hwnd, &rc);
+		cw = rc.right - rc.left;
+		ch = rc.bottom - rc.top;
+		cols = GEPaletteCols ();
+		rows = GEPaletteRows ();
+		cell = cw / cols;
+		if (ch / rows < cell) cell = ch / rows;
+		if (cell < 1) cell = 1;
+		FillRect (hdc, &rc, (HBRUSH) GetStockObject (BLACK_BRUSH));
+		for (cy = 0; cy < rows; cy++) {
+			for (cx = 0; cx < cols; cx++) {
+				RECT prc;
+				HBRUSH hbr;
+				ci = cy * cols + cx;
+				if (ci > 255) continue;
+				prc.left = cx * cell;
+				prc.top = cy * cell;
+				prc.right = prc.left + cell;
+				prc.bottom = prc.top + cell;
+				if (cmappt != NULL)
+					hbr = CreateSolidBrush (RGB (cmappt[ci * 3], cmappt[ci * 3 + 1], cmappt[ci * 3 + 2]));
+				else
+					hbr = CreateSolidBrush (RGB (ci, ci, ci));
+				FillRect (hdc, &prc, hbr);
+				DeleteObject (hbr);
+				if (ci == GE_gfxcol) {
+					HPEN hpen, hold;
+					HBRUSH holdbr;
+					hpen = CreatePen (PS_SOLID, 2, RGB (255, 255, 255));
+					hold = SelectObject (hdc, hpen);
+					holdbr = SelectObject (hdc, GetStockObject (NULL_BRUSH));
+					Rectangle (hdc, prc.left, prc.top, prc.right, prc.bottom);
+					SelectObject (hdc, hold);
+					SelectObject (hdc, holdbr);
+					DeleteObject (hpen);
+				}
+			}
+		}
+		EndPaint (hwnd, &ps);
+		return 0;
+	}
+	case WM_LBUTTONDOWN: {
+		RECT rc;
+		int cols, rows, cell, mx, my, ci;
+		GetClientRect (hwnd, &rc);
+		cols = GEPaletteCols ();
+		rows = GEPaletteRows ();
+		cell = (rc.right - rc.left) / cols;
+		if ((rc.bottom - rc.top) / rows < cell) cell = (rc.bottom - rc.top) / rows;
+		if (cell < 1) cell = 1;
+		mx = (int)(short) LOWORD (lParam);
+		my = (int)(short) HIWORD (lParam);
+		ci = (mx / cell) + (my / cell) * cols;
+		SetFocus (hwnd);
+		PalClickSwatch (ci);
+		return 0;
+	}
+	case WM_GETDLGCODE:
+		return DLGC_WANTARROWS;
+	case WM_KEYDOWN: {
+		int cols = GEPaletteCols ();
+		int ci = GE_gfxcol;
+		switch (LOWORD (wParam)) {
+			case VK_LEFT: ci--; break;
+			case VK_RIGHT: ci++; break;
+			case VK_UP: ci -= cols; break;
+			case VK_DOWN: ci += cols; break;
+			default: return 0;
+		}
+		PalClickSwatch (ci);
+		return 0;
+	}
+	default:
+		return DefWindowProc (hwnd, msg, wParam, lParam);
+	}
+}
+
+static void GERegisterPalGrid (void)
+{
+	WNDCLASS wc;
+	memset (&wc, 0, sizeof (wc));
+	wc.style = CS_HREDRAW | CS_VREDRAW;
+	wc.lpfnWndProc = PalGridWndProc;
+	wc.hInstance = hInstance;
+	wc.hCursor = LoadCursor (NULL, IDC_ARROW);
+	wc.hbrBackground = (HBRUSH) GetStockObject (BLACK_BRUSH);
+	wc.lpszClassName = "GEPalSwatch";
+	RegisterClass (&wc);
+}
+
+static INT_PTR CALLBACK DIAPaletteProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	int id, code;
+
+	switch (msg) {
+	case WM_INITDIALOG: {
+		INITCOMMONCONTROLSEX icc;
+		int i;
+		static const int bars[] = { IDC_PALTBARR, IDC_PALTBARG, IDC_PALTBARB };
+		static const int decs[] = { IDC_PALDECR, IDC_PALDECG, IDC_PALDECB };
+		static const int uds[] = { IDC_PALUDR, IDC_PALUDG, IDC_PALUDB };
+		icc.dwSize = sizeof (icc);
+		icc.dwICC = ICC_BAR_CLASSES | ICC_UPDOWN_CLASS;
+		InitCommonControlsEx (&icc);
+		for (i = 0; i < 3; i++) {
+			HWND ud;
+			SendDlgItemMessage (hwndDlg, bars[i], TBM_SETRANGE, TRUE, MAKELPARAM (0, 255));
+			/* Positioned next to the edit in PalLayoutDialog — not UDS_ALIGNRIGHT
+			   (that sticks to the template rect and ends up over the sliders). */
+			ud = CreateWindow (UPDOWN_CLASS, "",
+				WS_CHILD | WS_VISIBLE | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+				0, 0, 16, 18, hwndDlg, (HMENU)(INT_PTR) uds[i], hInstance, NULL);
+			if (ud) {
+				SendMessage (ud, UDM_SETRANGE, 0, MAKELPARAM (255, 0));
+				SendMessage (ud, UDM_SETBUDDY, (WPARAM) GetDlgItem (hwndDlg, decs[i]), 0);
+			}
+		}
+		PalSetFont (hwndDlg);
+		PalSyncButtons ();
+		PalSyncFromColor ();
+		return TRUE;
+	}
+	case WM_SIZE:
+		PalLayoutDialog (hwndDlg);
+		return TRUE;
+	case WM_COMMAND:
+		id = (int) LOWORD (wParam);
+		code = (int) HIWORD (wParam);
+		if (pal_syncing) return TRUE;
+		if (id == IDC_PALCPY && code == BN_CLICKED) { PalArmOp (1); return TRUE; }
+		if (id == IDC_PALEXG && code == BN_CLICKED) { PalArmOp (2); return TRUE; }
+		if (id == IDC_PALSPR && code == BN_CLICKED) { PalArmOp (3); return TRUE; }
+		if (id == IDC_PALPICK && code == BN_CLICKED) { PalArmOp (4); return TRUE; }
+		if (id == IDC_PALTRN && code == BN_CLICKED) { PalApplyTrans (); return TRUE; }
+		if (id == IDC_PALHEXVIEW && code == BN_CLICKED) {
+			pal_hex = (IsDlgButtonChecked (hwndDlg, IDC_PALHEXVIEW) == BST_CHECKED);
+			PalSyncFromColor ();
+			return TRUE;
+		}
+		if (code == EN_CHANGE) {
+			if (id == IDC_PALDECR) { GESetColChan (0, PalParseValue (hwndDlg, id)); PalColorChanged (); }
+			else if (id == IDC_PALDECG) { GESetColChan (1, PalParseValue (hwndDlg, id)); PalColorChanged (); }
+			else if (id == IDC_PALDECB) { GESetColChan (2, PalParseValue (hwndDlg, id)); PalColorChanged (); }
+			return TRUE;
+		}
+		break;
+	case WM_VSCROLL:
+		if (pal_syncing) return TRUE;
+		id = GetDlgCtrlID ((HWND) lParam);
+		if (id == IDC_PALUDR || id == IDC_PALUDG || id == IDC_PALUDB) {
+			int v = (short) LOWORD (SendMessage ((HWND) lParam, UDM_GETPOS, 0, 0));
+			if (v < 0) v = 0;
+			if (v > 255) v = 255;
+			if (id == IDC_PALUDR) GESetColChan (0, v);
+			else if (id == IDC_PALUDG) GESetColChan (1, v);
+			else GESetColChan (2, v);
+			PalColorChanged ();
+			return TRUE;
+		}
+		{
+			int v = 255 - (int) SendMessage ((HWND) lParam, TBM_GETPOS, 0, 0);
+			if (id == IDC_PALTBARR) GESetColChan (0, v);
+			else if (id == IDC_PALTBARG) GESetColChan (1, v);
+			else if (id == IDC_PALTBARB) GESetColChan (2, v);
+			else break;
+			PalColorChanged ();
+		}
+		return TRUE;
+	case WM_DPICHANGED:
+		PalSetFont (hwndDlg);
+		PalLayoutDialog (hwndDlg);
+		return TRUE;
+	default:
+		break;
+	}
+	UNUSED(lParam);
+	return FALSE;
+}
+
+int GEPaletteDlgMessage (MSG * msg)
+{
+	if (palhwnd == NULL || !IsWindowVisible (palhwnd)) return 0;
+	return IsDialogMessage (palhwnd, msg);
+}
+
+static void GECreatePalette (HWND parent)
+{
+	if (palhwnd != NULL) return;
+	GERegisterPalGrid ();
+	palhwnd = CreateDialog (hInstance, "D_PALEDIT", parent, AsDlgProc (DIAPaletteProc));
+	if (palhwnd != NULL) {
+		PalSetFont (palhwnd);
+		ShowWindow (palhwnd, SW_HIDE);
 	}
 }
 
@@ -1186,29 +1669,15 @@ static void MEDragFinish (void)
 }
 
 /* ---- Graphic editor mode (Graph tab) ---- */
-/* Graph tab: tile on the left, tools along the bottom, optional palette
- * cluster or bar on the right (panelpro). */
+/* Graph tab: tile on the left, native toolbar along the bottom, optional
+ * D_PALEDIT child dialog on the right (panelpro). */
 
 typedef struct {
 	int pw, ph;
 	int tilex, tiley, tilew, tileh;	/* stretched tile preview */
-	int palx, paly, palcell, palw, palh;
-	int palcols, palrows;
-	int pbtny, pbtnh;			/* CPY/EXG/SPR/TRN/? row */
-	int barx[3], bary, barw, barh;
-	int valy, hexy;
-	int previewx, previewy, previeww, previewh;
-	int toolx, tooly, toolw, toolh, ntools;
-	int dsx, dsy;
-	int statusy;
 	int showpanel;
 } GELayout;
 
-static int GE_gfxcol = 0;
-static int GE_paint = 0;		/* dragging on the tile */
-static int GE_bar = -1;			/* 0=R 1=G 2=B while dragging a bar */
-static int GE_palop = 0;		/* 1=CPY 2=EXG 3=SPR 4=pick-from-tile */
-static int GE_palsrc = 0;
 static int GE_lastpx = 0, GE_lastpy = 0, GE_haslast = 0;
 static int GE_mx = 0, GE_my = 0;
 static int GE_linemode = 0, GE_linex = 0, GE_liney = 0;
@@ -1233,7 +1702,7 @@ static int GE_FindBlockForGraphic (int gfx)
 static void GEComputeLayout (HWND hwnd, GELayout * L)
 {
 	RECT rc;
-	int palcell, palw, palh, rightx, remain, barh, toolstrip;
+	int toolstrip, palw, ts;
 	GetClientRect (hwnd, &rc);
 	L->pw = rc.right - rc.left;
 	L->ph = rc.bottom - rc.top;
@@ -1242,99 +1711,21 @@ static void GEComputeLayout (HWND hwnd, GELayout * L)
 
 	toolstrip = GEToolbarHeight (hwnd);
 	L->showpanel = (panelpro != 0);
-	if (panelpro == 2) { L->palcols = 32; L->palrows = 8; }
-	else { L->palcols = 16; L->palrows = 16; }
-
-	L->ntools = 7;
-	L->toolw = 36;
-	L->toolh = 18;
-	L->toolx = 8;
-	L->tooly = L->ph - 42;
-	L->dsx = L->toolx + L->ntools * (L->toolw + 4) + 12;
-	L->dsy = L->tooly;
-	L->statusy = L->ph - 16;
-
-	if (!L->showpanel) {
-		L->tilex = 0;
-		L->tiley = 0;
-		L->tilew = L->pw - 8;
-		L->tileh = L->ph - toolstrip;
-		if (L->tileh < 8) L->tileh = 8;
-		if (L->tilew < 8) L->tilew = 8;
-		{
-			int ts = L->tilew < L->tileh ? L->tilew : L->tileh;
-			L->tilew = ts;
-			L->tileh = ts;
-		}
-		L->palcell = 12;
-		L->palw = L->palh = 0;
-		L->palx = L->pw + 64;
-		L->paly = 0;
-		L->pbtny = 0;
-		L->pbtnh = 16;
-		L->barw = L->barh = 0;
-		L->barx[0] = L->barx[1] = L->barx[2] = L->pw + 64;
-		L->bary = L->valy = L->hexy = 0;
-		L->previewx = L->pw + 64;
-		L->previewy = 0;
-		L->previeww = L->previewh = 0;
-		return;
+	palw = 0;
+	if (L->showpanel) {
+		palw = GEPaletteWidth (hwnd);
+		if (palw > L->pw / 2) palw = L->pw / 2;
 	}
-
-	palcell = (panelpro == 2) ? 14 : 20;
-	palw = palcell * L->palcols;
-	if (palw + 16 > L->pw / 2) {
-		palcell = (L->pw / 2 - 16) / L->palcols;
-		if (palcell < 8) palcell = 8;
-		if (palcell > 24) palcell = 24;
-		palw = palcell * L->palcols;
-	}
-	palh = palcell * L->palrows;
-	L->palcell = palcell;
-	L->palw = palw;
-	L->palh = palh;
-	L->palx = L->pw - 8 - palw;
-	L->paly = 20;
-
-	rightx = L->palx - 8;
-	if (rightx < blockwidth + 8) rightx = L->pw / 2;
 
 	L->tilex = 0;
 	L->tiley = 0;
-	L->tilew = rightx;
+	L->tilew = L->pw - palw - 8;
 	L->tileh = L->ph - toolstrip;
-	if (L->tileh < blockheight) L->tileh = blockheight;
-	{
-		int ts = L->tilew < L->tileh ? L->tilew : L->tileh;
-		if (ts < 8) ts = 8;
-		L->tilew = ts;
-		L->tileh = ts;
-	}
-
-	L->pbtny = L->paly + palh + 4;
-	L->pbtnh = 16;
-
-	remain = L->ph - (L->pbtny + L->pbtnh + 4) - 40 - 8;
-	if (remain < 80) remain = 80;
-	barh = remain * 2 / 5;
-	if (barh < 48) barh = 48;
-	if (barh > 140) barh = 140;
-	L->barh = barh;
-	L->barw = (palw - 16) / 3;
-	if (L->barw < 10) L->barw = 10;
-	L->bary = L->pbtny + L->pbtnh + 6;
-	L->barx[0] = L->palx;
-	L->barx[1] = L->palx + L->barw + 8;
-	L->barx[2] = L->palx + (L->barw + 8) * 2;
-
-	L->valy = L->bary + barh + 4;
-	L->hexy = L->valy + 14;
-
-	L->previewx = L->palx;
-	L->previewy = L->hexy + 18;
-	L->previeww = palw;
-	L->previewh = L->ph - L->previewy - 8;
-	if (L->previewh < 32) L->previewh = 32;
+	if (L->tilew < 8) L->tilew = 8;
+	if (L->tileh < 8) L->tileh = 8;
+	ts = L->tilew < L->tileh ? L->tilew : L->tileh;
+	L->tilew = ts;
+	L->tileh = ts;
 }
 
 static void GEGetColRGB (int * r, int * g, int * b)
@@ -1518,79 +1909,6 @@ static void GEFill (int px, int py)
 	free (seen);
 	free (st);
 	GE_lastpx = px; GE_lastpy = py; GE_haslast = 1;
-}
-
-static void GEDrawMapPreview (HDC hdc, const GELayout * L)
-{
-	int nx, ny, tw, th, i, j, pitch, bw, bh;
-	unsigned char * buf;
-	HDC fromhdc;
-	HBITMAP temphbm, hbmpold;
-	BITMAPINFOHEADER bih;
-	RECT prc;
-
-	prc.left = L->previewx; prc.top = L->previewy;
-	prc.right = L->previewx + L->previeww; prc.bottom = L->previewy + L->previewh;
-	FillRect (hdc, &prc, (HBRUSH) GetStockObject (BLACK_BRUSH));
-
-	if (mappt == NULL || blockgfxpt == NULL || blockwidth < 1 || blockheight < 1)
-		return;
-	if (L->previeww < 4 || L->previewh < 4) return;
-
-	tw = blockwidth;
-	th = blockheight;
-	nx = L->previeww / tw;
-	ny = L->previewh / th;
-	if (nx < 1) nx = 1;
-	if (ny < 1) ny = 1;
-	if (nx > mapwidth) nx = mapwidth;
-	if (ny > mapheight) ny = mapheight;
-
-	bw = nx * tw;
-	bh = ny * th;
-	pitch = ((bw * 3) + 3) & ~3;
-	buf = malloc ((size_t) pitch * bh);
-	if (buf == NULL) return;
-	memset (buf, 0, (size_t) pitch * bh);
-
-	for (j = 0; j < ny; j++) {
-		for (i = 0; i < nx; i++) {
-			int mx = xmapoffset + i;
-			int my = ymapoffset + j;
-			if (mx >= 0 && my >= 0 && mx < mapwidth && my < mapheight)
-				Blockto24 (mx, my, buf, i * tw, j * th, pitch);
-		}
-	}
-
-	memset (&bih, 0, sizeof (bih));
-	bih.biSize = sizeof (bih);
-	bih.biWidth = bw;
-	bih.biHeight = -bh;
-	bih.biPlanes = 1;
-	bih.biBitCount = 24;
-	bih.biCompression = BI_RGB;
-
-	fromhdc = CreateCompatibleDC (hdc);
-	if (fromhdc==NULL) { free (buf); return; }
-	temphbm = CreateDIBitmap (hdc, &bih, CBM_INIT, buf, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
-	if (temphbm==NULL) { DeleteDC (fromhdc); free (buf); return; }
-	hbmpold = SelectObject (fromhdc, temphbm);
-	StretchBlt (hdc, L->previewx, L->previewy, L->previeww, L->previewh,
-		fromhdc, 0, 0, bw, bh, SRCCOPY);
-	SelectObject (fromhdc, hbmpold);
-	DeleteObject (temphbm);
-	DeleteDC (fromhdc);
-	free (buf);
-}
-
-static void GEApplyBarAtY (int chan, int my)
-{
-	int v;
-	if (gelay.barh <= 1) return;
-	v = 255 - ((my - gelay.bary) * 255) / (gelay.barh - 1);
-	if (v < 0) v = 0;
-	if (v > 255) v = 255;
-	GESetColChan (chan, v);
 }
 
 static int GEIsTranspPixel (unsigned char * p)
@@ -1777,13 +2095,10 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 	HBITMAP temphbm, hbmpold;
 	unsigned char * tb;
 	BITMAPINFOHEADER bih;
-	char txt[80];
-	int r, g, b, cx, cy, step, pitch;
+	int pitch;
 	RECT prc;
-	const GELayout * cl;
 
 	GEComputeLayout (phwnd, L);
-	cl = L;
 
 	prc.left = 0; prc.top = 0; prc.right = L->pw; prc.bottom = L->ph;
 	{
@@ -1846,99 +2161,6 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 		DeleteObject (hpen);
 	}
 
-	GEGetColRGB (&r, &g, &b);
-	SetBkColor (myhdc, prographbg ? RGB (0x40, 0x40, 0x40) : RGB (0, 0, 0));
-	SetTextColor (myhdc, RGB (255, 255, 255));
-	if (L->showpanel) {
-	sprintf (txt, "Palette (col %d/255)", GE_gfxcol);
-	TextOut (myhdc, L->palx, 4, txt, (int) strlen (txt));
-
-	for (cy = 0; cy < L->palrows; cy++) {
-		for (cx = 0; cx < L->palcols; cx++) {
-			int ci = cy * L->palcols + cx;
-			if (ci > 255) continue;
-			HBRUSH hbr;
-			prc.left = L->palx + cx * L->palcell;
-			prc.top = L->paly + cy * L->palcell;
-			prc.right = prc.left + L->palcell;
-			prc.bottom = prc.top + L->palcell;
-			if (cmappt != NULL)
-				hbr = CreateSolidBrush (RGB (cmappt[ci * 3], cmappt[ci * 3 + 1], cmappt[ci * 3 + 2]));
-			else
-				hbr = CreateSolidBrush (RGB (ci, ci, ci));
-			FillRect (myhdc, &prc, hbr);
-			DeleteObject (hbr);
-			if (ci == GE_gfxcol) {
-				HPEN hpen2, hold2;
-				HBRUSH holdbr;
-				hpen2 = CreatePen (PS_SOLID, 2, RGB (255, 255, 255));
-				hold2 = SelectObject (myhdc, hpen2);
-				holdbr = SelectObject (myhdc, GetStockObject (NULL_BRUSH));
-				Rectangle (myhdc, prc.left, prc.top, prc.right, prc.bottom);
-				SelectObject (myhdc, hold2);
-				SelectObject (myhdc, holdbr);
-				DeleteObject (hpen2);
-			}
-		}
-	}
-
-	{
-		const char * palbtns[] = { "CPY", "EXG", "SPR", "TRN", " ? " };
-		int bi, bw = L->palw / 5;
-		if (bw < 28) bw = 28;
-		for (bi = 0; bi < 5; bi++) {
-			RECT brc;
-			int selected = (GE_palop == bi + 1);
-			brc.left = L->palx + bi * bw;
-			brc.top = L->pbtny;
-			brc.right = brc.left + bw - 2;
-			brc.bottom = L->pbtny + L->pbtnh;
-			FillRect (myhdc, &brc, (HBRUSH) GetStockObject (selected ? LTGRAY_BRUSH : WHITE_BRUSH));
-			SetBkColor (myhdc, selected ? RGB (192, 192, 192) : RGB (255, 255, 255));
-			SetTextColor (myhdc, RGB (0, 0, 0));
-			TextOut (myhdc, brc.left + 4, L->pbtny + 1, palbtns[bi], 3);
-		}
-	}
-
-	for (step = 0; step < L->barh; step++) {
-		int v = 255 - step * 255 / (L->barh - 1);
-		int ch;
-		int handle[3];
-		handle[0] = r; handle[1] = g; handle[2] = b;
-		for (ch = 0; ch < 3; ch++) {
-			HBRUSH hbr;
-			COLORREF col;
-			if (v == handle[ch] || (L->barh > 1 && step == (255 - handle[ch]) * (L->barh - 1) / 255))
-				col = RGB (0xF0, 0xF0, 0xF0);
-			else if (ch == 0) col = RGB (v, 0, 0);
-			else if (ch == 1) col = RGB (0, v, 0);
-			else col = RGB (0, 0, v);
-			hbr = CreateSolidBrush (col);
-			prc.left = L->barx[ch];
-			prc.top = L->bary + step;
-			prc.right = L->barx[ch] + L->barw;
-			prc.bottom = prc.top + 1;
-			FillRect (myhdc, &prc, hbr);
-			DeleteObject (hbr);
-		}
-	}
-
-	SetBkColor (myhdc, RGB (0, 0, 0));
-	SetTextColor (myhdc, RGB (255, 255, 255));
-	{
-		int ch, vals[3];
-		vals[0] = r; vals[1] = g; vals[2] = b;
-		for (ch = 0; ch < 3; ch++) {
-			sprintf (txt, "%03d", vals[ch]);
-			TextOut (myhdc, L->barx[ch], L->valy, txt, 3);
-			sprintf (txt, "$%02X", vals[ch]);
-			TextOut (myhdc, L->barx[ch], L->hexy, txt, 4);
-		}
-	}
-
-	GEDrawMapPreview (myhdc, cl);
-	}
-
 	GEUpdateStatus ();
 }
 
@@ -1960,10 +2182,11 @@ static int GETileXY (int mx, int my, int * px, int * py)
 static int GEDoTileAction (HWND hwnd, int act, int px, int py)
 {
 	if (act == 0) return 1;
-	if (act == 2) GE_gfxcol = 0;
+	if (act == 2) { GE_gfxcol = 0; GERefreshPalette (); }
 	if (act == 6) {
 		GEPickAt (px, py, 1);
 		InvalidateRect (hwnd, NULL, FALSE);
+		GERefreshPalette ();
 		return 1;
 	}
 	if (act == 8) {
@@ -2001,77 +2224,23 @@ static int GEDoTileAction (HWND hwnd, int act, int px, int py)
 
 static int GEOnLButtonDown (HWND hwnd, int mx, int my)
 {
-	int px, py, ch, bw;
+	int px, py;
 	GEComputeLayout (hwnd, &gelay);
 	GE_mx = mx; GE_my = my;
-
-	if (gelay.showpanel && mx >= gelay.palx && my >= gelay.paly &&
-		mx < gelay.palx + gelay.palw && my < gelay.paly + gelay.palh) {
-		int ci = ((mx - gelay.palx) / gelay.palcell) +
-			((my - gelay.paly) / gelay.palcell) * gelay.palcols;
-		if (ci < 0) ci = 0;
-		if (ci > 255) ci = 255;
-		if (GE_palop >= 1 && GE_palop <= 3) {
-			GEPaletteOp (ci);
-			GE_gfxcol = ci;
-		} else {
-			GE_gfxcol = ci;
-			GE_palop = 0;
-		}
-		InvalidateRect (hwnd, NULL, FALSE);
-		return 1;
-	}
-
-	bw = gelay.palw / 5;
-	if (bw < 28) bw = 28;
-	if (gelay.showpanel && my >= gelay.pbtny && my < gelay.pbtny + gelay.pbtnh &&
-		mx >= gelay.palx && mx < gelay.palx + gelay.palw) {
-		int bi = (mx - gelay.palx) / bw;
-		if (bi >= 0 && bi < 5) {
-			if (bi == 3) {
-				/* TRN: write colourkey into the current palette slot */
-				if (cmappt && GE_gfxcol >= 0 && GE_gfxcol < 256) {
-					if (blockdepth == 8) {
-						cmappt[GE_gfxcol * 3] = cmappt[trans8bit * 3];
-						cmappt[GE_gfxcol * 3 + 1] = cmappt[trans8bit * 3 + 1];
-						cmappt[GE_gfxcol * 3 + 2] = cmappt[trans8bit * 3 + 2];
-					} else {
-						cmappt[GE_gfxcol * 3] = transred;
-						cmappt[GE_gfxcol * 3 + 1] = transgreen;
-						cmappt[GE_gfxcol * 3 + 2] = transblue;
-					}
-				}
-				GE_palop = 0;
-			} else {
-				GE_palop = bi + 1; /* 1 CPY 2 EXG 3 SPR 4 pick */
-				GE_palsrc = GE_gfxcol;
-			}
-			InvalidateRect (hwnd, NULL, FALSE);
-			return 1;
-		}
-	}
-
-	for (ch = 0; gelay.showpanel && ch < 3; ch++) {
-		if (mx >= gelay.barx[ch] && mx < gelay.barx[ch] + gelay.barw &&
-			my >= gelay.bary && my < gelay.bary + gelay.barh) {
-			GE_bar = ch;
-			GEApplyBarAtY (ch, my);
-			SetCapture (hwnd);
-			InvalidateRect (hwnd, NULL, FALSE);
-			return 1;
-		}
-	}
 
 	if (GETileXY (mx, my, &px, &py)) {
 		if (GE_palop == 4) {
 			GEPickAt (px, py, GetKeyState (VK_CONTROL) < 0);
 			GE_palop = 0;
+			PalSyncButtons ();
 			InvalidateRect (hwnd, NULL, FALSE);
+			GERefreshPalette ();
 			return 1;
 		}
 		if (GetKeyState (VK_CONTROL) < 0) {
 			GEPickAt (px, py, 1);
 			InvalidateRect (hwnd, NULL, FALSE);
+			GERefreshPalette ();
 			return 1;
 		}
 		GEDoTileAction (hwnd, mb_l, px, py);
@@ -2096,11 +2265,6 @@ static int GEOnMouseMove (HWND hwnd, int mx, int my)
 {
 	int px, py;
 	GE_mx = mx; GE_my = my;
-	if (GE_bar >= 0) {
-		GEApplyBarAtY (GE_bar, my);
-		InvalidateRect (hwnd, NULL, FALSE);
-		return 1;
-	}
 	if (GE_paint) {
 		GEComputeLayout (hwnd, &gelay);
 		if (GETileXY (mx, my, &px, &py)) {
@@ -2116,8 +2280,7 @@ static int GEOnMouseMove (HWND hwnd, int mx, int my)
 
 static void GEOnLButtonUp (HWND hwnd)
 {
-	if (GE_bar >= 0 || GE_paint) {
-		GE_bar = -1;
+	if (GE_paint) {
 		GE_paint = 0;
 		ReleaseCapture ();
 		InvalidateRect (hwnd, NULL, FALSE);
@@ -2616,11 +2779,14 @@ static LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT message, WPARAM wParam, LPA
 		return 0;
 	case WM_SIZE:
 		GELayoutToolbar (hwnd);
+		GEPlacePalette (hwnd);
 		InvalidateRect (hwnd, NULL, FALSE);
 		break;
 	case WM_DPICHANGED:
 		GEEnsureUiFont (hwnd);
+		if (palhwnd) PalSetFont (palhwnd);
 		GELayoutToolbar (hwnd);
+		GEPlacePalette (hwnd);
 		InvalidateRect (hwnd, NULL, FALSE);
 		break;
 	case WM_KEYDOWN:
@@ -2634,6 +2800,10 @@ static LRESULT CALLBACK GraphWndProc(HWND hwnd, UINT message, WPARAM wParam, LPA
 		}
 		return 0;
 	case WM_DESTROY:
+		if (palhwnd != NULL) {
+			DestroyWindow (palhwnd);
+			palhwnd = NULL;
+		}
 		ghwnd = NULL;
 		if (ge_font != NULL) {
 			DeleteObject (ge_font);
@@ -2676,6 +2846,7 @@ HWND CreateGraphEditorWindow (HWND hwnd)
 		hwnd, (HMENU) 1002, hInstance, NULL);
 
 	GECreateToolbar (ghwnd);
+	GECreatePalette (ghwnd);
 	ShowWindow (ghwnd, SW_HIDE);
 	return ghwnd;
 }
