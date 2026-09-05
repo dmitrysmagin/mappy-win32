@@ -1523,7 +1523,7 @@ void ApplyEditorPrefs (void)
 	v = F14_EphdGet (F14_EPHD_CURLAYER);
 	if (v >= 0 && v < MAXMAPLAYERS && GetLayerpt (v) != NULL)
 		MapSetCurLayer (v);
-	divideron = F14_EphdGet (F14_EPHD_DIVON) ? 1 : 0;
+	/* Dividers stay off unless the user enables them (INI or MapTools). */
 	v = F14_EphdGet (F14_EPHD_DIVGAPX);
 	if (v >= 8 && v <= 4096) dividergapx = v;
 	v = F14_EphdGet (F14_EPHD_DIVGAPY);
