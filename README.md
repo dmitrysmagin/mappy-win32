@@ -54,7 +54,7 @@ If the linker reports `Permission denied` on `mapwin.exe`, close the running edi
 
 ## Running
 
-Copy or run `src/mapwin.exe`. On first launch it reads `MAPWIN.INI` from the exe directory (defaults live in `src/MAPWIN.INI`). Useful keys are documented in that file: window layout, zoom, wheel behaviour, mouse/key bindings, custom `.MAP` format, object/block dialog labels, and Lua file-menu hooks.
+Copy or run `src/mapwin.exe`. On first launch it reads `MAPWIN.INI` from the exe directory (defaults live in `src/MAPWIN.INI`). Useful keys are documented in that file: window layout, zoom, wheel behaviour, mouse/key bindings, custom `.MAP` format, object/block dialog labels, and Lua file-menu hooks. `width` / `height` are 96-DPI units; see [High-DPI](#high-dpi) for how the UI scales.
 
 Command line:
 
@@ -66,6 +66,25 @@ mapwin.exe map.fmp script.lua
 You can also drop `.fmp`, `.fma`, `.map`, `.bmp`, `.pcx`, `.png`, `.mar`, or `.lua` onto the main window.
 
 Lua scripts that ship with the editor go in `luascr\` next to the exe (`src/luascr/` in this repo). Examples: export helpers, layer tools, Placer / Area mouse scripts, `BlockProp.lua` / `ObjectProp.lua`.
+
+## High-DPI
+
+The exe embeds a Per-Monitor V2 manifest (plus Common Controls 6.0), so Windows does not bitmap-scale `mapwin.exe`. Chrome is laid out in 96-DPI units (DIPs) and converted with the window’s DPI (`src/dpi.h`).
+
+**Tiles stay 1:1 device pixels.** Zoom 0.25 / 0.5 / 1 / 2 / 4 is the only scale for map cells. A 16×16 tile at Zoom ×1 is 16 screen pixels at any DPI. If tiles look small on a 200% laptop, use Zoom ×2 rather than expecting the OS scale to stretch the map.
+
+What *does* follow Windows DPI:
+
+- Startup size: `width` / `height` in `MAPWIN.INI` are DIPs (`640`×`480` → 960×720 at 150%, 1280×960 at 200%). The window is centered on the monitor under the cursor
+- Map / Graph / Block split, tab strip, Graph toolbar and palette
+- Overlay fonts (user-data and object labels)
+- Wall, divider, graph-grid, and object-border pens
+
+Fill (`f`), pick (`p`), and drag-map use client coordinates (`ScreenToClient`), not guessed frame metrics, so they stay on the tile under the cursor when borders or caption height change.
+
+Dialog templates are still `FONT 8, "MS Sans Serif"` in dialog units; the dialog manager scales those once the process is DPI-aware. The DirectDraw animation preview (`WITH_DX=1`) is not DPI-aware.
+
+Dragging the window between monitors with different DPI works for Graph / Block chrome (`WM_DPICHANGED` recreates fonts and relayouts). A full live re-layout of the main frame (and Lua `moveWindow` DIP conversion) is not done yet.
 
 ## File formats
 

@@ -3,11 +3,13 @@
 
 #define  STRICT
 #include <windows.h>
+#include <commctrl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "mapwin.h"
 #include "compat.h"
+#include "dpi.h"
 #include "fmp14.h"
 #include "luabind.h"
 
@@ -1322,6 +1324,13 @@ char * iniinfo, * inipos;
 //		"Map Editor", MB_OK | MB_ICONEXCLAMATION);
 
 	hInstance = hInst;
+	{
+		INITCOMMONCONTROLSEX icc;
+		icc.dwSize = sizeof (icc);
+		icc.dwICC = ICC_WIN95_CLASSES | ICC_TAB_CLASSES |
+			ICC_BAR_CLASSES | ICC_UPDOWN_CLASS | ICC_STANDARD_CLASSES;
+		InitCommonControlsEx (&icc);
+	}
 	GetModuleFileName (hInstance, defpname, 254);
 	i=strlen (defpname); while (i) { if (defpname[i]=='\\' || defpname[i]=='/') break; i--; }
 	if (i>0) defpname[i+1] = 0;
@@ -1474,12 +1483,15 @@ char * iniinfo, * inipos;
 
 	haccel = LoadAccelerators (hInstance, "MAPACCEL");
 
-	hwnd = CreateWindow  (szAppname, szAppname,
+	{
+		int posx, posy, winw, winh;
+		/* INI width/height are 96-DPI DIPs (see MAPWIN.INI). */
+		MapCenterOnWorkArea (defwidth, defheight, &posx, &posy, &winw, &winh);
+		hwnd = CreateWindow  (szAppname, szAppname,
 								WS_OVERLAPPEDWINDOW,
-								(GetSystemMetrics (SM_CXSCREEN))/2-(defwidth/2),
-								(GetSystemMetrics (SM_CYSCREEN))/2-(defheight/2),
-								defwidth, defheight,
+								posx, posy, winw, winh,
 								NULL, NULL, hInstance, NULL);
+	}
 
 	ShowWindow (hwnd, nCmdShow);
 	UpdateWindow (hwnd);

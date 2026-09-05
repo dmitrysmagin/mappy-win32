@@ -1,6 +1,9 @@
 #include <windows.h>
 #include "mapdefs.h"
 
+/* CREATEPROCESS_MANIFEST_RESOURCE_ID / RT_MANIFEST — not default-manifest.o */
+1 24 "mapwin.manifest"
+
 MAPWINIC ICON "mapwin.ico"
 
 MAPACCEL ACCELERATORS 

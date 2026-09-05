@@ -48,14 +48,13 @@ CRTEND   = $(shell $(CC) -print-file-name=crtend.o)
 CRT2     = $(shell $(CC) -print-file-name=crt2.o)
 LIBDIRS  = -L$(shell dirname $(CRTBEGIN))
 SYSLIBS  = -lmingw32 -lgcc -lgcc_eh -lmingwex -lmsvcrt -lkernel32 -lpthread
-MANIFEST = $(shell $(CC) -print-file-name=default-manifest.o)
 LIBS    = -lcomdlg32 -lgdi32 -luser32 -lkernel32 -lcomctl32 -lshell32 -lole32 $(DXLIBS)
 
 $(PROGRAM): $(OFILES) $(LUA_OFILES) mapwinrc.o
 	$(LD) $(LDFLAGS) $(LIBDIRS) -o $@ $(CRT2) $(CRTBEGIN) \
-		$(OFILES) $(LUA_OFILES) mapwinrc.o $(LIBS) $(SYSLIBS) $(MANIFEST) $(CRTEND)
+		$(OFILES) $(LUA_OFILES) mapwinrc.o $(LIBS) $(SYSLIBS) $(CRTEND)
 
-mapwinrc.o: mapwin.rc mapdefs.h MAPWIN.ICO
+mapwinrc.o: mapwin.rc mapdefs.h mapwin.manifest MAPWIN.ICO
 	$(WINDRES) mapwin.rc -o mapwinrc.o
 
 # handle lowercase ico name on case-sensitive filesystems

@@ -7,6 +7,7 @@
 #include "mapwin.h"
 #include "mapdefs.h"
 #include "compat.h"
+#include "dpi.h"
 #include "luabind.h"
 
 #ifndef WM_DPICHANGED
@@ -46,6 +47,7 @@ static HWND ge_toolbtn[7] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 static HWND ge_dsbtn[4] = { NULL, NULL, NULL, NULL };
 static HWND ge_dslbl = NULL, ge_status = NULL;
 static HFONT ge_font = NULL;
+static HFONT me_font = NULL;
 static int pal_syncing = 0;
 static int pal_hex = 0;		/* 0 = decimal RGB fields, 1 = $XX hex */
 static char szMapEdname[] = "Map Editor";
@@ -211,39 +213,25 @@ static void GEInvalidate (void)
 	GERefreshPalette ();
 }
 
-static int GEGetDpi (HWND hwnd)
-{
-	HDC hdc;
-	int dpi;
-	if (hwnd == NULL) return 96;
-	hdc = GetDC (hwnd);
-	if (hdc == NULL) return 96;
-	dpi = GetDeviceCaps (hdc, LOGPIXELSY);
-	ReleaseDC (hwnd, hdc);
-	if (dpi < 96) dpi = 96;
-	return dpi;
-}
-
 static int GEToolbarHeight (HWND hwnd)
 {
-	int dpi = GEGetDpi (hwnd);
-	return MulDiv (24, dpi, 96) + MulDiv (18, dpi, 96) + MulDiv (12, dpi, 96);
+	return MapDip (hwnd, 24) + MapDip (hwnd, 18) + MapDip (hwnd, 12);
+}
+
+static void MEEnsureUiFont (HWND hwnd)
+{
+	HFONT created = MapCreateUiFont (hwnd);
+	if (created == NULL) return;
+	if (me_font != NULL) DeleteObject (me_font);
+	me_font = created;
 }
 
 static void GEEnsureUiFont (HWND hwnd)
 {
-	NONCLIENTMETRICS ncm;
 	HFONT created;
 	int i;
 
-	memset (&ncm, 0, sizeof (ncm));
-	ncm.cbSize = sizeof (ncm);
-	if (!SystemParametersInfo (SPI_GETNONCLIENTMETRICS, sizeof (ncm), &ncm, 0)) {
-		ncm.cbSize = sizeof (ncm) - sizeof (int);
-		if (!SystemParametersInfo (SPI_GETNONCLIENTMETRICS, ncm.cbSize, &ncm, 0))
-			return;
-	}
-	created = CreateFontIndirect (&ncm.lfMessageFont);
+	created = MapCreateUiFont (hwnd);
 	if (created == NULL) return;
 	if (ge_font != NULL) DeleteObject (ge_font);
 	ge_font = created;
@@ -254,7 +242,6 @@ static void GEEnsureUiFont (HWND hwnd)
 	for (i = 0; i < 4; i++)
 		if (ge_dsbtn[i]) SendMessage (ge_dsbtn[i], WM_SETFONT, (WPARAM) ge_font, TRUE);
 	if (palhwnd) PalSetFont (palhwnd);
-	(void) hwnd;
 }
 
 static void GEUpdateToolbar (void)
@@ -289,24 +276,24 @@ static void GELayoutToolbar (HWND hwnd)
 	GetClientRect (hwnd, &rc);
 	pw = rc.right - rc.left;
 	ph = rc.bottom - rc.top;
-	dpi = GEGetDpi (hwnd);
-	btnw = MulDiv (44, dpi, 96);
-	btnh = MulDiv (24, dpi, 96);
-	dsw = MulDiv (28, dpi, 96);
-	gap = MulDiv (4, dpi, 96);
-	margin = MulDiv (8, dpi, 96);
-	statush = MulDiv (18, dpi, 96);
-	dslblw = MulDiv (72, dpi, 96);
+	dpi = MapGetDpi (hwnd);
+	btnw = MapScale (44, dpi);
+	btnh = MapScale (24, dpi);
+	dsw = MapScale (28, dpi);
+	gap = MapScale (4, dpi);
+	margin = MapScale (8, dpi);
+	statush = MapScale (18, dpi);
+	dslblw = MapScale (72, dpi);
 	need = GETOOL_COUNT * (btnw + gap) + gap * 2 + dslblw + 4 * (dsw + gap) + margin * 2;
 	if (need > pw && pw > margin * 2) {
 		int scale = pw - margin * 2;
 		btnw = btnw * scale / need;
 		dsw = dsw * scale / need;
 		dslblw = dslblw * scale / need;
-		if (btnw < 28) btnw = 28;
-		if (dsw < 20) dsw = 20;
+		if (btnw < MapScale (28, dpi)) btnw = MapScale (28, dpi);
+		if (dsw < MapScale (20, dpi)) dsw = MapScale (20, dpi);
 	}
-	y = ph - statush - gap - btnh - MulDiv (4, dpi, 96);
+	y = ph - statush - gap - btnh - MapScale (4, dpi);
 	if (y < 0) y = 0;
 	x = margin;
 	for (i = 0; i < GETOOL_COUNT; i++) {
@@ -324,7 +311,7 @@ static void GELayoutToolbar (HWND hwnd)
 		x += dsw + gap;
 	}
 	if (ge_status)
-		MoveWindow (ge_status, margin, ph - statush - 2, pw - margin * 2, statush, TRUE);
+		MoveWindow (ge_status, margin, ph - statush - MapScale (2, dpi), pw - margin * 2, statush, TRUE);
 }
 
 static void GECreateToolbar (HWND parent)
@@ -390,13 +377,13 @@ static int GEPaletteRows (void)
 
 static int GEPaletteWidth (HWND hwnd)
 {
-	int dpi = GEGetDpi (hwnd);
+	int dpi = MapGetDpi (hwnd);
 	int cols = GEPaletteCols ();
-	int cell = MulDiv ((panelpro == 2) ? 10 : 14, dpi, 96);
+	int cell = MapScale ((panelpro == 2) ? 10 : 14, dpi);
 	int w, minw;
-	if (cell < 8) cell = 8;
-	w = cols * cell + MulDiv (20, dpi, 96);
-	minw = MulDiv (168, dpi, 96);
+	if (cell < MapScale (8, dpi)) cell = MapScale (8, dpi);
+	w = cols * cell + MapScale (20, dpi);
+	minw = MapScale (168, dpi);
 	if (w < minw) w = minw;
 	return w;
 }
@@ -547,15 +534,15 @@ static void PalLayoutDialog (HWND dlg)
 	GetClientRect (dlg, &rc);
 	cw = rc.right - rc.left;
 	ch = rc.bottom - rc.top;
-	dpi = GEGetDpi (dlg);
-	m = MulDiv (6, dpi, 96);
-	titleh = MulDiv (16, dpi, 96);
-	btnh = MulDiv (22, dpi, 96);
-	barh = MulDiv (72, dpi, 96);
-	edith = MulDiv (20, dpi, 96);
-	checkh = MulDiv (16, dpi, 96);
-	spinw = MulDiv (16, dpi, 96);
-	gap = MulDiv (4, dpi, 96);
+	dpi = MapGetDpi (dlg);
+	m = MapScale (6, dpi);
+	titleh = MapScale (16, dpi);
+	btnh = MapScale (22, dpi);
+	barh = MapScale (72, dpi);
+	edith = MapScale (20, dpi);
+	checkh = MapScale (16, dpi);
+	spinw = MapScale (16, dpi);
+	gap = MapScale (4, dpi);
 	cols = GEPaletteCols ();
 	rows = GEPaletteRows ();
 
@@ -564,17 +551,17 @@ static void PalLayoutDialog (HWND dlg)
 	gy = gap + titleh + gap;
 	gridw = cw - m * 2;
 	cell = gridw / cols;
-	if (cell < 8) cell = 8;
-	if (cell > MulDiv (20, dpi, 96)) cell = MulDiv (20, dpi, 96);
+	if (cell < MapScale (8, dpi)) cell = MapScale (8, dpi);
+	if (cell > MapScale (20, dpi)) cell = MapScale (20, dpi);
 	gridw = cell * cols;
 	gridh = cell * rows;
 	{
-		int leftover = ch - gy - btnh - gap - MulDiv (12, dpi, 96) - barh
+		int leftover = ch - gy - btnh - gap - MapScale (12, dpi) - barh
 			- gap - edith - gap - checkh - m;
 		if (leftover < 0) leftover = 0;
-		if (gridh > leftover && leftover >= rows * 8) {
+		if (gridh > leftover && leftover >= rows * MapScale (8, dpi)) {
 			cell = leftover / rows;
-			if (cell < 8) cell = 8;
+			if (cell < MapScale (8, dpi)) cell = MapScale (8, dpi);
 			gridw = cell * cols;
 			gridh = cell * rows;
 		}
@@ -585,7 +572,7 @@ static void PalLayoutDialog (HWND dlg)
 
 	y = gy + gridh + gap;
 	bw = (cw - m * 2 - gap * 4) / 5;
-	if (bw < MulDiv (24, dpi, 96)) bw = MulDiv (24, dpi, 96);
+	if (bw < MapScale (24, dpi)) bw = MapScale (24, dpi);
 	x = m;
 	for (i = 0; i < 5; i++) {
 		MoveWindow (GetDlgItem (dlg, btns[i]), x, y, bw, btnh, TRUE);
@@ -595,11 +582,11 @@ static void PalLayoutDialog (HWND dlg)
 	y += btnh + gap;
 	{
 		int colw = (cw - m * 2) / 3;
-		int lblh = MulDiv (12, dpi, 96);
+		int lblh = MapScale (12, dpi);
 		for (i = 0; i < 3; i++) {
 			int cx = m + i * colw;
 			int fieldw = colw - gap - spinw;
-			if (fieldw < MulDiv (20, dpi, 96)) fieldw = MulDiv (20, dpi, 96);
+			if (fieldw < MapScale (20, dpi)) fieldw = MapScale (20, dpi);
 			MoveWindow (GetDlgItem (dlg, lbls[i]), cx, y, colw, lblh, TRUE);
 			MoveWindow (GetDlgItem (dlg, bars[i]), cx, y + lblh, colw - gap, barh, TRUE);
 			MoveWindow (GetDlgItem (dlg, vals[i]), cx, y + lblh + barh + gap, fieldw, edith, TRUE);
@@ -671,7 +658,7 @@ static LRESULT CALLBACK PalGridWndProc (HWND hwnd, UINT msg, WPARAM wParam, LPAR
 				if (ci == GE_gfxcol) {
 					HPEN hpen, hold;
 					HBRUSH holdbr;
-					hpen = CreatePen (PS_SOLID, 2, RGB (255, 255, 255));
+					hpen = CreatePen (PS_SOLID, MapPenWidth (hwnd) * 2, RGB (255, 255, 255));
 					hold = SelectObject (hdc, hpen);
 					holdbr = SelectObject (hdc, GetStockObject (NULL_BRUSH));
 					Rectangle (hdc, prc.left, prc.top, prc.right, prc.bottom);
@@ -946,21 +933,27 @@ int yb;
 	return yb;
 }
 
+/* Screen cursor to map-window client pixels. 0 if the cursor is outside
+ * the client (caption/border) or there is no map window. */
+static int MECursorClient (POINT * pt)
+{
+	RECT rc;
+
+	if (mhwnd == NULL || pt == NULL) return 0;
+	GetCursorPos (pt);
+	ScreenToClient (mhwnd, pt);
+	GetClientRect (mhwnd, &rc);
+	if (pt->x < rc.left || pt->x >= rc.right ||
+		pt->y < rc.top || pt->y >= rc.bottom) return 0;
+	return 1;
+}
+
 void MEFillMap (int fillstyle)
 {
 POINT mousecoords;
-RECT merect;
 
 	if (mappt==NULL) return;
-	GetCursorPos (&mousecoords);
-	GetWindowRect (mhwnd, &merect);
-	if (mousecoords.x<merect.left ||
-		mousecoords.x>merect.right ||
-		mousecoords.y<merect.top ||
-		mousecoords.y>merect.bottom) return;
-
-	mousecoords.x -= (merect.left+GetSystemMetrics(SM_CXFRAME));
-	mousecoords.y -= (merect.top+GetSystemMetrics(SM_CYCAPTION)+GetSystemMetrics(SM_CYFRAME));
+	if (!MECursorClient (&mousecoords)) return;
 	MECopyToUndo ();
 	MapFill (xmapoffset+MEGetX(mousecoords.x,mousecoords.y),
 		ymapoffset+MEGetY(mousecoords.x,mousecoords.y),
@@ -970,18 +963,9 @@ RECT merect;
 void MEPickBlock (void)
 {
 POINT mousecoords;
-RECT merect;
 
 	if (mappt==NULL) return;
-	GetCursorPos (&mousecoords);
-	GetWindowRect (mhwnd, &merect);
-	if (mousecoords.x<merect.left ||
-		mousecoords.x>merect.right ||
-		mousecoords.y<merect.top ||
-		mousecoords.y>merect.bottom) return;
-
-	mousecoords.x -= (merect.left+GetSystemMetrics(SM_CXFRAME));
-	mousecoords.y -= (merect.top+GetSystemMetrics(SM_CYCAPTION)+GetSystemMetrics(SM_CYFRAME));
+	if (!MECursorClient (&mousecoords)) return;
 	PickBlock (xmapoffset+MEGetX(mousecoords.x,mousecoords.y),
 		ymapoffset+MEGetY(mousecoords.x,mousecoords.y));
 }
@@ -1309,7 +1293,7 @@ RECT rc;
 			/* 3D-wall mode: red vertical wall markers at tile left edges */
 			RECT wrc; HPEN wpen, wold; int wx, wy0, wy1;
 			GetClientRect (phwnd, &wrc);
-			wpen = CreatePen (PS_SOLID, 1, RGB (255, 0, 0));
+			wpen = CreatePen (PS_SOLID, MapPenWidth (phwnd), RGB (255, 0, 0));
 			wold = SelectObject (myhdc, wpen);
 			for (j=0;j<=k;j++) {
 				wx = ZX(j*blockgapx);
@@ -1328,7 +1312,7 @@ RECT rc;
 			int oy = (ymapoffset * blockheight * zoomon / zoomdiv) % stepy;
 			int x, y;
 			GetClientRect (phwnd, &crc);
-			hpen = CreatePen (PS_SOLID, 1, RGB ((dividercol>>16)&0xFF, (dividercol>>8)&0xFF, dividercol&0xFF));
+			hpen = CreatePen (PS_SOLID, MapPenWidth (phwnd), RGB ((dividercol>>16)&0xFF, (dividercol>>8)&0xFF, dividercol&0xFF));
 			holdpen = SelectObject (myhdc, hpen);
 			for (x = -ox; x <= crc.right; x += stepx) {
 				MoveToEx (myhdc, x, 0, NULL);
@@ -1345,6 +1329,9 @@ RECT rc;
 		if (showuser>=1 && showuser<=8) {
 			/* show user field / flags overlaying tiles (objects win) */
 			char utxt[64]; int vx, vy, ti, tj; short int bv; BLKSTR * bp;
+			HGDIOBJ holdf = NULL;
+			if (me_font == NULL) MEEnsureUiFont (phwnd);
+			if (me_font) holdf = SelectObject (myhdc, me_font);
 			SetBkMode (myhdc, TRANSPARENT);
 			SetTextColor (myhdc, RGB (255, 255, 0));
 			for (tj=0;tj<l;tj++) {
@@ -1389,6 +1376,7 @@ RECT rc;
 					TextOut (myhdc, ZX(ti*blockgapx), ZX(tj*blockgapy), utxt, strlen (utxt));
 				}
 			}
+			if (holdf) SelectObject (myhdc, holdf);
 		}
 
 		{
@@ -1706,8 +1694,8 @@ static void GEComputeLayout (HWND hwnd, GELayout * L)
 	GetClientRect (hwnd, &rc);
 	L->pw = rc.right - rc.left;
 	L->ph = rc.bottom - rc.top;
-	if (L->pw < 80) L->pw = 80;
-	if (L->ph < 80) L->ph = 80;
+	if (L->pw < MapDip (hwnd, 80)) L->pw = MapDip (hwnd, 80);
+	if (L->ph < MapDip (hwnd, 80)) L->ph = MapDip (hwnd, 80);
 
 	toolstrip = GEToolbarHeight (hwnd);
 	L->showpanel = (panelpro != 0);
@@ -1719,10 +1707,10 @@ static void GEComputeLayout (HWND hwnd, GELayout * L)
 
 	L->tilex = 0;
 	L->tiley = 0;
-	L->tilew = L->pw - palw - 8;
+	L->tilew = L->pw - palw - MapDip (hwnd, 8);
 	L->tileh = L->ph - toolstrip;
-	if (L->tilew < 8) L->tilew = 8;
-	if (L->tileh < 8) L->tileh = 8;
+	if (L->tilew < MapDip (hwnd, 8)) L->tilew = MapDip (hwnd, 8);
+	if (L->tileh < MapDip (hwnd, 8)) L->tileh = MapDip (hwnd, 8);
 	ts = L->tilew < L->tileh ? L->tilew : L->tileh;
 	L->tilew = ts;
 	L->tileh = ts;
@@ -2109,9 +2097,12 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 	}
 
 	if (blockgfxpt == NULL || numblockgfx <= 0) {
+		HGDIOBJ holdf = NULL;
+		if (ge_font) holdf = SelectObject (myhdc, ge_font);
 		SetBkColor (myhdc, RGB (0, 0, 0));
 		SetTextColor (myhdc, RGB (255, 255, 255));
-		TextOut (myhdc, 8, 8, "No graphics loaded", 18);
+		TextOut (myhdc, MapDip (phwnd, 8), MapDip (phwnd, 8), "No graphics loaded", 18);
+		if (holdf) SelectObject (myhdc, holdf);
 		return;
 	}
 	if (curgfxsel < 0) curgfxsel = 0;
@@ -2145,7 +2136,7 @@ static void MEDrawGraphicEditor (HWND phwnd, HDC myhdc)
 	{
 		HPEN hpen, hold;
 		int gx, gy;
-		hpen = CreatePen (PS_SOLID, 1, RGB (0xC0, 0xC0, 0xC0));
+		hpen = CreatePen (PS_SOLID, MapPenWidth (phwnd), RGB (0xC0, 0xC0, 0xC0));
 		hold = SelectObject (myhdc, hpen);
 		for (gx = 1; gx < blockwidth; gx++) {
 			int sx = L->tilex + gx * L->tilew / blockwidth;
@@ -2378,6 +2369,10 @@ PAINTSTRUCT ps;
 			MEDrawMap (hwnd, myhdc);
 		EndPaint (hwnd, &ps);
 //		ReleaseDC (hwnd, myhdc);
+		break;
+	case WM_DPICHANGED:
+		MEEnsureUiFont (hwnd);
+		InvalidateRect (hwnd, NULL, FALSE);
 		break;
 	case WM_LBUTTONDOWN:
 		if (mappt==NULL) return 0;
@@ -2669,15 +2664,15 @@ PAINTSTRUCT ps;
 				break;
 			case 'D': /* drag-map */
 				if (!dragmode) {
-					POINT mc; RECT rc;
-					GetCursorPos(&mc);
-					GetWindowRect(mhwnd, &rc);
-					dragmode = 1;
-					dragox = mc.x - rc.left;
-					dragoy = mc.y - rc.top;
-					dragoxoff = xmapoffset;
-					dragoyoff = ymapoffset;
-					SetCursor(LoadCursor(NULL, IDC_SIZEALL));
+					POINT mc;
+					if (MECursorClient (&mc)) {
+						dragmode = 1;
+						dragox = mc.x;
+						dragoy = mc.y;
+						dragoxoff = xmapoffset;
+						dragoyoff = ymapoffset;
+						SetCursor(LoadCursor(NULL, IDC_SIZEALL));
+					}
 				} else {
 					MEDragFinish();
 				}
@@ -2718,14 +2713,19 @@ WNDCLASS wndclass;
 		RegisterClass(&wndclass);
 
 	GetWindowRect (hwnd, &rc);
-	if (wlayout == 0) x = 0; else x = 128;
-
-	mhwnd = CreateWindow (szMapEdname, szMapEdname,
+	{
+		int split = MapDip (hwnd, MAP_DIP_SPLIT);
+		int pad = MapDip (hwnd, MAP_DIP_SPLITPAD);
+		int fudge = MapCaptionFudge (hwnd);
+		if (wlayout == 0) x = 0; else x = split;
+		mhwnd = CreateWindow (szMapEdname, szMapEdname,
 								WS_MAXIMIZEBOX	| WS_MINIMIZEBOX | WS_CAPTION | WS_CLIPSIBLINGS |
 								WS_THICKFRAME | WS_CHILDWINDOW | WS_HSCROLL | WS_VSCROLL,
-								x, 0, (rc.right)-(rc.left)-132,
-								(rc.bottom)-(rc.top)-30-GetSystemMetrics(SM_CYCAPTION),
+								x, 0, (rc.right)-(rc.left)-split-pad,
+								(rc.bottom)-(rc.top)-fudge,
 								hwnd, (HMENU) 1000, hInstance, NULL);
+	}
+	MEEnsureUiFont (mhwnd);
 
 	MEUpdateScrollVis (); /* no map yet: hide scrollbars until one loads */
 	ShowWindow(mhwnd, SW_SHOW);
@@ -2836,14 +2836,18 @@ HWND CreateGraphEditorWindow (HWND hwnd)
 	RegisterClass(&wndclass);
 
 	GetWindowRect (hwnd, &rc);
-	if (wlayout == 0) x = 0; else x = 128;
-
-	ghwnd = CreateWindow (szGraphEdname, szGraphEdname,
-		WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_CAPTION | WS_CLIPSIBLINGS |
-		WS_CLIPCHILDREN | WS_THICKFRAME | WS_CHILDWINDOW,
-		x, 0, (rc.right)-(rc.left)-132,
-		(rc.bottom)-(rc.top)-30-GetSystemMetrics(SM_CYCAPTION),
-		hwnd, (HMENU) 1002, hInstance, NULL);
+	{
+		int split = MapDip (hwnd, MAP_DIP_SPLIT);
+		int pad = MapDip (hwnd, MAP_DIP_SPLITPAD);
+		int fudge = MapCaptionFudge (hwnd);
+		if (wlayout == 0) x = 0; else x = split;
+		ghwnd = CreateWindow (szGraphEdname, szGraphEdname,
+			WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_CAPTION | WS_CLIPSIBLINGS |
+			WS_CLIPCHILDREN | WS_THICKFRAME | WS_CHILDWINDOW,
+			x, 0, (rc.right)-(rc.left)-split-pad,
+			(rc.bottom)-(rc.top)-fudge,
+			hwnd, (HMENU) 1002, hInstance, NULL);
+	}
 
 	GECreateToolbar (ghwnd);
 	GECreatePalette (ghwnd);

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "mapwin.h"
+#include "dpi.h"
 #include "fmp14.h"
 #include "luabind.h"
 
@@ -45,7 +46,6 @@ extern int wlayout;
 extern int sortblocks, sortobjects;
 extern int mwheelblks, thumbtrack;
 
-static int BEGetDpi (HWND hwnd);
 static int BETabStripHeight (void);
 static void BEEnsureUiFont (HWND hwnd);
 static void BELayoutTabs (HWND parent);
@@ -362,7 +362,7 @@ RGBQUAD rgbq;
 RECT rc;
 int tabht = BETabStripHeight ();
 
-		GetWindowRect (phwnd, &rc);
+		GetClientRect (phwnd, &rc);
 		k = (rc.right)-(rc.left);
 		if (BEZoom()!=1) { k /= BEZoom(); k+= (BEZoom()-1); }
 		if (k<blockwidth) k = blockwidth;
@@ -715,19 +715,6 @@ PAINTSTRUCT ps;
 	return 0;
 }
 
-static int BEGetDpi (HWND hwnd)
-{
-	HDC hdc;
-	int dpi;
-	if (hwnd == NULL) return 96;
-	hdc = GetDC (hwnd);
-	if (hdc == NULL) return 96;
-	dpi = GetDeviceCaps (hdc, LOGPIXELSY);
-	ReleaseDC (hwnd, hdc);
-	if (dpi < 96) dpi = 96;
-	return dpi;
-}
-
 static int BETabStripHeight (void)
 {
 	if (be_tabh < 1) return TAB_H;
@@ -736,23 +723,12 @@ static int BETabStripHeight (void)
 
 static void BEEnsureUiFont (HWND hwnd)
 {
-	NONCLIENTMETRICS ncm;
-	HFONT created;
-
-	memset (&ncm, 0, sizeof (ncm));
-	ncm.cbSize = sizeof (ncm);
-	if (!SystemParametersInfo (SPI_GETNONCLIENTMETRICS, sizeof (ncm), &ncm, 0)) {
-		ncm.cbSize = sizeof (ncm) - sizeof (int);
-		if (!SystemParametersInfo (SPI_GETNONCLIENTMETRICS, ncm.cbSize, &ncm, 0))
-			return;
-	}
-	created = CreateFontIndirect (&ncm.lfMessageFont);
+	HFONT created = MapCreateUiFont (hwnd);
 	if (created == NULL) return;
 	if (be_font != NULL) DeleteObject (be_font);
 	be_font = created;
 	if (htab != NULL)
 		SendMessage (htab, WM_SETFONT, (WPARAM) be_font, TRUE);
-	(void) hwnd;
 }
 
 static void BESyncTabSel (void)
@@ -771,12 +747,12 @@ static void BELayoutTabs (HWND parent)
 	GetClientRect (parent, &crc);
 	w = crc.right - crc.left;
 	if (w < 8) w = 8;
-	dpi = BEGetDpi (parent);
-	pad = MulDiv (6, dpi, 96);
-	SendMessage (htab, TCM_SETPADDING, 0, MAKELPARAM (pad, MulDiv (3, dpi, 96)));
+	dpi = MapGetDpi (parent);
+	pad = MapScale (6, dpi);
+	SendMessage (htab, TCM_SETPADDING, 0, MAKELPARAM (pad, MapScale (3, dpi)));
 
 	/* Give the control enough height to wrap, then shrink to the strip. */
-	hguess = MulDiv (72, dpi, 96);
+	hguess = MapScale (72, dpi);
 	SetWindowPos (htab, HWND_TOP, 0, 0, w, hguess, SWP_NOACTIVATE);
 
 	rc.left = 0;
@@ -785,7 +761,7 @@ static void BELayoutTabs (HWND parent)
 	rc.bottom = hguess;
 	SendMessage (htab, TCM_ADJUSTRECT, FALSE, (LPARAM) &rc);
 	be_tabh = rc.top;
-	minstrip = MulDiv (TAB_H, dpi, 96);
+	minstrip = MapScale (TAB_H, dpi);
 	if (be_tabh < minstrip) be_tabh = minstrip;
 
 	SetWindowPos (htab, HWND_TOP, 0, 0, w, be_tabh, SWP_NOACTIVATE);
@@ -810,7 +786,7 @@ static void BECreateTabControl (HWND parent)
 	htab = CreateWindowEx (0, WC_TABCONTROL, "",
 		WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS |
 		TCS_MULTILINE | TCS_HOTTRACK | TCS_RAGGEDRIGHT | TCS_FOCUSONBUTTONDOWN,
-		0, 0, 64, TAB_H,
+		0, 0, MapDip (parent, 64), MapDip (parent, TAB_H),
 		parent, (HMENU)(INT_PTR) IDC_BEMODETAB, hInstance, NULL);
 	if (htab == NULL) return;
 
@@ -845,15 +821,19 @@ WNDCLASS wndclass;
 		RegisterClass(&wndclass);
 
 	GetWindowRect (hwnd, &rc);
-	if (wlayout == 0) x = (rc.right)-(rc.left)-132;
-	else if (wlayout == -1) x = (rc.right)-(rc.left)-132;
-	else x = 0;
+	{
+		int split = MapDip (hwnd, MAP_DIP_SPLIT);
+		int pad = MapDip (hwnd, MAP_DIP_SPLITPAD);
+		int fudge = MapCaptionFudge (hwnd);
+		if (wlayout == 0 || wlayout == -1) x = (rc.right)-(rc.left)-split-pad;
+		else x = 0;
 		bhwnd = CreateWindow (szBlockEdname, szBlockEdname,
 								WS_MAXIMIZEBOX	| WS_MINIMIZEBOX | WS_CAPTION | WS_CLIPSIBLINGS |
 								WS_CLIPCHILDREN | WS_THICKFRAME | WS_CHILDWINDOW | WS_VSCROLL,
-								x, 0, 128,
-								(rc.bottom)-(rc.top)-30-GetSystemMetrics(SM_CYCAPTION),
+								x, 0, split,
+								(rc.bottom)-(rc.top)-fudge,
 								hwnd, (HMENU) 1001, hInstance, NULL);
+	}
 
 	BECreateTabControl (bhwnd);
 	BEUpdateScrollVis ();

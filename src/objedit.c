@@ -15,6 +15,7 @@
 #include <string.h>
 #include "mapwin.h"
 #include "compat.h"
+#include "dpi.h"
 #include "fmp14.h"
 #include "luabind.h"
 
@@ -35,6 +36,7 @@ extern char objlabels[16][64];
 
 static F14Obj objclip;
 static int objcliphas = 0;
+static HFONT oe_font = NULL;
 
 void DIAObjFname (HWND hwnd); /* defined below */
 
@@ -230,6 +232,13 @@ int zx = zoomon, zd = zoomdiv;
 		}
 	}
 	ox = xmapoffset * blockwidth; oy = ymapoffset * blockheight;
+	{
+		HGDIOBJ holdf = NULL;
+		HWND mapw = MEGetHWND ();
+		int off = MapDip (mapw, 2);
+		int pw = MapPenWidth (mapw);
+		if (oe_font == NULL) oe_font = MapCreateUiFont (mapw);
+		if (oe_font) holdf = SelectObject (hdc, oe_font);
 	for (order = 0; order < n; order++) {
 		const F14Obj * o;
 		int mx, my, mw, mh, cx, cy, cw, ch, bc;
@@ -278,11 +287,11 @@ int zx = zoomon, zd = zoomdiv;
 			}
 		}
 		if (i == F14_CurObject ()) {
-			hpen = CreatePen (PS_SOLID, 1, RGB (255, 255, 255));
+			hpen = CreatePen (PS_SOLID, pw, RGB (255, 255, 255));
 		} else {
 			bc = OE_BorderCol (i);
 			if (bc == 0) continue; /* 000000 = no border */
-			hpen = CreatePen (PS_SOLID, 1, RGB ((bc >> 16) & 0xFF, (bc >> 8) & 0xFF, bc & 0xFF));
+			hpen = CreatePen (PS_SOLID, pw, RGB ((bc >> 16) & 0xFF, (bc >> 8) & 0xFF, bc & 0xFF));
 		}
 		hold = SelectObject (hdc, hpen);
 		hbrold = SelectObject (hdc, GetStockObject (HOLLOW_BRUSH));
@@ -300,17 +309,19 @@ int zx = zoomon, zd = zoomdiv;
 			if (lab && lab[0] && o->gwidth == 0 && o->gheight == 0) {
 				SetBkMode (hdc, TRANSPARENT);
 				SetTextColor (hdc, RGB (255, 255, 255));
-				TextOut (hdc, cx + 2, cy + 2, lab, (int) strlen (lab));
+				TextOut (hdc, cx + off, cy + off, lab, (int) strlen (lab));
 			} else if (i != F14_CurObject ()) {
 				bc = OE_BorderCol (i);
 				if (bc > 1) {
 					SetBkMode (hdc, TRANSPARENT);
 					SetTextColor (hdc, RGB ((bc >> 16) & 0xFF, (bc >> 8) & 0xFF, bc & 0xFF));
 					sprintf (txt, "Object %d", i);
-					TextOut (hdc, cx + 2, cy + 2, txt, (int) strlen (txt));
+					TextOut (hdc, cx + off, cy + off, txt, (int) strlen (txt));
 				}
 			}
 		}
+	}
+		if (holdf) SelectObject (hdc, holdf);
 	}
 }
 
