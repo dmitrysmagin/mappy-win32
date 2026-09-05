@@ -169,16 +169,22 @@ RGBQUAD rgbq;
 */
 	tempblockgfxpt = blockgfxpt;
 	temphdc = CreateCompatibleDC (NULL);
+	if (temphdc == NULL) { free (temp24bitbuffer); return -1; }
 	for (i=0;i<numblockgfx;i++)
 	{
-		if ((IDirectDrawSurface2_GetDC (maplpDDSTiles[i], &myhdc)) != DD_OK) return -1;
+		if ((IDirectDrawSurface2_GetDC (maplpDDSTiles[i], &myhdc)) != DD_OK) {
+			DeleteDC (temphdc); free (temp24bitbuffer); return -1;
+		}
 		switch (blockdepth)
 		{
 /* This isn't needed, but left for reference
 		case 8:
 			tempbm.bmBits = tempblockgfxpt;
 			htempbm = CreateBitmapIndirect (&tempbm);
-			if (htempbm == NULL) return -1;
+			if (htempbm == NULL) {
+				IDirectDrawSurface2_ReleaseDC (maplpDDSTiles[i], myhdc);
+				DeleteDC (temphdc); free (temp24bitbuffer); return -1;
+			}
 			break;
 */
 		case 15:
@@ -197,7 +203,10 @@ RGBQUAD rgbq;
 			}
 			htempbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 				 temp24bitbuffer, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
-			if (htempbm == NULL) return -1;
+			if (htempbm == NULL) {
+				IDirectDrawSurface2_ReleaseDC (maplpDDSTiles[i], myhdc);
+				DeleteDC (temphdc); free (temp24bitbuffer); return -1;
+			}
 			break;
 		case 16:
 			blkgfxpt = (unsigned char *) tempblockgfxpt;
@@ -215,7 +224,10 @@ RGBQUAD rgbq;
 			}
 			htempbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 				 temp24bitbuffer, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
-			if (htempbm == NULL) return -1;
+			if (htempbm == NULL) {
+				IDirectDrawSurface2_ReleaseDC (maplpDDSTiles[i], myhdc);
+				DeleteDC (temphdc); free (temp24bitbuffer); return -1;
+			}
 			break;
 		case 24:
 			blkgfxpt = (unsigned char *) tempblockgfxpt;
@@ -229,7 +241,10 @@ RGBQUAD rgbq;
 			}
 			htempbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 				 temp24bitbuffer, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
-			if (htempbm == NULL) return -1;
+			if (htempbm == NULL) {
+				IDirectDrawSurface2_ReleaseDC (maplpDDSTiles[i], myhdc);
+				DeleteDC (temphdc); free (temp24bitbuffer); return -1;
+			}
 			break;
 		case 32:
 		default:
@@ -245,7 +260,10 @@ RGBQUAD rgbq;
 			}
 			htempbm = CreateDIBitmap (myhdc, &bih, CBM_INIT,
 				 temp24bitbuffer, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
-			if (htempbm == NULL) return -1;
+			if (htempbm == NULL) {
+				IDirectDrawSurface2_ReleaseDC (maplpDDSTiles[i], myhdc);
+				DeleteDC (temphdc); free (temp24bitbuffer); return -1;
+			}
 			break;
 		}
 		holdbm = (HBITMAP) SelectObject (temphdc, htempbm);

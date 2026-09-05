@@ -1296,7 +1296,11 @@ int GetEquals (char * strpt)
 {
 int i;
 
-	i = 0; while (strpt[i] != '=') i++; i++;
+	if (strpt == NULL) return 0;
+	i = 0;
+	while (strpt[i] != 0 && strpt[i] != '=' && strpt[i] != '\r' && strpt[i] != '\n') i++;
+	if (strpt[i] != '=') return i;
+	i++;
 	while (strpt[i] == ' ') i++;
 	return i;
 }

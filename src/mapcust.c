@@ -396,7 +396,7 @@ char * mcname;
 					if (layeridx < MAXMAPLAYERS && mapmappt[layeridx] != NULL)
 						mymappt = mapmappt[layeridx];
 					else
-						mymappt = mappt;
+						mymappt = NULL;
 					j = ((int) mapwidth)*((int) mapheight);
 					if (mapformat[i+1] == '-') {
 						l = (int) (mapformat[i+2]-'0');
@@ -406,9 +406,10 @@ char * mcname;
 					}
 					if (modemsb == 1) {
 						while (j) {
-							if (*mymappt < 0) k = 0;
+							if (mymappt == NULL) k = 0;
+							else if (*mymappt < 0) k = 0;
 							else k = (int) *mymappt;
-							mymappt++;
+							if (mymappt) mymappt++;
 //							k /= SOBSTR;
 							k += l;
 							if (k < 0) k = 0;
@@ -426,9 +427,10 @@ char * mcname;
 						}
 					} else {
 						while (j) {
-							if (*mymappt < 0) k = 0;
+							if (mymappt == NULL) k = 0;
+							else if (*mymappt < 0) k = 0;
 							else k = (int) *mymappt;
-							mymappt++;
+							if (mymappt) mymappt++;
 //							k /= SOBSTR;
 							k += l;
 							if (k < 0) k = 0;

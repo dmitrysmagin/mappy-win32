@@ -301,7 +301,7 @@ RECT merect;
 
 void MEShowCoords (int x, int y)
 {
-char temptext[256];
+char temptext[640];
 char scbits[16];
 char dettxt[128];
 BLKSTR * myblkstrpt;
@@ -310,6 +310,8 @@ short int * mymappt;
 int nlayers, li;
 const char * lname;
 const char * tstr;
+const char * hint;
+size_t nleft;
 
 	if (mappt == NULL) return;
 	if (blockstrpt == NULL) return;
@@ -324,7 +326,9 @@ const char * tstr;
 
 	dettxt[0] = 0;
 	if (*mymappt<0) {
-		sprintf (dettxt, "Anim %d", (-(*mymappt))/sizeof(ANISTR)-1);
+		snprintf (dettxt, sizeof (dettxt), "Anim %d", (int)((-(*mymappt))/(int)sizeof(ANISTR)-1));
+	} else if (*mymappt >= numblockstr) {
+		snprintf (dettxt, sizeof (dettxt), "Block %d", (*mymappt));
 	} else {
 		myblkstrpt = (BLKSTR *) (blockstrpt + (((int)(*mymappt))*sizeof(BLKSTR)));
 		memset (scbits, 0, 16);
@@ -337,7 +341,7 @@ const char * tstr;
 		if (myblkstrpt->unused2) scbits[6] = '1'; else scbits[6] = '0';
 		if (myblkstrpt->unused3) scbits[7] = '1'; else scbits[7] = '0';
 		if (myblkstrpt->trigger) scbits[9] = '1'; else scbits[9] = '0';
-		sprintf (dettxt, "Block %d (BG=%d, FG=%d, Bits=%s, T=%s)",
+		snprintf (dettxt, sizeof (dettxt), "Block %d (BG=%d, FG=%d, Bits=%s, T=%s)",
 			(*mymappt),
 			(int) myblkstrpt->bgoff/(blockwidth*blockheight*((blockdepth+1)/8)),
 			(int) myblkstrpt->fgoff/(blockwidth*blockheight*((blockdepth+1)/8)),
@@ -349,51 +353,58 @@ const char * tstr;
 	/* tbarinfo titlebar modes (mapwin.ini) */
 	switch (tbarinfo) {
 		case 0:
-			strcpy (temptext, "Map Editor");
+			snprintf (temptext, sizeof (temptext), "Map Editor");
 			break;
 		case 3:
-			if (*mymappt<0) sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, %s",
+			if (*mymappt<0) snprintf (temptext, sizeof (temptext), "X %d/%d, Y %d/%d, Layer %d/%d, %s",
 				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, dettxt);
-			else sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, Block %d",
+			else snprintf (temptext, sizeof (temptext), "X %d/%d, Y %d/%d, Layer %d/%d, Block %d",
 				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, (*mymappt));
 			break;
 		case 4:
-			sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, %s",
+			snprintf (temptext, sizeof (temptext), "X %d/%d, Y %d/%d, Layer %d/%d, %s",
 				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, dettxt);
 			break;
 		case 5:
 			tstr = F14_TstrGet (0);
 			if (tstr==NULL) tstr = "";
-			sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, %s [%s]",
-				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0,
-				(*mymappt<0) ? dettxt : dettxt, tstr);
-			if (*mymappt>=0) sprintf (temptext, "X %d/%d, Y %d/%d, Layer %d/%d, Block %d [%s]",
-				x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, (*mymappt), tstr);
+			if (*mymappt>=0)
+				snprintf (temptext, sizeof (temptext), "X %d/%d, Y %d/%d, Layer %d/%d, Block %d [%s]",
+					x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, (*mymappt), tstr);
+			else
+				snprintf (temptext, sizeof (temptext), "X %d/%d, Y %d/%d, Layer %d/%d, %s [%s]",
+					x, mapwidth-1, y, mapheight-1, maplayer, nlayers ? nlayers-1 : 0, dettxt, tstr);
 			break;
 		case 6:
 			lname = F14_LayerName (maplayer);
 			if (lname==NULL) lname = "";
 			tstr = F14_TstrGet (0);
 			if (tstr==NULL) tstr = "";
-			sprintf (temptext, "X %d/%d, Y %d/%d, [%s] %d/%d, %s [%s]",
+			snprintf (temptext, sizeof (temptext), "X %d/%d, Y %d/%d, [%s] %d/%d, %s [%s]",
 				x, mapwidth-1, y, mapheight-1, lname, maplayer, nlayers ? nlayers-1 : 0, dettxt, tstr);
 			break;
 		case 2:
-			sprintf (temptext, "X %d/%d, Y %d/%d. %s",
+			snprintf (temptext, sizeof (temptext), "X %d/%d, Y %d/%d. %s",
 				x, mapwidth-1, y, mapheight-1, dettxt);
 			break;
 		default: /* 1 */
-			if (*mymappt<0) sprintf (temptext, "X %d/%d, Y %d/%d. %s",
+			if (*mymappt<0) snprintf (temptext, sizeof (temptext), "X %d/%d, Y %d/%d. %s",
 				x, mapwidth-1, y, mapheight-1, dettxt);
-			else sprintf (temptext, "X %d/%d, Y %d/%d. Block %d",
+			else snprintf (temptext, sizeof (temptext), "X %d/%d, Y %d/%d. Block %d",
 				x, mapwidth-1, y, mapheight-1, (*mymappt));
 			break;
 	}
 
 	/* Tier-2 tool help: show active L/D/P mode in title (keys L/P/D, ESC cancels) */
-	if (linemode) strcat (temptext, " [LINE L: click end, ESC cancels]");
-	else if (pathmode) strcat (temptext, " [PATH P: click next, ESC ends]");
-	else if (dragmode) strcat (temptext, " [DRAG D: move mouse, D/click ends]");
+	hint = NULL;
+	if (linemode) hint = " [LINE L: click end, ESC cancels]";
+	else if (pathmode) hint = " [PATH P: click next, ESC ends]";
+	else if (dragmode) hint = " [DRAG D: move mouse, D/click ends]";
+	if (hint) {
+		nleft = strlen (temptext);
+		if (nleft < sizeof (temptext) - 1)
+			strncat (temptext, hint, sizeof (temptext) - 1 - nleft);
+	}
 
 	SetWindowText (mhwnd, temptext);
 	meoldbx = x; meoldby = y;

@@ -27,6 +27,7 @@ int IMLoadImage24 (char * imname, unsigned char ** out, int * iw, int * ih);
 #define BKGFXMEM (1048576*8)
 #define BLOCKSTRSIZE 32
 #define MAXBRSH 16
+#define MAPFILL_MAX 10000
 
 #define ER_NONE 0
 #define ER_MAPLOADERROR 1
@@ -2551,26 +2552,50 @@ int i, j, istrt, iend, iadd, jstrt, jend, jadd;
 
 static void RotRect24 (unsigned char * destpt, int xoff, int yoff, int linesize, int rot);
 
+static BLKSTR * MapCellBlkstr (short int cell)
+{
+ANISTR * myanpt;
+long int * templpt;
+int boff;
+
+	if (blockstrpt==NULL) return NULL;
+	if (cell >= 0) {
+		if (cell >= numblockstr) return NULL;
+		return (BLKSTR *) (((char *)blockstrpt) + (((int)cell)*FMP_BLK_MEMUNIT));
+	}
+	if (animstrpt==NULL) return NULL;
+	myanpt = (ANISTR *) ((animstrpt+ANDTMEM)+cell);
+	if ((unsigned char *) myanpt < (unsigned char *) animstrpt ||
+		(unsigned char *) (myanpt + 1) > (unsigned char *) animstrpt + ANDTMEM)
+		return NULL;
+	templpt = (long int *) ((animstrpt+ANDTMEM)+(myanpt->anstartoff));
+	templpt--;
+	if ((unsigned char *) templpt < (unsigned char *) animstrpt ||
+		(unsigned char *) (templpt + 1) > (unsigned char *) animstrpt + ANDTMEM)
+		return NULL;
+	boff = (int) (*templpt);
+	if (boff < 0 || (boff % FMP_BLK_MEMUNIT) || (boff / FMP_BLK_MEMUNIT) >= numblockstr)
+		return NULL;
+	return (BLKSTR *) (blockstrpt + boff);
+}
+
 void Onionto24 (int x, int y, unsigned char * destpt, int xoff, int yoff, int linesize, int olayer)
 {
-int i, isop;long int * templpt;
+int i, isop;
 short int * mymappt;
 unsigned char * srcpt;
 BLKSTR * blkdatapt;
-ANISTR * myanpt;
 
 	srcpt = (unsigned char *) blockgfxpt;
 	if (x<mapwidth && y<mapheight && x>=0 && y>=0)
 	{
+		if (olayer >= MAXMAPLAYERS) return;
 		if (olayer<0) mymappt = mappt;
 		else mymappt = mapmappt[olayer];
 		if (mymappt == NULL) return;
 		mymappt += x+(y*mapwidth);
-
-		if (*mymappt>=0) blkdatapt = (BLKSTR*) (((char *)blockstrpt) + (((int)(*mymappt))*FMP_BLK_MEMUNIT));
-		else { myanpt = (ANISTR *) ((animstrpt+ANDTMEM)+(*mymappt));
-			templpt = (long int *) ((animstrpt+ANDTMEM)+(myanpt->anstartoff)); templpt--;
-			blkdatapt = (BLKSTR *) (blockstrpt + (*templpt)); }
+		blkdatapt = MapCellBlkstr (*mymappt);
+		if (blkdatapt == NULL) return;
 
 		if (blockstaggerx || blockstaggery) {
 		if (blkdatapt->bgoff) {
@@ -2658,24 +2683,20 @@ int l;
 void Overlayto24 (int x, int y, unsigned char * destpt, int xoff, int yoff, int linesize, int olayer)
 {
 int i, isop, rotu7;
-long int * templpt;
 short int * mymappt;
 unsigned char * srcpt;
 BLKSTR * blkdatapt;
-ANISTR * myanpt;
 
 	srcpt = (unsigned char *) blockgfxpt;
 	if (x<mapwidth && y<mapheight && x>=0 && y>=0)
 	{
+		if (olayer >= MAXMAPLAYERS) return;
 		if (olayer<0) mymappt = mappt;
 		else mymappt = mapmappt[olayer];
 		if (mymappt == NULL) return;
 		mymappt += x+(y*mapwidth);
-
-		if (*mymappt>=0) blkdatapt = (BLKSTR*) (((char *)blockstrpt) + (((int)(*mymappt))*FMP_BLK_MEMUNIT));
-		else { myanpt = (ANISTR *) ((animstrpt+ANDTMEM)+(*mymappt));
-			templpt = (long int *) ((animstrpt+ANDTMEM)+(myanpt->anstartoff)); templpt--;
-			blkdatapt = (BLKSTR *) (blockstrpt + (*templpt)); }
+		blkdatapt = MapCellBlkstr (*mymappt);
+		if (blkdatapt == NULL) return;
 		rotu7 = (rotatedtiles && blkdatapt->user7>=1 && blkdatapt->user7<=3) ? blkdatapt->user7 : 0;
 
 		if (blkdatapt->bgoff) {
@@ -2787,22 +2808,24 @@ unsigned char t0, t1, t2;
 void Blockto24 (int x, int y, unsigned char * destpt, int xoff, int yoff, int linesize)
 {
 int i, isop;
-long int * templpt;
 short int * mymappt;
 unsigned char * srcpt;
 BLKSTR * blkdatapt;
-ANISTR * myanpt;
 
 	srcpt = (unsigned char *) blockgfxpt;
 	if (x<mapwidth && y<mapheight && x>=0 && y>=0)
 	{
 		mymappt = mappt;
 		mymappt += x+(y*mapwidth);
-
-		if (*mymappt>=0) blkdatapt = (BLKSTR*) (((char *)blockstrpt) + (((int)(*mymappt))*FMP_BLK_MEMUNIT));
-		else { myanpt = (ANISTR *) ((animstrpt+ANDTMEM)+(*mymappt));
-			templpt = (long int *) ((animstrpt+ANDTMEM)+(myanpt->anstartoff)); templpt--;
-			blkdatapt = (BLKSTR *) (blockstrpt + (*templpt)); }
+		blkdatapt = MapCellBlkstr (*mymappt);
+		if (blkdatapt == NULL) {
+			destpt += (xoff*3)+(yoff*linesize);
+			for (i=0;i<blockheight;i++) {
+				memset (destpt, 0x44, blockwidth*3);
+				destpt += linesize;
+			}
+			return;
+		}
 
 		isop = 0;
 		if (isopillars && blkdatapt->unused2 && !blkdatapt->unused3) isop = 1;
@@ -3972,11 +3995,23 @@ int ResizeMap (int neww, int newh, int mapc)
 int i, j, k;
 short int sxoff, syoff, dxoff, dyoff;
 short int * temppt, * spt, * dpt;
+short int * newlayers[MAXMAPLAYERS];
+
+	if (neww < 1 || newh < 1) return -1;
+	for (k=0;k<MAXMAPLAYERS;k++) newlayers[k] = NULL;
+	for (k=0;k<MAXMAPLAYERS;k++) {
+		if (mapmappt[k] != NULL) {
+			newlayers[k] = (short int *) malloc ((size_t)neww*(size_t)newh*2);
+			if (newlayers[k]==NULL) {
+				for (i=0;i<MAXMAPLAYERS;i++) if (newlayers[i]) free (newlayers[i]);
+				return -1;
+			}
+			memset (newlayers[k], 0, (size_t)neww*(size_t)newh*2);
+		}
+	}
 
 	for (k=0;k<MAXMAPLAYERS;k++) { if (mapmappt[k] != NULL) {
-		temppt = (short int *) malloc (neww*newh*2);
-		if (temppt==NULL) return -1;
-		memset (temppt, 0, neww*newh*2);
+		temppt = newlayers[k];
 
 		sxoff = 0; syoff = 0; dxoff = 0; dyoff = 0;
 		if (mapc==0) {
@@ -4107,6 +4142,7 @@ short int AddaLine (MAPFILL * myfillpt, int fxoff, int fyoff, short int fillval)
 {
 short int filllength, returnfill;
 short int * mymappt;
+MAPFILL * mapfill_end = myfillpt + MAPFILL_MAX;
 
 	if (fxoff<0 || fxoff>=mapwidth) return 1;
 	if (fyoff<0 || fyoff>=mapheight) return 1;
@@ -4116,7 +4152,11 @@ short int * mymappt;
 	if (mymappt[fxoff]!=fillval) return 1;
 
 	while (myfillpt->leftedge!=-1) {
-		if (myfillpt->leftedge==-2) { myfillpt++; myfillpt->leftedge=-2; myfillpt--; break; }
+		if (myfillpt >= mapfill_end) return 1;
+		if (myfillpt->leftedge==-2) {
+			if (myfillpt + 1 >= mapfill_end) return 1;
+			myfillpt++; myfillpt->leftedge=-2; myfillpt--; break;
+		}
 		myfillpt++;
 	}
 
@@ -4139,7 +4179,7 @@ MAPFILL * mapfillpt, * thisfillpt;
 	if (x<0 || x>=mapwidth) return;
 	if (y<0 || y>=mapheight) return;
 
-	mapfillpt = malloc (sizeof(MAPFILL)*10000);
+	mapfillpt = malloc (sizeof(MAPFILL)*MAPFILL_MAX);
 	if (mapfillpt==NULL) return;
 	mapfillpt->leftedge=-2;
 
@@ -4148,7 +4188,7 @@ MAPFILL * mapfillpt, * thisfillpt;
 
 	while (1) {
 		linestodo = 0;
-		thisfillpt = mapfillpt; while (thisfillpt->leftedge!=-2) {
+		thisfillpt = mapfillpt; while (thisfillpt < mapfillpt + MAPFILL_MAX && thisfillpt->leftedge!=-2) {
 			if (thisfillpt->leftedge!=-1) {
 				FillaLine (thisfillpt);
 				checkxpos = thisfillpt->leftedge;
