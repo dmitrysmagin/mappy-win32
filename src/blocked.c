@@ -42,7 +42,7 @@ extern short int blockwidth, blockheight, blockdepth, gridon, zoomon;
 extern int panelzoom;
 static int BEZoom(void) { return panelzoom ? zoomon : 1; }
 extern short int mapwidth, mapheight, xmapoffset, ymapoffset, maplayer;
-extern int tsplace;
+extern int tsplace, objplace;
 extern short int numblockstr, curstr, numblockanim, curanim, curbrsh;
 extern char * blockgfxpt, * blockstrpt, * animstrpt;
 extern short int numblockgfx;
@@ -125,7 +125,11 @@ void BEBlockNext(void) {
         while (next < MAXBRSH && brshpt[next] == NULL) next++;
         if (next < MAXBRSH) { curbrushsel = next; BEInvalidate(); }
     }
-    if (betype == BETYPE_OBJECTS && curobjsel < F14_NumObjects() - 1) { curobjsel++; BEInvalidate(); }
+    if (betype == BETYPE_OBJECTS && curobjsel < F14_NumObjects() - 1) {
+        curobjsel++;
+        F14_SetCurObject(curobjsel);
+        BEInvalidate();
+    }
     if (betype == BETYPE_TILESETS && curtilesetsel < TS_NumDefs() - 1) { curtilesetsel++; TS_SetCurDef(curtilesetsel); BEInvalidate(); }
 }
 
@@ -138,7 +142,11 @@ void BEBlockPrev(void) {
         while (prev >= 0 && brshpt[prev] == NULL) prev--;
         if (prev >= 0) { curbrushsel = prev; BEInvalidate(); }
     }
-    if (betype == BETYPE_OBJECTS && curobjsel > 0) { curobjsel--; BEInvalidate(); }
+    if (betype == BETYPE_OBJECTS && curobjsel > 0) {
+        curobjsel--;
+        F14_SetCurObject(curobjsel);
+        BEInvalidate();
+    }
     if (betype == BETYPE_TILESETS && curtilesetsel > 0) { curtilesetsel--; TS_SetCurDef(curtilesetsel); BEInvalidate(); }
 }
 
@@ -219,7 +227,7 @@ void BESetScrollRange(void) {
     } else {
         SetWindowText(bhwnd, title);
     }
-    if (betype == BETYPE_TILESETS) bebpr = 1;
+    if (betype == BETYPE_TILESETS || betype == BETYPE_OBJECTS) bebpr = 1;
     if (bebpr < 1) bebpr = 1;
     SetScrollRange(bhwnd, SB_VERT, 0, (total > 0) ? ((total - 1) / bebpr) : 0, FALSE);
     if (beyoff > ((total - 1) / bebpr)) beyoff = (total - 1) / bebpr;
@@ -278,6 +286,14 @@ void BENewBlock(void) {
             TS_SetCurDef(ni);
             mapaltered = 1;
             DIATilesetEdit(bhwnd, ni);
+        }
+    }
+    if (betype == BETYPE_OBJECTS) {
+        int ni = OE_NewDefault();
+        if (ni >= 0) {
+            curobjsel = (short int) ni;
+            if (!objplace)
+                DIAObjectProps(bhwnd, ni);
         }
     }
     BESetScrollRange();
@@ -532,6 +548,82 @@ static void BEDrawTilesetList(HWND phwnd, HDC myhdc)
     DeleteObject(line);
 }
 
+static void BEDrawObjectList(HWND phwnd, HDC myhdc)
+{
+    RECT rc, row;
+    int tabht = BETabStripHeight();
+    int rowh, i, n, thumb, pad, vis;
+    HBRUSH bg, sel, line;
+    HFONT oldf = NULL;
+
+    GetClientRect(phwnd, &rc);
+    rc.top = tabht;
+    bg = CreateSolidBrush(RGB(0x44, 0x44, 0x44));
+    FillRect(myhdc, &rc, bg);
+    DeleteObject(bg);
+    bebpr = 1;
+    BERefreshSort();
+    rowh = BETilesetRowH(phwnd);
+    pad = MapDip(phwnd, 4);
+    thumb = rowh - pad * 2;
+    if (thumb < 8) thumb = 8;
+    n = F14_NumObjects();
+    vis = BEVisibleCount();
+    sel = CreateSolidBrush(RGB(0x66, 0x66, 0x88));
+    line = CreateSolidBrush(RGB(0x33, 0x33, 0x33));
+    SetBkMode(myhdc, TRANSPARENT);
+    SetTextColor(myhdc, RGB(255, 255, 255));
+    if (be_font != NULL)
+        oldf = SelectObject(myhdc, be_font);
+    for (i = 0; (tabht + (i + 1) * rowh) <= rc.bottom + rowh; i++) {
+        const F14Obj *o;
+        int idx = BEMapDisp(beyoff + i);
+        char txt[96];
+        RECT bar, box;
+        COLORREF fill;
+        if (beyoff + i >= vis)
+            break;
+        if (idx < 0)
+            continue;
+        row.left = rc.left;
+        row.right = rc.right;
+        row.top = tabht + i * rowh;
+        row.bottom = row.top + rowh;
+        if (idx == curobjsel)
+            FillRect(myhdc, &row, sel);
+        bar = row;
+        bar.top = row.bottom - 1;
+        FillRect(myhdc, &bar, line);
+        o = F14_GetObject(idx);
+        box.left = row.left + pad;
+        box.top = row.top + pad;
+        box.right = box.left + thumb;
+        box.bottom = box.top + thumb;
+        if (o != NULL && o->gwidth == 0 && o->gheight == 0 && o->gfxid == 0 && o->tileid < 0)
+            fill = RGB(0x88, 0x88, 0x88);
+        else
+            fill = RGB(0x88, 0x88, 0xCC);
+        {
+            HBRUSH tb = CreateSolidBrush(fill);
+            FillRect(myhdc, &box, tb);
+            DeleteObject(tb);
+        }
+        if (o != NULL)
+            OE_DrawThumb(myhdc, box.left, box.top, thumb, thumb, idx);
+        OE_Describe(idx, txt, (int) sizeof(txt));
+        TextOut(myhdc, row.left + pad + thumb + pad, row.top + pad, txt, (int)strlen(txt));
+    }
+    if (n == 0) {
+        const char *hint = "No objects. Click or press Ctrl+N.";
+        SetTextColor(myhdc, RGB(200, 200, 200));
+        TextOut(myhdc, rc.left + pad, rc.top + pad, hint, (int)strlen(hint));
+    }
+    if (oldf != NULL)
+        SelectObject(myhdc, oldf);
+    DeleteObject(sel);
+    DeleteObject(line);
+}
+
 void BEDrawBlocks(HWND phwnd, HDC myhdc) {
     int i, j, k, l;
     HDC fromhdc;
@@ -676,6 +768,10 @@ static void BESetType(int newtype) {
         curtilesetsel = (short int)TS_CurDef();
         if (curtilesetsel < 0 && TS_NumDefs() > 0) curtilesetsel = 0;
     }
+    if (newtype == BETYPE_OBJECTS) {
+        curobjsel = (short int) F14_CurObject();
+        if (F14_GetObject(curobjsel) == NULL) curobjsel = -1;
+    }
     BESyncTabSel();
     BESetScrollRange();
     InvalidateRgn(bhwnd, NULL, FALSE);
@@ -698,6 +794,8 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         if (blockgfxpt!=NULL) {
             if (betype == BETYPE_TILESETS)
                 BEDrawTilesetList(hwnd, myhdc);
+            else if (betype == BETYPE_OBJECTS)
+                BEDrawObjectList(hwnd, myhdc);
             else
                 BEDrawBlocks(hwnd, myhdc);
             BESetScrollRange();
@@ -757,7 +855,8 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         InvalidateRgn(bhwnd, NULL, FALSE);
         break;
     case WM_LBUTTONUP:
-        if (betype != BETYPE_TILESETS && LOWORD(lParam)>((blockwidth+2)*BEZoom()*bebpr)) break;
+        if (betype != BETYPE_TILESETS && betype != BETYPE_OBJECTS &&
+            LOWORD(lParam)>((blockwidth+2)*BEZoom()*bebpr)) break;
         if (HIWORD(lParam) < BETabStripHeight()) break;
         {
             int clicked;
@@ -805,6 +904,45 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
                 InvalidateAll();
                 break;
             }
+            if (betype == BETYPE_OBJECTS) {
+                int rowh = BETilesetRowH(hwnd);
+                int vis;
+                BERefreshSort();
+                vis = BEVisibleCount();
+                clicked = beyoff + ((HIWORD(lParam) - BETabStripHeight()) / rowh);
+                if (clicked < 0) break;
+                if (vis == 0) {
+                    int ni = OE_NewDefault();
+                    if (ni >= 0) {
+                        curobjsel = (short int) ni;
+                        if (!objplace)
+                            DIAObjectProps(hwnd, ni);
+                    }
+                    BESetScrollRange();
+                    InvalidateAll();
+                    break;
+                }
+                if (clicked >= vis) clicked = vis - 1;
+                clicked = BEMapDisp(clicked);
+                if (clicked < 0) break;
+                curobjsel = (short int) clicked;
+                F14_SetCurObject(clicked);
+                if (GetKeyState(VK_SHIFT) < 0) {
+                    const F14Obj * o = F14_GetObject(curobjsel);
+                    if (o != NULL && blockwidth > 0 && blockheight > 0) {
+                        xmapoffset = (short int) (o->xpos / blockwidth);
+                        ymapoffset = (short int) (o->ypos / blockheight);
+                        if (xmapoffset < 0) xmapoffset = 0;
+                        if (ymapoffset < 0) ymapoffset = 0;
+                        if (xmapoffset > mapwidth - 1) xmapoffset = mapwidth - 1;
+                        if (ymapoffset > mapheight - 1) ymapoffset = mapheight - 1;
+                        MESetScrollRange(mapwidth - 1, mapheight - 1, xmapoffset, ymapoffset);
+                    }
+                }
+                BESetScrollRange();
+                InvalidateAll();
+                break;
+            }
             clicked = ((beyoff + ((HIWORD(lParam)-BETabStripHeight())/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
             clicked = BEMapDisp(clicked);
             switch (betype) {
@@ -837,26 +975,6 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
                     RejigBrshMenu(curbrsh);
                 }
                 break;
-            case BETYPE_OBJECTS:
-                curobjsel = clicked;
-                if (curobjsel>=F14_NumObjects()) curobjsel = F14_NumObjects()-1;
-                if (curobjsel<0) curobjsel = 0;
-                if (curobjsel >= 0) {
-                    F14_SetCurObject(curobjsel);
-                    if (GetKeyState(VK_SHIFT) < 0) {
-                        const F14Obj * o = F14_GetObject(curobjsel);
-                        if (o != NULL && blockwidth > 0 && blockheight > 0) {
-                            xmapoffset = (short int) (o->xpos / blockwidth);
-                            ymapoffset = (short int) (o->ypos / blockheight);
-                            if (xmapoffset < 0) xmapoffset = 0;
-                            if (ymapoffset < 0) ymapoffset = 0;
-                            if (xmapoffset > mapwidth - 1) xmapoffset = mapwidth - 1;
-                            if (ymapoffset > mapheight - 1) ymapoffset = mapheight - 1;
-                            MESetScrollRange(mapwidth - 1, mapheight - 1, xmapoffset, ymapoffset);
-                        }
-                    }
-                }
-                break;
             }
         }
         BESetScrollRange();
@@ -876,6 +994,23 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
             curtilesetsel = (short int)clicked;
             TS_SetCurDef(clicked);
             DIATilesetEdit(hwnd, clicked);
+            BESetScrollRange();
+            InvalidateAll();
+            break;
+        }
+        if (betype == BETYPE_OBJECTS) {
+            int rowh, clicked, vis;
+            if (HIWORD(lParam) < BETabStripHeight()) break;
+            BERefreshSort();
+            vis = BEVisibleCount();
+            rowh = BETilesetRowH(hwnd);
+            clicked = beyoff + ((HIWORD(lParam) - BETabStripHeight()) / rowh);
+            if (clicked < 0 || clicked >= vis) break;
+            clicked = BEMapDisp(clicked);
+            if (clicked < 0) break;
+            curobjsel = (short int) clicked;
+            F14_SetCurObject(clicked);
+            DIAObjectProps(hwnd, clicked);
             BESetScrollRange();
             InvalidateAll();
             break;
@@ -915,15 +1050,6 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
                     curbrsh = (short int) (curbrushsel + 1);
                     DIAGetBrushName(hwnd, GetBrushName(curbrushsel));
                     RejigBrshMenu(curbrsh);
-                }
-                break;
-            case BETYPE_OBJECTS:
-                curobjsel = clicked;
-                if (curobjsel>=F14_NumObjects()) { curobjsel = F14_NumObjects()-1; break; }
-                if (curobjsel<0) curobjsel = 0;
-                if (curobjsel >= 0) {
-                    F14_SetCurObject(curobjsel);
-                    DIAObjectProps(hwnd, curobjsel);
                 }
                 break;
             }

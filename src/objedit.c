@@ -71,7 +71,58 @@ static const char * OE_Kind(const F14Obj * o) {
         return " (area)";
     }
     if (o->gfxid == 0) return " (ext)";
-    return "";
+    return " (tile)";
+}
+
+void OE_Describe(int i, char * buf, int n) {
+    const F14Obj * o = F14_GetObject(i);
+    if (buf == NULL || n < 1) return;
+    if (o == NULL) snprintf(buf, (size_t) n, "Object %d", i);
+    else snprintf(buf, (size_t) n, "Object %d%s", i, OE_Kind(o));
+}
+
+/* Clone current (or a default area) at map pixels. Shift snaps to tiles. */
+int OE_CloneAt(int mx, int my, int snap) {
+    const F14Obj * src = F14_GetObject(F14_CurObject());
+    F14Obj o;
+    int ni = F14_NewObject();
+    if (ni < 0) return -1;
+    if (src != NULL) o = *src;
+    else {
+        memset(&o, 0, sizeof(o));
+        o.show = 1;
+        o.tileid = -1;
+        o.gwidth = blockwidth > 0 ? blockwidth : 16;
+        o.gheight = blockheight > 0 ? blockheight : 16;
+    }
+    if (snap && blockwidth > 0 && blockheight > 0) {
+        mx = (mx / blockwidth) * blockwidth;
+        my = (my / blockheight) * blockheight;
+    }
+    o.xpos = mx;
+    o.ypos = my;
+    o.show = 1;
+    F14_SetObject(ni, &o);
+    F14_SetCurObject(ni);
+    mapaltered = 1;
+    return ni;
+}
+
+int OE_NewDefault(void) {
+    F14Obj o;
+    int ni = F14_NewObject();
+    if (ni < 0) return -1;
+    memset(&o, 0, sizeof(o));
+    o.show = 1;
+    o.tileid = -1;
+    o.gwidth = blockwidth > 0 ? blockwidth : 16;
+    o.gheight = blockheight > 0 ? blockheight : 16;
+    o.xpos = (xmapoffset + 2) * (blockwidth > 0 ? blockwidth : 16);
+    o.ypos = (ymapoffset + 2) * (blockheight > 0 ? blockheight : 16);
+    F14_SetObject(ni, &o);
+    F14_SetCurObject(ni);
+    mapaltered = 1;
+    return ni;
 }
 
 /* ---------------- external image cache (top-down 24-bit) ---------------- */
@@ -158,6 +209,76 @@ static void OE_Blit24(HDC hdc, int dx, int dy, int dw, int dh,
     }
 }
 
+/* Fit a source size into dw x dh (aspect preserved). Returns 1 if ok. */
+static int OE_FitBox(int sw, int sh, int dw, int dh, int * ox, int * oy, int * tw, int * th)
+{
+    if (sw < 1 || sh < 1 || dw < 1 || dh < 1)
+        return 0;
+    if (sw * dh > sh * dw) {
+        *tw = dw;
+        *th = (sh * dw) / sw;
+    } else {
+        *th = dh;
+        *tw = (sw * dh) / sh;
+    }
+    if (*tw < 1) *tw = 1;
+    if (*th < 1) *th = 1;
+    *ox = (dw - *tw) / 2;
+    *oy = (dh - *th) / 2;
+    return 1;
+}
+
+/* Panel thumb: tile graphic, or shrunk file region. 0 = area/label (keep rect). */
+int OE_DrawThumb(HDC hdc, int dx, int dy, int dw, int dh, int i)
+{
+    const F14Obj * o = F14_GetObject(i);
+    int ox, oy, tw, th;
+
+    if (hdc == NULL || o == NULL || dw < 1 || dh < 1)
+        return 0;
+    if (o->gfxid > 0 && o->gfxid < numblockgfx && blockwidth > 0 && blockheight > 0) {
+        unsigned char * tb = malloc((size_t) blockwidth * (size_t) blockheight * 3);
+        if (tb == NULL)
+            return 0;
+        BlockGfxto24(o->gfxid, tb, 0, 0, blockwidth * 3);
+        OE_Blit24(hdc, dx, dy, dw, dh, tb, blockwidth, blockheight);
+        free(tb);
+        return 1;
+    }
+    if (o->gfxid == 0 && o->tileid >= 0) {
+        int iw, ih, sx, sy, sw, sh, r;
+        unsigned char * ip = OE_Image(o->tileid, &iw, &ih);
+        unsigned char * sub;
+        if (ip == NULL)
+            return 0;
+        sx = o->gxoff;
+        sy = o->gyoff;
+        sw = o->gwidth;
+        sh = o->gheight;
+        if (sx < 0) sx = 0;
+        if (sy < 0) sy = 0;
+        if (sx >= iw || sy >= ih)
+            return 0;
+        if (sw <= 0) sw = iw - sx;
+        if (sh <= 0) sh = ih - sy;
+        if (sw > iw - sx) sw = iw - sx;
+        if (sh > ih - sy) sh = ih - sy;
+        if (sw < 1 || sh < 1)
+            return 0;
+        if (!OE_FitBox(sw, sh, dw, dh, &ox, &oy, &tw, &th))
+            return 0;
+        sub = malloc((size_t) sw * (size_t) sh * 3);
+        if (sub == NULL)
+            return 0;
+        for (r = 0; r < sh; r++)
+            memcpy(sub + r * sw * 3, ip + ((sy + r) * iw + sx) * 3, (size_t) sw * 3);
+        OE_Blit24(hdc, dx + ox, dy + oy, tw, th, sub, sw, sh);
+        free(sub);
+        return 1;
+    }
+    return 0;
+}
+
 /* transparent blit of top-down 24-bit BGR src (colourkey RGB) via readback */
 static void OE_TransBlit(HDC hdc, int dx, int dy, int dw, int dh,
     unsigned char * topdown, int sw, int sh, int kr, int kg, int kb) {
@@ -207,7 +328,8 @@ void OE_DrawObjects(HDC hdc, RECT * client) {
     int n, i, order, ox, oy;
     int zx = zoomon, zd = zoomdiv;
 
-    if (!objshow || mappt == NULL) return;
+    if (mappt == NULL) return;
+    if (!objshow && !objplace) return;
     n = F14_NumObjects();
     if (n <= 0) return;
     if (n > 4096) n = 4096;
@@ -292,7 +414,9 @@ void OE_DrawObjects(HDC hdc, RECT * client) {
                 }
             }
             if (i == F14_CurObject()) {
-                hpen = CreatePen(PS_SOLID, pw, RGB(255, 255, 255));
+                hpen = CreatePen(PS_SOLID, pw, objplace ? RGB(255, 255, 0) : RGB(255, 255, 255));
+            } else if (objplace) {
+                hpen = CreatePen(PS_DOT, pw, RGB(180, 180, 80));
             } else {
                 bc = OE_BorderCol(i);
                 if (bc == 0) continue; /* 000000 = no border */

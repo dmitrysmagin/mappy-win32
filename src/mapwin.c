@@ -587,7 +587,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     tsplace = 0;
                     CheckMenuItem(hMenu, CM_TSPLACE, MF_UNCHECKED);
                     CheckMenuItem(hMenu, CM_OBJPLACE, MF_CHECKED);
+                    BESetWindowType(4); /* BETYPE_OBJECTS */
                 } else CheckMenuItem(hMenu, CM_OBJPLACE, MF_UNCHECKED);
+                InvalidateAll();
                 break;
             case CM_OBJSHOW:
                 objshow = 1-objshow;
@@ -610,6 +612,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     CheckMenuItem(hMenu, CM_TSPLACE, MF_CHECKED);
                     BESetWindowType(5); /* BETYPE_TILESETS */
                 } else CheckMenuItem(hMenu, CM_TSPLACE, MF_UNCHECKED);
+                InvalidateAll();
                 break;
             case CM_TSSHOW:
                 tsetshow = 1-tsetshow;

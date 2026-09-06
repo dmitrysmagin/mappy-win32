@@ -92,6 +92,9 @@ static int pathcx, pathcy;		/* path cursor (map coords) */
 static int tsdrag = 0;
 static int tsgrabdx, tsgrabdy;
 static int ts_undo_on_move = 0;
+static int objdrag = 0;
+static int objgrabdx, objgrabdy;
+static int obj_undo_on_move = 0;
 
 extern HINSTANCE hInstance;
 extern short int blockwidth, blockheight, blockdepth, gridon, zoomon, curbrsh;
@@ -116,6 +119,7 @@ extern int key1, key2, key3, keyi, keyk, keym;
 extern int keyF[10];
 extern int objplace;
 extern int tsplace, tsetshow;
+extern short int curobjsel;
 extern int panelpro, prographbg, sortobjects;
 
 #include "fmp.h"
@@ -1189,6 +1193,68 @@ static void MEMoveCurTileset(int xblk, int yblk)
     inst.tx = xblk - tsgrabdx;
     inst.ty = yblk - tsgrabdy;
     TS_SetInst(TS_CurInst(), &inst);
+    mapaltered = 1;
+}
+
+static void MESyncObjSel(int idx)
+{
+    if (idx >= 0 && F14_GetObject(idx) != NULL)
+        curobjsel = (short int) idx;
+    else
+        curobjsel = -1;
+}
+
+static int MEMapPixX(LPARAM lParam)
+{
+    return ZD(LOWORD(lParam)) + xmapoffset * blockwidth;
+}
+
+static int MEMapPixY(LPARAM lParam)
+{
+    return ZD(HIWORD(lParam)) + ymapoffset * blockheight;
+}
+
+/* Empty / Ctrl: clone selected (or a default area). Hit: select only. */
+static int MEPlaceObjectAt(int mx, int my, int ctrl, int snap)
+{
+    int hit = OE_PickObject(mx, my);
+    const F14Obj *cur;
+    int ni;
+
+    if (ctrl || hit < 0) {
+        ni = OE_CloneAt(mx, my, snap);
+        if (ni < 0)
+            return -1;
+        objgrabdx = 0;
+        objgrabdy = 0;
+        MESyncObjSel(ni);
+        return ni;
+    }
+    F14_SetCurObject(hit);
+    MESyncObjSel(hit);
+    cur = F14_GetObject(hit);
+    if (cur == NULL)
+        return -1;
+    objgrabdx = mx - cur->xpos;
+    objgrabdy = my - cur->ypos;
+    return hit;
+}
+
+static void MEMoveCurObject(int mx, int my, int snap)
+{
+    const F14Obj *cur = F14_GetObject(F14_CurObject());
+    F14Obj o;
+
+    if (cur == NULL)
+        return;
+    o = *cur;
+    o.xpos = mx - objgrabdx;
+    o.ypos = my - objgrabdy;
+    if (snap && blockwidth > 0 && blockheight > 0) {
+        o.xpos = (o.xpos / blockwidth) * blockwidth;
+        o.ypos = (o.ypos / blockheight) * blockheight;
+    }
+    F14_SetObject(F14_CurObject(), &o);
     mapaltered = 1;
 }
 
@@ -2665,23 +2731,19 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             return 0;
         }
         if (!(megetabrush || megetatileset) && objplace) {
-            /* object placement: click places selected, ctrl+click duplicates */
-            int mpx = ZD(LOWORD(lParam)) + xmapoffset * blockwidth;
-            int mpy = ZD(HIWORD(lParam)) + ymapoffset * blockheight;
-            if (GetKeyState(VK_CONTROL) < 0) {
-                const F14Obj * src = F14_GetObject(F14_CurObject());
-                if (src != NULL) {
-                    int ni = F14_NewObject();
-                    if (ni >= 0) {
-                        F14_SetObject(ni, src);
-                        F14_SetCurObject(ni);
-                    }
-                }
+            int mpx = MEMapPixX(lParam);
+            int mpy = MEMapPixY(lParam);
+            int hit = OE_PickObject(mpx, mpy);
+            int creating = (GetKeyState(VK_CONTROL) < 0) || hit < 0;
+            if (creating)
+                MECopyToUndo();
+            obj_undo_on_move = !creating;
+            if (MEPlaceObjectAt(mpx, mpy, GetKeyState(VK_CONTROL) < 0,
+                    GetKeyState(VK_SHIFT) < 0) >= 0) {
+                objdrag = 1;
+                SetCapture(hwnd);
+                InvalidateAll();
             }
-            MECopyToUndo();
-            OE_PlaceSelected(mpx, mpy, GetKeyState(VK_SHIFT) < 0);
-            mapaltered = 1;
-            InvalidateRgn(mhwnd, NULL, FALSE);
             return 0;
         }
         if (!(megetabrush || megetatileset) && MBDoAction(mb_l, hwnd, lParam)) return 0;
@@ -2758,6 +2820,22 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             MEShowCoords(xblk, yblk);
             return 0;
         }
+        if (objplace && objdrag) {
+            int mpx = MEMapPixX(lParam);
+            int mpy = MEMapPixY(lParam);
+            xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
+            yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
+            if (obj_undo_on_move) {
+                MECopyToUndo();
+                obj_undo_on_move = 0;
+            }
+            MEMoveCurObject(mpx, mpy, GetKeyState(VK_SHIFT) < 0);
+            meoldbx = xblk;
+            meoldby = yblk;
+            InvalidateRgn(mhwnd, NULL, FALSE);
+            MEShowCoords(xblk, yblk);
+            return 0;
+        }
         if (dragmode) {
             MEDragMap(LOWORD(lParam), HIWORD(lParam));
             return 0;
@@ -2808,6 +2886,10 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             tsdrag = 0;
             ReleaseCapture();
         }
+        if (objdrag) {
+            objdrag = 0;
+            ReleaseCapture();
+        }
         painton = 0;
         if (gettingbrush) {
             if (mebrushx2<mebrushx) { i = mebrushx; mebrushx = mebrushx2; mebrushx2 = i; }
@@ -2847,6 +2929,18 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             rmapped = 0;
             break;
         }
+        if (objplace) {
+            i = OE_PickObject(MEMapPixX(lParam), MEMapPixY(lParam));
+            if (i >= 0) {
+                MECopyToUndo();
+                F14_DeleteObject(i);
+                MESyncObjSel(F14_NumObjects() > 0 ? F14_CurObject() : -1);
+                mapaltered = 1;
+                InvalidateAll();
+            }
+            rmapped = 0;
+            break;
+        }
         if (lua_mb_act == 10) {
             xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
             yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
@@ -2872,7 +2966,7 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         break;
     case WM_RBUTTONDOWN:
         if (mappt==NULL) break;
-        if (tsplace) break;
+        if (tsplace || objplace) break;
         if (MBDoAction(mb_r, hwnd, lParam)) rmapped = 1;
         break;
     case WM_XBUTTONDOWN:
@@ -3005,7 +3099,8 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 int pi = OE_PickObject(mpx, mpy);
                 if (pi >= 0) {
                     F14_SetCurObject(pi);
-                    InvalidateRgn(mhwnd, NULL, FALSE);
+                    MESyncObjSel(pi);
+                    InvalidateAll();
                 }
             } else if (pathmode) { pathmode = 0; } else { pathmode = 1; linemode = 0; }
             break;
@@ -3036,10 +3131,18 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 mapaltered = 1;
                 InvalidateRgn(mhwnd, NULL, FALSE);
             }
+            if (objplace && F14_GetObject(F14_CurObject()) != NULL) {
+                MECopyToUndo();
+                F14_DeleteObject(F14_CurObject());
+                MESyncObjSel(F14_NumObjects() > 0 ? F14_CurObject() : -1);
+                mapaltered = 1;
+                InvalidateAll();
+            }
             break;
         case VK_ESCAPE:
             linemode = 0; pathmode = 0;
             if (tsdrag) { tsdrag = 0; ReleaseCapture(); }
+            if (objdrag) { objdrag = 0; ReleaseCapture(); }
             if (dragmode) MEDragFinish();
             break;
         }
