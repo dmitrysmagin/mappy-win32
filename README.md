@@ -98,6 +98,8 @@ Dragging the window between monitors with different DPI works for Graph / Block 
 
 Unknown FMP chunks are kept and written back so a load/save round-trip does not drop data the editor does not interpret.
 
+The on-disk chunk layout (including `TSDF`/`TSIN` tilesets) is documented in [FMP.md](FMP.md).
+
 ## Layout of this repo
 
 ```text

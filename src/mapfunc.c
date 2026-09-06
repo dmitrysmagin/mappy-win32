@@ -14,6 +14,7 @@
 #include <assert.h>
 #include "fmp.h"
 #include "fmp14.h"
+#include "tileset.h"
 #include "compat.h"
 #include "mapdefs.h"
 
@@ -403,6 +404,7 @@ void FreeAll(void) {
         chunklist = tmp;
     }
     F14_FreeAll();  /* 1.4 chunks: EPHD/TSTR/LSTR/OBDT/OBFN */
+    TS_FreeAll();   /* TSDF/TSIN tilesets */
 
     curstr = 0; numblockstr = 0; numblockgfx = 0;
     curbrsh = 0; numbrushes = 0; mapwidth = 0; mapheight = 0; strtanim = 0;
@@ -1215,6 +1217,8 @@ int MapDecode(FILE * mfpt, int mpfilesize) {
         if (chunk_is(fmappospt, "LSTR", 4)) { chkdn = 1; if (F14_DecodeLSTR(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
         if (chunk_is(fmappospt, "OBDT", 4)) { chkdn = 1; if (F14_DecodeOBDT(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
         if (chunk_is(fmappospt, "OBFN", 4)) { chkdn = 1; if (F14_DecodeOBFN(fmappospt, MapGetchksz(fmappospt+4))) { merror = ER_MAPLOADERROR; } }
+        if (chunk_is(fmappospt, "TSDF", 4)) { chkdn = 1; if (TS_DecodeTSDF(fmappospt, MapGetchksz(fmappospt+4), mapislsb, maptype, blockstrsize)) { merror = ER_MAPLOADERROR; } }
+        if (chunk_is(fmappospt, "TSIN", 4)) { chkdn = 1; if (TS_DecodeTSIN(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
         if (chunk_is(fmappospt, "NLYR", 4)) {
             int nlyr, nloff;
             chkdn = 1;
@@ -1750,6 +1754,12 @@ int SaveProjectEx(int skipgfx) {
         F14_LstrEnsure(nlay > 0 ? nlay : 1);
     }
     if (F14_SaveLSTR(filept, mapislsb)) { merror = ER_MAPSAVEERROR; fclose(filept); return -1; }
+    if (TS_HasTSDF()) {
+        if (TS_SaveTSDF(filept, mapislsb, maptype, BLOCKSTRSIZE)) { merror = ER_MAPSAVEERROR; fclose(filept); return -1; }
+    }
+    if (TS_HasTSIN()) {
+        if (TS_SaveTSIN(filept, mapislsb)) { merror = ER_MAPSAVEERROR; fclose(filept); return -1; }
+    }
 
     genheader.id1='C'; genheader.id2='M'; genheader.id3='A'; genheader.id4='P';
     genheader.headsize=byteswapl((unsigned long)(3*256));
