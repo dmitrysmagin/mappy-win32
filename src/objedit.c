@@ -2,7 +2,7 @@
  *
  * Dialogs D_OBJECT, D_OBJFNAME; export symbol `objstr` ("OBJSTR %sobjstr[%d]");
  * value names OBJXPOS..OBJFLAGS; "Object %d", "Objects (%d/%d)",
- * "Area only\t(no graphic)"; Col: 000000 = no border, 000001 = black.
+ * Graphic kinds: Area / Tile / Image region. Col: 000000 = no border, 000001 = black.
  *
  * Areas = objects with tileid<0 ("area only"); labels = areas with 0x0 + text.
  * External graphics come from the OBFN file list (any format via IMLoadImage24).
@@ -10,6 +10,7 @@
  */
 #define STRICT
 #include <windows.h>
+#include <commctrl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,19 +130,32 @@ static void OE_Blit24(HDC hdc, int dx, int dy, int dw, int dh,
     RGBQUAD rgbq;
 
     if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return;
+    {
+        int pitch = (sw * 3 + 3) & ~3;
+        unsigned char * src = topdown;
+        int own = 0, y;
+        if (pitch != sw * 3) {
+            src = malloc((size_t) pitch * sh);
+            if (src == NULL) return;
+            own = 1;
+            for (y = 0; y < sh; y++)
+                memcpy(src + y * pitch, topdown + y * sw * 3, (size_t) sw * 3);
+        }
     memset(&bih, 0, sizeof(bih)); memset(&rgbq, 0, sizeof(rgbq));
     bih.biSize = sizeof(bih);
     bih.biWidth = sw; bih.biHeight = -sh;
     bih.biPlanes = 1; bih.biBitCount = 24; bih.biCompression = BI_RGB;
     mdc = CreateCompatibleDC(hdc);
-    if (mdc == NULL) return;
-    hbm = CreateDIBitmap(hdc, &bih, CBM_INIT, topdown, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
-    if (hbm == NULL) { DeleteDC(mdc); return; }
+    if (mdc == NULL) { if (own) free(src); return; }
+    hbm = CreateDIBitmap(hdc, &bih, CBM_INIT, src, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+    if (hbm == NULL) { DeleteDC(mdc); if (own) free(src); return; }
     hold = SelectObject(mdc, hbm);
     StretchBlt(hdc, dx, dy, dw, dh, mdc, 0, 0, sw, sh, SRCCOPY);
     SelectObject(mdc, hold);
     DeleteObject(hbm);
     DeleteDC(mdc);
+    if (own) free(src);
+    }
 }
 
 /* transparent blit of top-down 24-bit BGR src (colourkey RGB) via readback */
@@ -467,74 +481,483 @@ static void OE_ApplyStrCombo(HWND hwndDlg, F14Obj * o) {
     }
 }
 
-static void OE_FillFileCombo(HWND hwndDlg) {
+enum { OE_MODE_AREA = 0, OE_MODE_TILE = 1, OE_MODE_FILE = 2 };
+
+static int oe_edgfx;
+static int oe_filling;
+
+static void OE_FillFileCombo(HWND hwndDlg, int sel) {
     int i, n;
-    char txt[300];
 
     SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_RESETCONTENT, 0, 0);
-    SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_ADDSTRING, 0,
-        (LPARAM) "Area only\t(no graphic)");
-    SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_ADDSTRING, 0,
-        (LPARAM) "Tile graphic (see number)");
     n = F14_NumImages();
-    for (i = 0; i < n; i++) {
-        sprintf(txt, "External: %s", F14_ImageName(i));
-        SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_ADDSTRING, 0, (LPARAM) txt);
+    if (n <= 0) {
+        SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_ADDSTRING, 0,
+            (LPARAM) "(no image files — click Add)");
+        SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_SETCURSEL, 0, 0);
+        return;
     }
+    for (i = 0; i < n; i++)
+        SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_ADDSTRING, 0,
+            (LPARAM) F14_ImageName(i));
+    if (sel < 0) sel = 0;
+    if (sel >= n) sel = n - 1;
+    SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_SETCURSEL, sel, 0);
+}
+
+static int OE_PropsGetMode(HWND dlg) {
+    if (IsDlgButtonChecked(dlg, IDC_OBJKIND_TILE)) return OE_MODE_TILE;
+    if (IsDlgButtonChecked(dlg, IDC_OBJKIND_FILE)) return OE_MODE_FILE;
+    return OE_MODE_AREA;
+}
+
+static void OE_Show(HWND dlg, int id, int on) {
+    HWND w = GetDlgItem(dlg, id);
+    if (w) ShowWindow(w, on ? SW_SHOW : SW_HIDE);
+}
+
+static void OE_PropsTileLab(HWND dlg) {
+    char t[64];
+    if (numblockgfx <= 1)
+        strcpy(t, "No usable tiles");
+    else
+        sprintf(t, "Tile %d of %d", oe_edgfx, numblockgfx - 1);
+    SetDlgItemText(dlg, IDC_OBJTILELAB, t);
+}
+
+static void OE_MoveDlg(HWND dlg, int id, int x, int y, int w, int h) {
+    RECT r;
+    HWND ctl = GetDlgItem(dlg, id);
+    if (ctl == NULL) return;
+    r.left = x; r.top = y; r.right = x + w; r.bottom = y + h;
+    MapDialogRect(dlg, &r);
+    SetWindowPos(ctl, NULL, r.left, r.top, r.right - r.left, r.bottom - r.top,
+        SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+static void OE_RebuddySpin(HWND dlg, int editId, int spinId) {
+    HWND ed = GetDlgItem(dlg, editId);
+    HWND ud = GetDlgItem(dlg, spinId);
+    if (ed && ud) SendMessage(ud, UDM_SETBUDDY, (WPARAM) ed, 0);
+}
+
+static void OE_ShowPair(HWND dlg, int editId, int spinId, int on) {
+    OE_Show(dlg, editId, on);
+    OE_Show(dlg, spinId, on);
+}
+
+static void OE_MakeSpin(HWND dlg, int editId, int spinId, int lo, int hi) {
+    HWND ed, ud;
+    RECT rc;
+    int sw;
+
+    if (GetDlgItem(dlg, spinId) != NULL) return;
+    ed = GetDlgItem(dlg, editId);
+    if (ed == NULL) return;
+    GetWindowRect(ed, &rc);
+    MapWindowPoints(NULL, dlg, (POINT *) &rc, 2);
+    sw = GetSystemMetrics(SM_CXVSCROLL);
+    if (sw < 16) sw = 16;
+    ud = CreateWindowEx(WS_EX_CLIENTEDGE, UPDOWN_CLASS, "",
+        WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_SETBUDDYINT |
+        UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+        rc.right - sw, rc.top, sw, rc.bottom - rc.top,
+        dlg, (HMENU) (INT_PTR) spinId, hInstance, NULL);
+    if (ud == NULL) return;
+    SendMessage(ud, UDM_SETRANGE32, (WPARAM) lo, (LPARAM) hi);
+    SendMessage(ud, UDM_SETBUDDY, (WPARAM) ed, 0);
+}
+
+static void OE_InitPropSpins(HWND dlg) {
+    INITCOMMONCONTROLSEX icc;
+    icc.dwSize = sizeof(icc);
+    icc.dwICC = ICC_UPDOWN_CLASS;
+    InitCommonControlsEx(&icc);
+    OE_MakeSpin(dlg, IDC_OBJX, IDC_OBJXSPIN, -99999, 999999);
+    OE_MakeSpin(dlg, IDC_OBJY, IDC_OBJYSPIN, -99999, 999999);
+    OE_MakeSpin(dlg, IDC_OBJHX, IDC_OBJHXSPIN, -99999, 999999);
+    OE_MakeSpin(dlg, IDC_OBJHY, IDC_OBJHYSPIN, -99999, 999999);
+    OE_MakeSpin(dlg, IDC_OBJGXOFF, IDC_OBJGXSPIN, 0, 99999);
+    OE_MakeSpin(dlg, IDC_OBJGYOFF, IDC_OBJGYSPIN, 0, 99999);
+    OE_MakeSpin(dlg, IDC_OBJGW, IDC_OBJGWSPIN, 0, 99999);
+    OE_MakeSpin(dlg, IDC_OBJGH, IDC_OBJGHSPIN, 0, 99999);
+}
+
+static void OE_InitRegSpins(HWND dlg) {
+    INITCOMMONCONTROLSEX icc;
+    icc.dwSize = sizeof(icc);
+    icc.dwICC = ICC_UPDOWN_CLASS;
+    InitCommonControlsEx(&icc);
+    OE_MakeSpin(dlg, IDC_OBJREGX, IDC_OBJREGXSPIN, 0, 99999);
+    OE_MakeSpin(dlg, IDC_OBJREGY, IDC_OBJREGYSPIN, 0, 99999);
+    OE_MakeSpin(dlg, IDC_OBJREGW, IDC_OBJREGWSPIN, 1, 99999);
+    OE_MakeSpin(dlg, IDC_OBJREGH, IDC_OBJREGHSPIN, 1, 99999);
+}
+
+static void OE_SetDlgInt(HWND dlg, int id, int v) {
+    char t[32];
+    sprintf(t, "%d", v);
+    SetDlgItemText(dlg, id, t);
+}
+
+static int OE_GetDlgInt(HWND dlg, int id) {
+    char t[32];
+    GetDlgItemText(dlg, id, t, 32);
+    return atoi(t);
+}
+
+static void OE_InvalidatePrev(HWND dlg) {
+    HWND w = GetDlgItem(dlg, IDC_OBJGFXPREV);
+    if (w) InvalidateRect(w, NULL, TRUE);
+}
+
+static void OE_PropsShowMode(HWND dlg, int mode) {
+    int area = (mode == OE_MODE_AREA);
+    int tile = (mode == OE_MODE_TILE);
+    int file = (mode == OE_MODE_FILE);
+
+    OE_Show(dlg, IDC_OBJHINT, area);
+    OE_Show(dlg, IDC_OBJCOORLBL, area);
+    OE_Show(dlg, IDC_OBJSIZELBL, area);
+    OE_Show(dlg, IDC_OBJFILELBL, file);
+    OE_Show(dlg, IDC_OBJFILE, file);
+    OE_Show(dlg, IDC_OBJADDFILE, file);
+    OE_Show(dlg, IDC_OBJGFXPREV, tile || file);
+    OE_Show(dlg, IDC_OBJTILELAB, tile);
+    OE_Show(dlg, IDC_OBJPICKTILE, tile);
+    OE_Show(dlg, IDC_OBJPICKREG, file);
+    OE_Show(dlg, IDC_OBJXLBL, file);
+    OE_Show(dlg, IDC_OBJYLBL, file);
+    OE_Show(dlg, IDC_OBJWLBL, file);
+    OE_Show(dlg, IDC_OBJHLBL, file);
+    OE_ShowPair(dlg, IDC_OBJGXOFF, IDC_OBJGXSPIN, file);
+    OE_ShowPair(dlg, IDC_OBJGYOFF, IDC_OBJGYSPIN, file);
+
+    if (area) {
+        OE_MoveDlg(dlg, IDC_OBJGW, 50, 66, 40, 14);
+        OE_MoveDlg(dlg, IDC_OBJGH, 138, 66, 40, 14);
+        OE_RebuddySpin(dlg, IDC_OBJGW, IDC_OBJGWSPIN);
+        OE_RebuddySpin(dlg, IDC_OBJGH, IDC_OBJGHSPIN);
+    } else if (file) {
+        OE_MoveDlg(dlg, IDC_OBJGW, 196, 62, 36, 14);
+        OE_MoveDlg(dlg, IDC_OBJGH, 250, 62, 36, 14);
+        OE_RebuddySpin(dlg, IDC_OBJGW, IDC_OBJGWSPIN);
+        OE_RebuddySpin(dlg, IDC_OBJGH, IDC_OBJGHSPIN);
+    }
+    OE_ShowPair(dlg, IDC_OBJGW, IDC_OBJGWSPIN, area || file);
+    OE_ShowPair(dlg, IDC_OBJGH, IDC_OBJGHSPIN, area || file);
+    if (tile) OE_PropsTileLab(dlg);
+
+    EnableWindow(GetDlgItem(dlg, IDC_OBJPICKTILE), numblockgfx > 1);
+    EnableWindow(GetDlgItem(dlg, IDC_OBJPICKREG), F14_NumImages() > 0);
+    InvalidateRect(dlg, NULL, TRUE);
+    OE_InvalidatePrev(dlg);
+}
+
+static void OE_DrawGfxPrev(HWND dlg, const DRAWITEMSTRUCT * di) {
+    int mode, pitch;
+    RECT rc = di->rcItem;
+    HDC hdc = di->hDC;
+    unsigned char * tb;
+
+    FillRect(hdc, &rc, GetSysColorBrush(COLOR_3DDKSHADOW));
+    mode = OE_PropsGetMode(dlg);
+    if (mode == OE_MODE_TILE) {
+        if (oe_edgfx <= 0 || blockgfxpt == NULL || blockwidth <= 0 || blockheight <= 0)
+            return;
+        pitch = (blockwidth * 3 + 3) & ~3;
+        tb = malloc((size_t) pitch * blockheight);
+        if (tb == NULL) return;
+        memset(tb, 0x44, (size_t) pitch * blockheight);
+        BlockGfxto24(oe_edgfx, tb, 0, 0, pitch);
+        OE_Blit24(hdc, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+            tb, blockwidth, blockheight);
+        free(tb);
+        return;
+    }
+    if (mode == OE_MODE_FILE) {
+        int fi, iw, ih, sx, sy, sw, sh, x, y;
+        unsigned char * ip, * sub;
+        fi = (int) SendDlgItemMessage(dlg, IDC_OBJFILE, CB_GETCURSEL, 0, 0);
+        if (fi < 0 || F14_NumImages() <= 0) return;
+        ip = OE_Image(fi, &iw, &ih);
+        if (ip == NULL) return;
+        sx = OE_GetDlgInt(dlg, IDC_OBJGXOFF);
+        sy = OE_GetDlgInt(dlg, IDC_OBJGYOFF);
+        sw = OE_GetDlgInt(dlg, IDC_OBJGW);
+        sh = OE_GetDlgInt(dlg, IDC_OBJGH);
+        if (sx < 0) sx = 0;
+        if (sy < 0) sy = 0;
+        if (sx >= iw) sx = iw - 1;
+        if (sy >= ih) sy = ih - 1;
+        if (sw < 1) sw = 1;
+        if (sh < 1) sh = 1;
+        if (sw > iw - sx) sw = iw - sx;
+        if (sh > ih - sy) sh = ih - sy;
+        sub = malloc((size_t) sw * sh * 3);
+        if (sub == NULL) return;
+        for (y = 0; y < sh; y++)
+            for (x = 0; x < sw; x++) {
+                unsigned char * s = ip + ((sy + y) * iw + (sx + x)) * 3;
+                unsigned char * d = sub + (y * sw + x) * 3;
+                d[0] = s[0]; d[1] = s[1]; d[2] = s[2];
+            }
+        OE_Blit24(hdc, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+            sub, sw, sh);
+        free(sub);
+    }
+}
+
+/* ----- image-region picker ----- */
+
+static struct {
+    int imgidx, x, y, w, h;
+    int drag, x0, y0;
+    int syncing;
+    HWND dlg;
+} oereg;
+static WNDPROC oereg_old;
+
+static int OE_RegFit(HWND hwnd, int iw, int ih, int * ox, int * oy, int * dw, int * dh) {
+    RECT rc;
+    int cw, ch;
+    GetClientRect(hwnd, &rc);
+    cw = rc.right; ch = rc.bottom;
+    if (iw < 1 || ih < 1 || cw < 2 || ch < 2) return 0;
+    if ((long) cw * ih < (long) ch * iw) {
+        *dw = cw;
+        *dh = (int) (((long) cw * ih) / iw);
+    } else {
+        *dh = ch;
+        *dw = (int) (((long) ch * iw) / ih);
+    }
+    if (*dw < 1) *dw = 1;
+    if (*dh < 1) *dh = 1;
+    *ox = (cw - *dw) / 2;
+    *oy = (ch - *dh) / 2;
+    return 1;
+}
+
+static void OE_RegViewToImg(HWND hwnd, int mx, int my, int iw, int ih, int * ix, int * iy) {
+    int ox, oy, dw, dh;
+    if (!OE_RegFit(hwnd, iw, ih, &ox, &oy, &dw, &dh)) { *ix = 0; *iy = 0; return; }
+    *ix = (int) (((long) (mx - ox) * iw) / dw);
+    *iy = (int) (((long) (my - oy) * ih) / dh);
+    if (*ix < 0) *ix = 0;
+    if (*iy < 0) *iy = 0;
+    if (*ix >= iw) *ix = iw - 1;
+    if (*iy >= ih) *iy = ih - 1;
+}
+
+static void OE_RegNorm(int x0, int y0, int x1, int y1, int * x, int * y, int * w, int * h) {
+    int l = x0 < x1 ? x0 : x1, t = y0 < y1 ? y0 : y1;
+    int r = x0 < x1 ? x1 : x0, b = y0 < y1 ? y1 : y0;
+    *x = l; *y = t;
+    *w = r - l + 1;
+    *h = b - t + 1;
+    if (*w < 1) *w = 1;
+    if (*h < 1) *h = 1;
+}
+
+static void OE_RegWriteEdits(HWND dlg) {
+    oereg.syncing = 1;
+    OE_SetDlgInt(dlg, IDC_OBJREGX, oereg.x);
+    OE_SetDlgInt(dlg, IDC_OBJREGY, oereg.y);
+    OE_SetDlgInt(dlg, IDC_OBJREGW, oereg.w);
+    OE_SetDlgInt(dlg, IDC_OBJREGH, oereg.h);
+    oereg.syncing = 0;
+}
+
+static void OE_RegReadEdits(HWND dlg) {
+    oereg.x = OE_GetDlgInt(dlg, IDC_OBJREGX);
+    oereg.y = OE_GetDlgInt(dlg, IDC_OBJREGY);
+    oereg.w = OE_GetDlgInt(dlg, IDC_OBJREGW);
+    oereg.h = OE_GetDlgInt(dlg, IDC_OBJREGH);
+    if (oereg.w < 1) oereg.w = 1;
+    if (oereg.h < 1) oereg.h = 1;
+}
+
+static LRESULT CALLBACK OE_RegViewProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    int iw, ih, ox, oy, dw, dh, mx, my, ix, iy;
+    unsigned char * ip;
+
+    switch (msg) {
+    case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            FillRect(hdc, &rc, GetSysColorBrush(COLOR_3DDKSHADOW));
+            ip = OE_Image(oereg.imgidx, &iw, &ih);
+            if (ip != NULL && OE_RegFit(hwnd, iw, ih, &ox, &oy, &dw, &dh)) {
+                int vx, vy, vw, vh;
+                HPEN pen, hold;
+                HBRUSH hbrold;
+                OE_Blit24(hdc, ox, oy, dw, dh, ip, iw, ih);
+                vx = ox + (int) (((long) oereg.x * dw) / iw);
+                vy = oy + (int) (((long) oereg.y * dh) / ih);
+                vw = (int) (((long) oereg.w * dw) / iw);
+                vh = (int) (((long) oereg.h * dh) / ih);
+                if (vw < 2) vw = 2;
+                if (vh < 2) vh = 2;
+                hbrold = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+                pen = CreatePen(PS_SOLID, 2, RGB(255, 255, 0));
+                hold = SelectObject(hdc, pen);
+                Rectangle(hdc, vx, vy, vx + vw, vy + vh);
+                SelectObject(hdc, GetStockObject(BLACK_PEN));
+                Rectangle(hdc, vx + 2, vy + 2, vx + vw - 2, vy + vh - 2);
+                SelectObject(hdc, hold);
+                SelectObject(hdc, hbrold);
+                DeleteObject(pen);
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_SETCURSOR:
+        SetCursor(LoadCursor(NULL, IDC_CROSS));
+        return 1;
+    case WM_LBUTTONDOWN:
+        ip = OE_Image(oereg.imgidx, &iw, &ih);
+        if (ip == NULL) break;
+        mx = (short) LOWORD(lParam); my = (short) HIWORD(lParam);
+        OE_RegViewToImg(hwnd, mx, my, iw, ih, &ix, &iy);
+        oereg.drag = 1; oereg.x0 = ix; oereg.y0 = iy;
+        oereg.x = ix; oereg.y = iy; oereg.w = 1; oereg.h = 1;
+        SetCapture(hwnd);
+        OE_RegWriteEdits(oereg.dlg);
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+    case WM_MOUSEMOVE:
+        if (!oereg.drag) break;
+        ip = OE_Image(oereg.imgidx, &iw, &ih);
+        if (ip == NULL) break;
+        mx = (short) LOWORD(lParam); my = (short) HIWORD(lParam);
+        OE_RegViewToImg(hwnd, mx, my, iw, ih, &ix, &iy);
+        OE_RegNorm(oereg.x0, oereg.y0, ix, iy, &oereg.x, &oereg.y, &oereg.w, &oereg.h);
+        OE_RegWriteEdits(oereg.dlg);
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+    case WM_LBUTTONUP:
+        if (!oereg.drag) break;
+        oereg.drag = 0;
+        ReleaseCapture();
+        return 0;
+    }
+    return CallWindowProc(oereg_old, hwnd, msg, wParam, lParam);
+}
+
+INT_PTR CALLBACK DIAObjRegionProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    HWND view;
+    UNUSED(lParam);
+    switch (msg) {
+    case WM_INITDIALOG: {
+            char info[80];
+            int iw = 0, ih = 0;
+            view = GetDlgItem(hwndDlg, IDC_OBJREGVIEW);
+            oereg.dlg = hwndDlg;
+            oereg.drag = 0;
+            oereg_old = (WNDPROC) SetWindowLongPtr(view, GWLP_WNDPROC, (LONG_PTR) OE_RegViewProc);
+            OE_Image(oereg.imgidx, &iw, &ih);
+            sprintf(info, "Image %d x %d", iw, ih);
+            SetDlgItemText(hwndDlg, IDC_OBJREGINFO, info);
+            OE_RegWriteEdits(hwndDlg);
+            OE_InitRegSpins(hwndDlg);
+            break;
+        }
+    case WM_COMMAND:
+        if (HIWORD(wParam) == EN_CHANGE && !oereg.syncing) {
+            int id = LOWORD(wParam);
+            if (id == IDC_OBJREGX || id == IDC_OBJREGY || id == IDC_OBJREGW || id == IDC_OBJREGH) {
+                OE_RegReadEdits(hwndDlg);
+                view = GetDlgItem(hwndDlg, IDC_OBJREGVIEW);
+                if (view) InvalidateRect(view, NULL, FALSE);
+            }
+            break;
+        }
+        switch (LOWORD(wParam)) {
+        case IDOK: {
+                int iw = 0, ih = 0;
+                OE_RegReadEdits(hwndDlg);
+                OE_Image(oereg.imgidx, &iw, &ih);
+                if (iw > 0 && ih > 0) {
+                    if (oereg.x < 0) oereg.x = 0;
+                    if (oereg.y < 0) oereg.y = 0;
+                    if (oereg.x >= iw) oereg.x = iw - 1;
+                    if (oereg.y >= ih) oereg.y = ih - 1;
+                    if (oereg.w > iw - oereg.x) oereg.w = iw - oereg.x;
+                    if (oereg.h > ih - oereg.y) oereg.h = ih - oereg.y;
+                    if (oereg.w < 1) oereg.w = 1;
+                    if (oereg.h < 1) oereg.h = 1;
+                }
+                EndDialog(hwndDlg, 1);
+                break;
+            }
+        case IDCANCEL:
+            EndDialog(hwndDlg, 0);
+            break;
+        }
+        break;
+    case WM_DESTROY:
+        view = GetDlgItem(hwndDlg, IDC_OBJREGVIEW);
+        if (view && oereg_old)
+            SetWindowLongPtr(view, GWLP_WNDPROC, (LONG_PTR) oereg_old);
+        oereg_old = NULL;
+        break;
+    default:
+        return 0;
+    }
+    return -1;
+}
+
+static int OE_PickRegion(HWND hwnd, int imgidx, int * x, int * y, int * w, int * h) {
+    memset(&oereg, 0, sizeof(oereg));
+    oereg.imgidx = imgidx;
+    oereg.x = *x; oereg.y = *y; oereg.w = *w; oereg.h = *h;
+    if (oereg.w < 1) oereg.w = blockwidth > 0 ? blockwidth : 16;
+    if (oereg.h < 1) oereg.h = blockheight > 0 ? blockheight : 16;
+    if (DialogBox(hInstance, (LPCSTR) "D_OBJREGION", hwnd, AsDlgProc(DIAObjRegionProc)) != 1)
+        return 0;
+    *x = oereg.x; *y = oereg.y; *w = oereg.w; *h = oereg.h;
+    return 1;
 }
 
 INT_PTR CALLBACK DIAObjectPropsProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     char txt[300];
     static int edidx = 0;
-    int i;
+    int i, mode;
 
     switch (msg) {
     case WM_INITDIALOG:
         edidx = (int) lParam;
+        oe_filling = 1;
         LuaRunObjectProp(edidx);
         {
             const F14Obj * o = F14_GetObject(edidx);
+            int kind;
             if (o == NULL) { EndDialog(hwndDlg, -1L); break; }
-            sprintf(txt, "%d", o->xpos);
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJX), txt);
-            sprintf(txt, "%d", o->ypos);
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJY), txt);
-            sprintf(txt, "%d", o->gfxid);
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJGFX), txt);
-            OE_FillFileCombo(hwndDlg);
-            if (o->gfxid > 0)
-                SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_SELECTSTRING, -1,
-                (LPARAM) "Tile graphic (see number)");
-            else if (o->tileid < 0)
-                SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_SELECTSTRING, -1,
-                (LPARAM) "Area only\t(no graphic)");
-            else {
-                sprintf(txt, "External: %s", F14_ImageName(o->tileid));
-                if (SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_SELECTSTRING, -1,
-                    (LPARAM) txt) == CB_ERR)
-                SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_SETCURSEL, 0, 0);
-            }
-            sprintf(txt, "%d", o->gxoff);
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJGXOFF), txt);
-            sprintf(txt, "%d", o->gyoff);
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJGYOFF), txt);
-            sprintf(txt, "%d", o->gwidth);
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJGW), txt);
-            sprintf(txt, "%d", o->gheight);
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJGH), txt);
-            sprintf(txt, "%d", o->ghandlexoff);
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJHX), txt);
-            sprintf(txt, "%d", o->ghandleyoff);
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJHY), txt);
+            OE_SetDlgInt(hwndDlg, IDC_OBJX, o->xpos);
+            OE_SetDlgInt(hwndDlg, IDC_OBJY, o->ypos);
+            oe_edgfx = o->gfxid;
+            if (oe_edgfx < 1 && numblockgfx > 1) oe_edgfx = 1;
+            if (o->gfxid > 0) kind = IDC_OBJKIND_TILE;
+            else if (o->tileid < 0) kind = IDC_OBJKIND_AREA;
+            else kind = IDC_OBJKIND_FILE;
+            CheckRadioButton(hwndDlg, IDC_OBJKIND_AREA, IDC_OBJKIND_FILE, kind);
+            OE_FillFileCombo(hwndDlg, o->tileid);
+            OE_SetDlgInt(hwndDlg, IDC_OBJGXOFF, o->gxoff);
+            OE_SetDlgInt(hwndDlg, IDC_OBJGYOFF, o->gyoff);
+            OE_SetDlgInt(hwndDlg, IDC_OBJGW, o->gwidth);
+            OE_SetDlgInt(hwndDlg, IDC_OBJGH, o->gheight);
+            OE_SetDlgInt(hwndDlg, IDC_OBJHX, o->ghandlexoff);
+            OE_SetDlgInt(hwndDlg, IDC_OBJHY, o->ghandleyoff);
             CheckDlgButton(hwndDlg, IDC_OBJSHOW, o->show ? 1 : 0);
             {
                 const int * u = &o->user1;
                 int ids[7] = { IDC_OBJUSER1, IDC_OBJUSER2, IDC_OBJUSER3,
                     IDC_OBJUSER4, IDC_OBJUSER5, IDC_OBJUSER6, IDC_OBJUSER7 };
-                for (i = 0; i < 7; i++) {
-                    sprintf(txt, "%d", u[i]);
-                    SetWindowText(GetDlgItem(hwndDlg, ids[i]), txt);
-                }
+                for (i = 0; i < 7; i++) OE_SetDlgInt(hwndDlg, ids[i], u[i]);
             }
             {
                 int ids[8] = { IDC_OBJF1, IDC_OBJF2, IDC_OBJF3, IDC_OBJF4,
@@ -549,20 +972,93 @@ INT_PTR CALLBACK DIAObjectPropsProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
             SetWindowText(GetDlgItem(hwndDlg, IDC_OBJCOL), txt);
             if (objlayeruser >= 1 && objlayeruser <= 7) {
                 const int * u = &o->user1;
-                sprintf(txt, "%d", u[objlayeruser - 1]);
-            } else strcpy(txt, "0");
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJLAYER), txt);
+                OE_SetDlgInt(hwndDlg, IDC_OBJLAYER, u[objlayeruser - 1]);
+            } else SetDlgItemText(hwndDlg, IDC_OBJLAYER, "0");
             sprintf(txt, "Object %d", edidx);
             SetWindowText(hwndDlg, txt);
             OE_FillStrCombo(hwndDlg, o);
+            OE_InitPropSpins(hwndDlg);
+            OE_PropsShowMode(hwndDlg, OE_PropsGetMode(hwndDlg));
         }
+        oe_filling = 0;
+        break;
+    case WM_DRAWITEM:
+        if (wParam == IDC_OBJGFXPREV)
+            OE_DrawGfxPrev(hwndDlg, (const DRAWITEMSTRUCT *) lParam);
         break;
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
-        case IDC_OBJADDFILE:
-            DIAObjFname(GetParent(hwndDlg));
-            OE_FillFileCombo(hwndDlg);
+        case IDC_OBJKIND_AREA:
+        case IDC_OBJKIND_TILE:
+        case IDC_OBJKIND_FILE:
+            if (HIWORD(wParam) != BN_CLICKED) break;
+            mode = OE_PropsGetMode(hwndDlg);
+            if (mode == OE_MODE_TILE && oe_edgfx < 1 && numblockgfx > 1)
+                oe_edgfx = 1;
+            if ((mode == OE_MODE_AREA || mode == OE_MODE_FILE) &&
+                OE_GetDlgInt(hwndDlg, IDC_OBJGW) <= 0)
+                OE_SetDlgInt(hwndDlg, IDC_OBJGW, blockwidth > 0 ? blockwidth : 16);
+            if ((mode == OE_MODE_AREA || mode == OE_MODE_FILE) &&
+                OE_GetDlgInt(hwndDlg, IDC_OBJGH) <= 0)
+                OE_SetDlgInt(hwndDlg, IDC_OBJGH, blockheight > 0 ? blockheight : 16);
+            OE_PropsShowMode(hwndDlg, mode);
             break;
+        case IDC_OBJFILE:
+            if (HIWORD(wParam) == CBN_SELCHANGE) OE_InvalidatePrev(hwndDlg);
+            break;
+        case IDC_OBJGXOFF:
+        case IDC_OBJGYOFF:
+        case IDC_OBJGW:
+        case IDC_OBJGH:
+            if (HIWORD(wParam) == EN_CHANGE && !oe_filling) OE_InvalidatePrev(hwndDlg);
+            break;
+        case IDC_OBJPICKTILE: {
+                int g = DIAPickGraphicIndex(hwndDlg, oe_edgfx);
+                if (g < 0) break;
+                if (g < 1) {
+                    MessageBox(hwndDlg,
+                        "Graphic 0 is reserved and cannot be used as an object tile.",
+                        "Object", MB_OK | MB_ICONINFORMATION);
+                    if (numblockgfx > 1) g = 1;
+                    else break;
+                }
+                oe_edgfx = g;
+                OE_PropsTileLab(hwndDlg);
+                OE_InvalidatePrev(hwndDlg);
+                break;
+            }
+        case IDC_OBJPICKREG: {
+                int fi, x, y, w, h;
+                fi = (int) SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_GETCURSEL, 0, 0);
+                if (fi < 0 || F14_NumImages() <= 0) {
+                    MessageBox(hwndDlg, "Add an image file first.", "Object",
+                        MB_OK | MB_ICONINFORMATION);
+                    break;
+                }
+                x = OE_GetDlgInt(hwndDlg, IDC_OBJGXOFF);
+                y = OE_GetDlgInt(hwndDlg, IDC_OBJGYOFF);
+                w = OE_GetDlgInt(hwndDlg, IDC_OBJGW);
+                h = OE_GetDlgInt(hwndDlg, IDC_OBJGH);
+                if (OE_PickRegion(hwndDlg, fi, &x, &y, &w, &h)) {
+                    oe_filling = 1;
+                    OE_SetDlgInt(hwndDlg, IDC_OBJGXOFF, x);
+                    OE_SetDlgInt(hwndDlg, IDC_OBJGYOFF, y);
+                    OE_SetDlgInt(hwndDlg, IDC_OBJGW, w);
+                    OE_SetDlgInt(hwndDlg, IDC_OBJGH, h);
+                    oe_filling = 0;
+                    OE_InvalidatePrev(hwndDlg);
+                }
+                break;
+            }
+        case IDC_OBJADDFILE: {
+                int keep = (int) SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_GETCURSEL, 0, 0);
+                DIAObjFname(hwndDlg);
+                if (F14_NumImages() > 0 && (keep < 0 || keep >= F14_NumImages()))
+                    keep = F14_NumImages() - 1;
+                OE_FillFileCombo(hwndDlg, keep);
+                OE_PropsShowMode(hwndDlg, OE_PropsGetMode(hwndDlg));
+                break;
+            }
         case IDC_OBJPREV:
         case IDC_OBJNEXT:
         case IDOK: {
@@ -574,38 +1070,35 @@ INT_PTR CALLBACK DIAObjectPropsProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
                     break;
                 }
                 o = *F14_GetObject(edidx);
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJX), tb, 80);
-                o.xpos = atoi(tb);
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJY), tb, 80);
-                o.ypos = atoi(tb);
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJGFX), tb, 80);
-                o.gfxid = atoi(tb);
-                if (o.gfxid < 0) o.gfxid = 0;
-                gsel = SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_GETCURSEL, 0, 0);
-                if (gsel == 0) { o.gfxid = 0; o.tileid = -1; }
-                else if (gsel == 1) { /* tile graphic: keep number */ }
-                else o.tileid = gsel - 2;
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJGXOFF), tb, 80);
-                o.gxoff = atoi(tb);
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJGYOFF), tb, 80);
-                o.gyoff = atoi(tb);
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJGW), tb, 80);
-                o.gwidth = atoi(tb);
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJGH), tb, 80);
-                o.gheight = atoi(tb);
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJHX), tb, 80);
-                o.ghandlexoff = atoi(tb);
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJHY), tb, 80);
-                o.ghandleyoff = atoi(tb);
+                o.xpos = OE_GetDlgInt(hwndDlg, IDC_OBJX);
+                o.ypos = OE_GetDlgInt(hwndDlg, IDC_OBJY);
+                o.gxoff = OE_GetDlgInt(hwndDlg, IDC_OBJGXOFF);
+                o.gyoff = OE_GetDlgInt(hwndDlg, IDC_OBJGYOFF);
+                o.gwidth = OE_GetDlgInt(hwndDlg, IDC_OBJGW);
+                o.gheight = OE_GetDlgInt(hwndDlg, IDC_OBJGH);
+                o.ghandlexoff = OE_GetDlgInt(hwndDlg, IDC_OBJHX);
+                o.ghandleyoff = OE_GetDlgInt(hwndDlg, IDC_OBJHY);
                 o.show = IsDlgButtonChecked(hwndDlg, IDC_OBJSHOW) ? 1 : 0;
+                mode = OE_PropsGetMode(hwndDlg);
+                if (mode == OE_MODE_AREA) {
+                    o.gfxid = 0;
+                    o.tileid = -1;
+                } else if (mode == OE_MODE_TILE) {
+                    o.gfxid = oe_edgfx;
+                    if (o.gfxid < 1) o.gfxid = (numblockgfx > 1) ? 1 : 0;
+                    o.tileid = -1;
+                    o.gwidth = blockwidth;
+                    o.gheight = blockheight;
+                } else {
+                    o.gfxid = 0;
+                    gsel = (int) SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_GETCURSEL, 0, 0);
+                    o.tileid = (F14_NumImages() > 0 && gsel >= 0) ? gsel : 0;
+                }
                 {
                     int * u = &o.user1;
                     int ids[7] = { IDC_OBJUSER1, IDC_OBJUSER2, IDC_OBJUSER3,
                         IDC_OBJUSER4, IDC_OBJUSER5, IDC_OBJUSER6, IDC_OBJUSER7 };
-                    for (i = 0; i < 7; i++) {
-                        GetWindowText(GetDlgItem(hwndDlg, ids[i]), tb, 80);
-                        u[i] = atoi(tb);
-                    }
+                    for (i = 0; i < 7; i++) u[i] = OE_GetDlgInt(hwndDlg, ids[i]);
                 }
                 {
                     int ids[8] = { IDC_OBJF1, IDC_OBJF2, IDC_OBJF3, IDC_OBJF4,
@@ -619,8 +1112,7 @@ INT_PTR CALLBACK DIAObjectPropsProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
                 OE_SetBorderCol(&o, strtol(tb, NULL, 16));
                 if (objlayeruser >= 1 && objlayeruser <= 7) {
                     int * u = &o.user1;
-                    GetWindowText(GetDlgItem(hwndDlg, IDC_OBJLAYER), tb, 80);
-                    u[objlayeruser - 1] = atoi(tb);
+                    u[objlayeruser - 1] = OE_GetDlgInt(hwndDlg, IDC_OBJLAYER);
                 }
                 OE_ApplyStrCombo(hwndDlg, &o);
                 F14_SetObject(edidx, &o);
@@ -656,6 +1148,7 @@ void DIAObjectProps(HWND hwnd, int idx) {
         i = DialogBoxParam(hInstance, (LPCSTR) "D_OBJECT", hwnd, AsDlgProc(DIAObjectPropsProc), (LPARAM) idx);
         if (i == 1) { if (idx > 0) idx--; else i = 0; }
         else if (i == 2) { if (idx < F14_NumObjects() - 1) idx++; else i = 0; }
+        else i = 0; /* OK / Cancel / close — do not reopen */
     }
     return;
 }

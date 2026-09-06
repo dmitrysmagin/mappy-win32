@@ -93,6 +93,7 @@ extern unsigned char trans16hi, trans16low;
 extern int resize_left, resize_top;
 
 static int editnum, pgfxnum, editpoint, pickwhat, totalmapmem;
+static int pick_init_gfx;
 int hexordec = 0;
 static int propedit_haspos = 0; /* remember Block Properties pos across reopen */
 static RECT propedit_rc;
@@ -939,6 +940,19 @@ INT_PTR CALLBACK DIAPickGfxProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lP
 
     switch (msg) {
     case WM_INITDIALOG:
+        if (lParam == 10) {
+            pickwhat = 0;
+            pgfxnum = pick_init_gfx;
+            if (pgfxnum < 0) pgfxnum = 0;
+            if (numblockgfx > 0 && pgfxnum >= numblockgfx) pgfxnum = numblockgfx - 1;
+            SetWindowText(hwndDlg, "Pick object tile");
+            SetWindowText(GetDlgItem(hwndDlg, IDC_PICKTEXT),
+                "Click a tileset graphic for this object. Graphic 0 is reserved and cannot be used.");
+            sprintf(textbuf, "Current graphic is %d", pgfxnum);
+            SetWindowText(GetDlgItem(hwndDlg, IDC_PICKINFO), textbuf);
+            SendMessage(hwndDlg, WM_COMMAND, 99, 0L);
+            break;
+        }
         myblkstr = (BLKSTR*) blockstrpt;
         myblkstr += editnum;
         if (lParam<4) { SetWindowText(hwndDlg, "Pick Block Graphic");
@@ -2049,6 +2063,13 @@ int DIAPickBlockGfx(HWND hwnd, int gpart) {
         }
     }
     return 0;
+}
+
+int DIAPickGraphicIndex(HWND hwnd, int current) {
+    if (blockgfxpt == NULL || numblockgfx <= 0) return -1;
+    pick_init_gfx = current;
+    return (int) DialogBoxParam(hInstance, (LPCSTR) "D_PICKER", hwnd,
+        AsDlgProc(DIAPickGfxProc), (LPARAM) 10);
 }
 
 int DIAEditProperties(HWND hwnd, int btoedit) {

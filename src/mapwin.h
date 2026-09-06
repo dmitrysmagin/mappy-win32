@@ -76,6 +76,7 @@ int DIANewProject (HWND);
 int DIAEditProperties (HWND, int);
 void DIARangeEditBlocks (HWND);
 int DIAEditAnimProperties (HWND, int);
+int DIAPickGraphicIndex (HWND, int current);
 void DIAGrabBrushBS (HWND);
 void DIAGetBrushName (HWND, char *);
 void DIAShowUser (HWND);
