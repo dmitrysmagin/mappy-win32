@@ -1035,6 +1035,81 @@ static void MEDrawTilesetBoxes(HDC hdc, RECT *client)
     }
 }
 
+static void MELineClipH(HDC hdc, int y, int x0, int x1, int sx, int sy, int sw, int sh)
+{
+    int xa, xb;
+    if (y < sy || y >= sy + sh)
+        return;
+    if (x0 > x1) { int t = x0; x0 = x1; x1 = t; }
+    xa = x0 > sx ? x0 : sx;
+    xb = x1 < sx + sw ? x1 : sx + sw;
+    if (xa >= xb)
+        return;
+    MoveToEx(hdc, xa, y, NULL);
+    LineTo(hdc, xb, y);
+}
+
+static void MELineClipV(HDC hdc, int x, int y0, int y1, int sx, int sy, int sw, int sh)
+{
+    int ya, yb;
+    if (x < sx || x >= sx + sw)
+        return;
+    if (y0 > y1) { int t = y0; y0 = y1; y1 = t; }
+    ya = y0 > sy ? y0 : sy;
+    yb = y1 < sy + sh ? y1 : sy + sh;
+    if (ya >= yb)
+        return;
+    MoveToEx(hdc, x, ya, NULL);
+    LineTo(hdc, x, yb);
+}
+
+/* Redraw tileset outline segments that cross one tile (hover blit wipes them). */
+static void MEDrawTilesetBoxesTile(HDC hdc, HWND hwnd, int tilex, int tiley)
+{
+    int i, n, ox, oy, tw, th, cx, cy, cw, ch, sx, sy, sw, sh;
+    HPEN pen, old;
+
+    if (!tsetshow || hdc == NULL || mappt == NULL)
+        return;
+    if (blockwidth < 1 || blockheight < 1)
+        return;
+    n = TS_NumInst();
+    if (n < 1)
+        return;
+    sx = ZX((tilex - xmapoffset) * blockwidth);
+    sy = ZX((tiley - ymapoffset) * blockheight);
+    sw = ZX(blockwidth);
+    sh = ZX(blockheight);
+    if (sw < 1) sw = 1;
+    if (sh < 1) sh = 1;
+    for (i = 0; i < n; i++) {
+        const TilesetInst *in = TS_GetInst(i);
+        if (in == NULL || !in->show || in->layer != maplayer)
+            continue;
+        if (TS_InstBounds(i, &ox, &oy, &tw, &th) != 0)
+            continue;
+        cx = ZX((ox - xmapoffset) * blockgapx);
+        cy = ZX((oy - ymapoffset) * blockgapy);
+        cw = ZX(tw * blockgapx);
+        ch = ZX(th * blockgapy);
+        if (cw < 1) cw = 1;
+        if (ch < 1) ch = 1;
+        if (i == TS_CurInst())
+            pen = CreatePen(PS_SOLID, MapPenWidth(hwnd), RGB(255, 255, 0));
+        else if (tsplace)
+            pen = CreatePen(PS_DOT, MapPenWidth(hwnd), RGB(180, 180, 80));
+        else
+            continue;
+        old = SelectObject(hdc, pen);
+        MELineClipH(hdc, cy, cx, cx + cw + 1, sx, sy, sw, sh);
+        MELineClipH(hdc, cy + ch, cx, cx + cw + 1, sx, sy, sw, sh);
+        MELineClipV(hdc, cx, cy, cy + ch + 1, sx, sy, sw, sh);
+        MELineClipV(hdc, cx + cw, cy, cy + ch + 1, sx, sy, sw, sh);
+        SelectObject(hdc, old);
+        DeleteObject(pen);
+    }
+}
+
 static int MEPlaceTilesetAt(int xblk, int yblk, int ctrl)
 {
     int hit, ni, def;
@@ -1350,6 +1425,7 @@ void MEDrawUnderTile(HWND hwnd, int xoff, int yoff) {
             ZX(blockwidth), ZX(blockheight), fromhdc, 0, 0, blockwidth, blockheight, SRCCOPY);
     }
     MEDrawDividersTile(myhdc, hwnd, xoff, yoff);
+    MEDrawTilesetBoxesTile(myhdc, hwnd, xoff, yoff);
 
     SelectObject(fromhdc, hbmpold);
     DeleteObject(temphbm);
@@ -1637,6 +1713,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
         SelectObject(fromhdc, hbmpold);
         DeleteObject(temphbm);
         MEDrawDividersTile(myhdc, hwnd, meoldbx, meoldby);
+        MEDrawTilesetBoxesTile(myhdc, hwnd, meoldbx, meoldby);
     }
 
     if (xoff<0 || xoff>=mapwidth || yoff<0 || yoff>=mapheight) {
@@ -1724,6 +1801,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
         StretchBlt(myhdc, x, y,
         ZX(blockwidth), ZX(blockheight), fromhdc, 0, 0, blockwidth, blockheight, blttype);
     MEDrawDividersTile(myhdc, hwnd, xoff, yoff);
+    MEDrawTilesetBoxesTile(myhdc, hwnd, xoff, yoff);
 
     SelectObject(fromhdc, hbmpold);
     DeleteObject(temphbm);
