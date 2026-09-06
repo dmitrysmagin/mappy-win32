@@ -42,7 +42,7 @@ extern short int blockwidth, blockheight, blockdepth, gridon, zoomon;
 extern int panelzoom;
 static int BEZoom(void) { return panelzoom ? zoomon : 1; }
 extern short int mapwidth, mapheight, xmapoffset, ymapoffset, maplayer;
-extern int tsplace, objplace;
+extern int tsplace, objplace, megetabrush;
 extern short int numblockstr, curstr, numblockanim, curanim, curbrsh;
 extern char * blockgfxpt, * blockstrpt, * animstrpt;
 extern short int numblockgfx;
@@ -73,7 +73,45 @@ static int BETilesetRowH(HWND hwnd)
 
 static int BEIsListType(int t)
 {
-    return t == BETYPE_TILESETS || t == BETYPE_OBJECTS;
+    return t == BETYPE_TILESETS || t == BETYPE_OBJECTS || t == BETYPE_BRUSHES;
+}
+
+static int BEBrushCount(void)
+{
+    int i, n = 0;
+    for (i = 0; i < MAXBRSH; i++)
+        if (brshpt[i] != NULL) n++;
+    return n;
+}
+
+static int BEBrushAt(int disp)
+{
+    int i, n = 0;
+    if (disp < 0)
+        return -1;
+    for (i = 0; i < MAXBRSH; i++) {
+        if (brshpt[i] == NULL)
+            continue;
+        if (n == disp)
+            return i;
+        n++;
+    }
+    return -1;
+}
+
+static int BEBrushListPos(int slot)
+{
+    int i, n = 0;
+    if (slot < 0)
+        return -1;
+    for (i = 0; i < MAXBRSH; i++) {
+        if (brshpt[i] == NULL)
+            continue;
+        if (i == slot)
+            return n;
+        n++;
+    }
+    return -1;
 }
 
 /* Columns for the tile grid. List modes stay at 1. */
@@ -165,7 +203,12 @@ void BEBlockNext(void) {
     if (betype == BETYPE_BRUSHES && curbrushsel < MAXBRSH - 1) {
         int next = curbrushsel + 1;
         while (next < MAXBRSH && brshpt[next] == NULL) next++;
-        if (next < MAXBRSH) { curbrushsel = next; BEInvalidate(); }
+        if (next < MAXBRSH) {
+            curbrushsel = (short int) next;
+            curbrsh = (short int) (next + 1);
+            RejigBrshMenu(curbrsh);
+            BEInvalidate();
+        }
     }
     if (betype == BETYPE_OBJECTS && curobjsel < F14_NumObjects() - 1) {
         curobjsel++;
@@ -182,7 +225,12 @@ void BEBlockPrev(void) {
     if (betype == BETYPE_BRUSHES && curbrushsel > 0) {
         int prev = curbrushsel - 1;
         while (prev >= 0 && brshpt[prev] == NULL) prev--;
-        if (prev >= 0) { curbrushsel = prev; BEInvalidate(); }
+        if (prev >= 0) {
+            curbrushsel = (short int) prev;
+            curbrsh = (short int) (prev + 1);
+            RejigBrshMenu(curbrsh);
+            BEInvalidate();
+        }
     }
     if (betype == BETYPE_OBJECTS && curobjsel > 0) {
         curobjsel--;
@@ -197,7 +245,7 @@ static int BEItemCount(void) {
     case BETYPE_STILL:   return numblockstr;
     case BETYPE_ANIM:    return numblockanim;
     case BETYPE_GRAPH:   return numblockgfx;
-    case BETYPE_BRUSHES: return numbrushes;
+    case BETYPE_BRUSHES: return BEBrushCount();
     case BETYPE_OBJECTS: return F14_NumObjects();
     case BETYPE_TILESETS: return TS_NumDefs();
     }
@@ -264,7 +312,7 @@ void BESetScrollRange(void) {
         case BETYPE_STILL:   sel = (curanim == -1 && curbrsh == 0) ? curstr : -1; break;
         case BETYPE_ANIM:    sel = (curanim >= 0) ? curanim : -1; break;
         case BETYPE_GRAPH:   sel = curgfxsel; break;
-        case BETYPE_BRUSHES: sel = curbrushsel; break;
+        case BETYPE_BRUSHES: sel = BEBrushListPos(curbrushsel); break;
         case BETYPE_OBJECTS: sel = curobjsel; break;
         case BETYPE_TILESETS: sel = curtilesetsel; break;
         }
@@ -350,6 +398,22 @@ static int BEAddObject(HWND hwnd)
     return ni;
 }
 
+static int BEAddBrush(HWND hwnd)
+{
+    int i = FindFreeBrush();
+    if (i == 0) {
+        MessageBox(hwnd, "All 16 brush slots are used. Destroy a brush first.",
+            "Add brush", MB_OK | MB_ICONINFORMATION);
+        return -1;
+    }
+    curbrsh = (short int) i;
+    curbrushsel = (short int) (i - 1);
+    curanim = -1;
+    megetabrush = 1;
+    RejigBrshMenu(curbrsh);
+    return i;
+}
+
 void BENewBlock(void) {
     if (betype == BETYPE_STILL && curanim == -1 && curbrsh == 0 && numblockstr < MAXBLKSTR) NewBlock();
     if (betype == BETYPE_ANIM && curanim != -1) AnimNew();
@@ -358,6 +422,8 @@ void BENewBlock(void) {
         BEAddTileset(bhwnd);
     if (betype == BETYPE_OBJECTS)
         BEAddObject(bhwnd);
+    if (betype == BETYPE_BRUSHES)
+        BEAddBrush(bhwnd);
     BESetScrollRange();
     BEInvalidate();
 }
@@ -729,6 +795,165 @@ static void BEDrawObjectList(HWND phwnd, HDC myhdc)
     DeleteObject(line);
 }
 
+static void BEBrushLabel(int slot, char * txt, int n)
+{
+    const char * nm;
+    int bw, bh;
+    if (txt == NULL || n < 1)
+        return;
+    if (slot < 0 || slot >= MAXBRSH || brshpt[slot] == NULL) {
+        snprintf(txt, (size_t) n, "Brush %d", slot + 1);
+        return;
+    }
+    bw = brshpt[slot][0];
+    bh = brshpt[slot][1];
+    nm = GetBrushName(slot);
+    if (nm != NULL && nm[0] && strcmp(nm, "Brush") != 0)
+        snprintf(txt, (size_t) n, "%s  (%dx%d)", nm, bw, bh);
+    else
+        snprintf(txt, (size_t) n, "Brush %d  (%dx%d)", slot + 1, bw, bh);
+}
+
+static void BEBlitBrushThumb(HDC hdc, int dx, int dy, int dw, int dh, int slot)
+{
+    short * br;
+    int bw, bh, x, y, tw, th, pitch, ox, oy, sw, sh;
+    unsigned char * buf;
+    HDC mdc;
+    HBITMAP hbm, hold;
+    BITMAPINFOHEADER bih;
+
+    if (hdc == NULL || dw < 1 || dh < 1 || blockwidth < 1 || blockheight < 1)
+        return;
+    if (slot < 0 || slot >= MAXBRSH || brshpt[slot] == NULL)
+        return;
+    br = brshpt[slot];
+    bw = br[0];
+    bh = br[1];
+    if (bw < 1 || bh < 1)
+        return;
+    tw = bw * blockwidth;
+    th = bh * blockheight;
+    if (tw < 1 || th < 1 || tw > 512 || th > 512 ||
+        (size_t) tw * (size_t) th > 262144) {
+        BEBlitCell(hdc, dx, dy, dw, dh, br[2]);
+        return;
+    }
+    pitch = (tw * 3 + 3) & ~3;
+    buf = (unsigned char *) malloc((size_t) pitch * (size_t) th);
+    if (buf == NULL) {
+        BEBlitCell(hdc, dx, dy, dw, dh, br[2]);
+        return;
+    }
+    memset(buf, 0x44, (size_t) pitch * (size_t) th);
+    for (y = 0; y < bh; y++) {
+        for (x = 0; x < bw; x++) {
+            short cell = br[2 + y * bw + x];
+            if (cell < 0) {
+                int ani = (-(int) cell / FMP_ANI_MEMUNIT) - 1;
+                if (ani >= 0)
+                    BlockAnimto24(ani, -1, buf, x * blockwidth, y * blockheight, pitch);
+            } else {
+                BlockStrto24(cell, buf, x * blockwidth, y * blockheight, pitch);
+            }
+        }
+    }
+    if (tw * dh > th * dw) {
+        sw = dw;
+        sh = (th * dw) / tw;
+    } else {
+        sh = dh;
+        sw = (tw * dh) / th;
+    }
+    if (sw < 1) sw = 1;
+    if (sh < 1) sh = 1;
+    ox = (dw - sw) / 2;
+    oy = (dh - sh) / 2;
+    memset(&bih, 0, sizeof(bih));
+    bih.biSize = sizeof(bih);
+    bih.biWidth = tw;
+    bih.biHeight = -th;
+    bih.biPlanes = 1;
+    bih.biBitCount = 24;
+    bih.biCompression = BI_RGB;
+    mdc = CreateCompatibleDC(hdc);
+    if (mdc == NULL) { free(buf); return; }
+    hbm = CreateDIBitmap(hdc, &bih, CBM_INIT, buf, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
+    free(buf);
+    if (hbm == NULL) { DeleteDC(mdc); return; }
+    hold = SelectObject(mdc, hbm);
+    StretchBlt(hdc, dx + ox, dy + oy, sw, sh, mdc, 0, 0, tw, th, SRCCOPY);
+    SelectObject(mdc, hold);
+    DeleteObject(hbm);
+    DeleteDC(mdc);
+}
+
+static void BEDrawBrushList(HWND phwnd, HDC myhdc)
+{
+    RECT rc, row;
+    int tabht = BETabStripHeight();
+    int rowh, i, vis, thumb, pad;
+    HBRUSH bg, sel, line;
+    HFONT oldf = NULL;
+
+    GetClientRect(phwnd, &rc);
+    rc.top = tabht;
+    bg = CreateSolidBrush(RGB(0x44, 0x44, 0x44));
+    FillRect(myhdc, &rc, bg);
+    DeleteObject(bg);
+    bebpr = 1;
+    rowh = BETilesetRowH(phwnd);
+    pad = MapDip(phwnd, 4);
+    thumb = rowh - pad * 2;
+    if (thumb < 8) thumb = 8;
+    vis = BEBrushCount();
+    sel = CreateSolidBrush(RGB(0x66, 0x66, 0x88));
+    line = CreateSolidBrush(RGB(0x33, 0x33, 0x33));
+    SetBkMode(myhdc, TRANSPARENT);
+    SetTextColor(myhdc, RGB(255, 255, 255));
+    if (be_font != NULL)
+        oldf = SelectObject(myhdc, be_font);
+    for (i = 0; (tabht + (i + 1) * rowh) <= rc.bottom + rowh; i++) {
+        int slot = BEBrushAt(beyoff + i);
+        int disp = beyoff + i;
+        char txt[96];
+        RECT bar, box;
+        if (disp > vis)
+            break;
+        row.left = rc.left;
+        row.right = rc.right;
+        row.top = tabht + i * rowh;
+        row.bottom = row.top + rowh;
+        if (disp == vis) {
+            BEDrawAddNewRow(myhdc, &row, pad, thumb);
+            break;
+        }
+        if (slot < 0)
+            continue;
+        if (slot == curbrushsel)
+            FillRect(myhdc, &row, sel);
+        bar = row;
+        bar.top = row.bottom - 1;
+        FillRect(myhdc, &bar, line);
+        box.left = row.left + pad;
+        box.top = row.top + pad;
+        box.right = box.left + thumb;
+        box.bottom = box.top + thumb;
+        {
+            HBRUSH tb = CreateSolidBrush(RGB(0x55, 0x55, 0x55));
+            FillRect(myhdc, &box, tb);
+            DeleteObject(tb);
+        }
+        BEBlitBrushThumb(myhdc, box.left, box.top, thumb, thumb, slot);
+        BEBrushLabel(slot, txt, (int) sizeof(txt));
+        TextOut(myhdc, row.left + pad + thumb + pad, row.top + pad, txt, (int)strlen(txt));
+    }
+    if (oldf != NULL)
+        SelectObject(myhdc, oldf);
+    DeleteObject(sel);
+    DeleteObject(line);
+}
+
 void BEDrawBlocks(HWND phwnd, HDC myhdc) {
     int i, j, k, l;
     HDC fromhdc;
@@ -885,6 +1110,12 @@ static void BESetType(int newtype) {
         curobjsel = (short int) F14_CurObject();
         if (F14_GetObject(curobjsel) == NULL) curobjsel = -1;
     }
+    if (newtype == BETYPE_BRUSHES) {
+        if (curbrsh >= 1 && curbrsh <= MAXBRSH && brshpt[curbrsh - 1] != NULL)
+            curbrushsel = (short int) (curbrsh - 1);
+        else
+            curbrushsel = -1;
+    }
     BESyncTabSel();
     BESetScrollRange();
     InvalidateRgn(bhwnd, NULL, FALSE);
@@ -909,6 +1140,8 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
                 BEDrawTilesetList(hwnd, myhdc);
             else if (betype == BETYPE_OBJECTS)
                 BEDrawObjectList(hwnd, myhdc);
+            else if (betype == BETYPE_BRUSHES)
+                BEDrawBrushList(hwnd, myhdc);
             else
                 BEDrawBlocks(hwnd, myhdc);
             BESetScrollRange();
@@ -968,7 +1201,7 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         InvalidateRgn(bhwnd, NULL, FALSE);
         break;
     case WM_LBUTTONUP:
-        if (betype != BETYPE_TILESETS && betype != BETYPE_OBJECTS &&
+        if (!BEIsListType(betype) &&
             LOWORD(lParam)>((blockwidth+2)*BEZoom()*bebpr)) break;
         if (HIWORD(lParam) < BETabStripHeight()) break;
         {
@@ -1047,6 +1280,28 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
                 InvalidateAll();
                 break;
             }
+            if (betype == BETYPE_BRUSHES) {
+                int rowh = BETilesetRowH(hwnd);
+                int vis = BEBrushCount();
+                clicked = beyoff + ((HIWORD(lParam) - BETabStripHeight()) / rowh);
+                if (clicked < 0) break;
+                if (clicked == vis) {
+                    BEAddBrush(hwnd);
+                    BESetScrollRange();
+                    InvalidateAll();
+                    break;
+                }
+                if (clicked >= vis) break;
+                clicked = BEBrushAt(clicked);
+                if (clicked < 0 || brshpt[clicked] == NULL) break;
+                curbrushsel = (short int) clicked;
+                curbrsh = (short int) (clicked + 1);
+                curanim = -1;
+                RejigBrshMenu(curbrsh);
+                BESetScrollRange();
+                InvalidateAll();
+                break;
+            }
             clicked = ((beyoff + ((HIWORD(lParam)-BETabStripHeight())/((blockheight+2)*BEZoom()))) * bebpr) + ((LOWORD(lParam))/((blockwidth+2)*BEZoom()));
             clicked = BEMapDisp(clicked);
             switch (betype) {
@@ -1068,16 +1323,6 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
                 curgfxsel = clicked;
                 if (curgfxsel>=numblockgfx) curgfxsel = numblockgfx-1;
                 if (curgfxsel<0) curgfxsel = 0;
-                break;
-            case BETYPE_BRUSHES:
-                curbrushsel = clicked;
-                if (curbrushsel>=MAXBRSH) curbrushsel = MAXBRSH-1;
-                if (curbrushsel<0) curbrushsel = 0;
-                if (curbrushsel >= 0 && brshpt[curbrushsel] != NULL) {
-                    curbrsh = (short int) (curbrushsel + 1);
-                    curanim = -1;
-                    RejigBrshMenu(curbrsh);
-                }
                 break;
             }
         }
@@ -1132,6 +1377,29 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
             InvalidateAll();
             break;
         }
+        if (betype == BETYPE_BRUSHES) {
+            int rowh, clicked, vis;
+            if (HIWORD(lParam) < BETabStripHeight()) break;
+            vis = BEBrushCount();
+            rowh = BETilesetRowH(hwnd);
+            clicked = beyoff + ((HIWORD(lParam) - BETabStripHeight()) / rowh);
+            if (clicked == vis) {
+                BEAddBrush(hwnd);
+                BESetScrollRange();
+                InvalidateAll();
+                break;
+            }
+            if (clicked < 0 || clicked >= vis) break;
+            clicked = BEBrushAt(clicked);
+            if (clicked < 0 || brshpt[clicked] == NULL) break;
+            curbrushsel = (short int) clicked;
+            curbrsh = (short int) (clicked + 1);
+            DIAGetBrushName(hwnd, GetBrushName(clicked));
+            RejigBrshMenu(curbrsh);
+            BESetScrollRange();
+            InvalidateAll();
+            break;
+        }
         if (LOWORD(lParam)>((blockwidth+2)*BEZoom()*bebpr)) break;
         if (HIWORD(lParam) < BETabStripHeight()) break;
         {
@@ -1158,16 +1426,6 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
                 curgfxsel = clicked;
                 if (curgfxsel>=numblockgfx) { curgfxsel = numblockgfx-1; break; }
                 if (curgfxsel<0) curgfxsel = 0;
-                break;
-            case BETYPE_BRUSHES:
-                curbrushsel = clicked;
-                if (curbrushsel>=MAXBRSH) { curbrushsel = MAXBRSH-1; break; }
-                if (curbrushsel<0) curbrushsel = 0;
-                if (curbrushsel >= 0 && brshpt[curbrushsel] != NULL) {
-                    curbrsh = (short int) (curbrushsel + 1);
-                    DIAGetBrushName(hwnd, GetBrushName(curbrushsel));
-                    RejigBrshMenu(curbrsh);
-                }
                 break;
             }
         }

@@ -36,6 +36,7 @@ extern short int numblockstr, numblockgfx;
 extern short int gridon, zoomon;
 extern short int maplayer;
 extern short int curbrsh, curanim, pastebrushnt;
+extern short int curbrushsel;
 extern short int *brshpt[MAXBRSH];
 
 /* in mapcust.c */
@@ -128,18 +129,53 @@ static void DoBackup(void) {
     fclose(src);
 }
 
+static HMENU GetBrushMenu(void)
+{
+    int i, n;
+    if (hMenu == NULL)
+        return NULL;
+    n = GetMenuItemCount(hMenu);
+    for (i = 0; i < n; i++) {
+        HMENU sub = GetSubMenu(hMenu, i);
+        if (sub != NULL && GetMenuState(sub, CM_BRUSHGRAB, MF_BYCOMMAND) != (UINT) -1)
+            return sub;
+    }
+    return NULL;
+}
+
 void RejigBrshMenu(int brshnum) {
-    int i;
+    HMENU bm = GetBrushMenu();
+    int i, n, bw, bh;
+    char txt[96];
 
-    for (i=0;i<MAXBRSH;i++) {
-        ModifyMenu(hMenu, CM_BRUSH1+i, MF_BYCOMMAND | MF_STRING, CM_BRUSH1+i, GetBrushName(i));
-        CheckMenuItem(hMenu, CM_BRUSH1+i, MF_UNCHECKED);
-    }
+    if (bm == NULL)
+        return;
+    for (i = 0; i < MAXBRSH; i++)
+        RemoveMenu(bm, CM_BRUSH1 + i, MF_BYCOMMAND);
+    RemoveMenu(bm, CM_BRUSHSEP, MF_BYCOMMAND);
 
-    if (brshnum>0 && brshnum<=MAXBRSH) {
-        CheckMenuItem(hMenu, CM_BRUSH1+(brshnum-1), MF_CHECKED);
-        BEInvalidate();
+    n = 0;
+    for (i = 0; i < MAXBRSH; i++) {
+        const char * nm;
+        if (brshpt[i] == NULL)
+            continue;
+        bw = brshpt[i][0];
+        bh = brshpt[i][1];
+        nm = GetBrushName(i);
+        if (nm != NULL && nm[0] && strcmp(nm, "Brush") != 0)
+            sprintf(txt, "%s  (%dx%d)", nm, bw, bh);
+        else
+            sprintf(txt, "Brush %d  (%dx%d)", i + 1, bw, bh);
+        InsertMenu(bm, CM_BRUSHRENAME, MF_BYCOMMAND | MF_STRING, CM_BRUSH1 + i, txt);
+        n++;
     }
+    if (n > 0)
+        InsertMenu(bm, CM_BRUSHRENAME, MF_BYCOMMAND | MF_SEPARATOR, CM_BRUSHSEP, NULL);
+
+    if (brshnum > 0 && brshnum <= MAXBRSH && brshpt[brshnum - 1] != NULL)
+        CheckMenuItem(bm, CM_BRUSH1 + (brshnum - 1), MF_CHECKED);
+    DrawMenuBar(hwnd);
+    BEInvalidate();
 }
 
 static void RefreshLayerBankMenu(void) {
@@ -301,6 +337,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             if (cmd >= CM_LAYERBANK0 && cmd < CM_LAYERBANK0+10) {
                 layerbank = cmd - CM_LAYERBANK0;
                 RefreshLayerBankMenu();
+                break;
+            }
+            if (cmd >= CM_BRUSH1 && cmd <= CM_BRUSH16) {
+                int slot = cmd - CM_BRUSH1;
+                if (brshpt[slot] == NULL)
+                    break;
+                curbrsh = (short int) (slot + 1);
+                curbrushsel = (short int) slot;
+                curanim = -1;
+                RejigBrshMenu(curbrsh);
+                InvalidateAll();
                 break;
             }
             switch (cmd) {
@@ -795,6 +842,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     break;
                 }
                 curbrsh = (short int) i;
+                curbrushsel = (short int) (i - 1);
+                curanim = -1;
                 RejigBrshMenu(curbrsh);
                 megetabrush = 1;
                 break;
@@ -816,6 +865,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 if (mappt==NULL) break;
                 if (MessageBox(hwnd, "Really delete all brushes?", "Delete Brushes", MB_ICONQUESTION|MB_YESNO)==IDYES) {
                     DestroyAllBrushes();
+                    curbrsh = 0;
+                    curbrushsel = -1;
+                    RejigBrshMenu(0);
+                    InvalidateAll();
                 }
                 break;
             case CM_BRUSHRENAME:
@@ -826,22 +879,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     MessageBox(hwnd, "Please select a grabbed brush first...", "Brush Rename", MB_ICONINFORMATION|MB_OK);
                 }
                 break;
-            case CM_BRUSH1: curbrsh = 1; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH2: curbrsh = 2; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH3: curbrsh = 3; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH4: curbrsh = 4; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH5: curbrsh = 5; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH6: curbrsh = 6; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH7: curbrsh = 7; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH8: curbrsh = 8; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH9: curbrsh = 9; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH10: curbrsh = 10; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH11: curbrsh = 11; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH12: curbrsh = 12; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH13: curbrsh = 13; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH14: curbrsh = 14; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH15: curbrsh = 15; RejigBrshMenu(curbrsh);	break;
-            case CM_BRUSH16: curbrsh = 16; RejigBrshMenu(curbrsh);	break;
             case CM_BRUSHHANDLE:
                 brushhandle = (brushhandle+1)&3;
                 UpdateToggleMenus();

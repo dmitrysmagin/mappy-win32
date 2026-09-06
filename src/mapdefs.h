@@ -338,6 +338,7 @@
 #define CM_BRUSH3	302
 #define CM_BRUSH2	301
 #define CM_BRUSH1	300
+#define CM_BRUSHSEP	316
 #define CM_BRUSHGRAB	110
 #define CM_EDITPASTE	109
 #define CM_EDITCOPY	108

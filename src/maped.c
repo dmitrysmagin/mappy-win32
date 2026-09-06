@@ -77,6 +77,7 @@ static int lua_mb_act = 0, lua_area_x = 0, lua_area_y = 0;
 /* Graphic editor mode (when Graph tab selected in Block Editor) */
 extern short int betype;
 extern short int curgfxsel;
+extern short int curbrushsel;
 extern short int numblockgfx;
 extern unsigned char * cmappt;
 #define BETYPE_GRAPH 2
@@ -2910,6 +2911,11 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             } else if (MakeBrush(xmapoffset+mebrushx, ymapoffset+mebrushy,
                 xmapoffset+mebrushx2, ymapoffset+mebrushy2)!=0)
             MessageBox(hwnd, "No brush number selected, or part of the brush is outside the map area, the previous brush has been kept", "Brush error", MB_ICONEXCLAMATION|MB_OK);
+            else {
+                if (curbrsh >= 1 && curbrsh <= MAXBRSH)
+                    curbrushsel = (short int) (curbrsh - 1);
+                RejigBrshMenu(curbrsh);
+            }
             gettingbrush = 0;
             InvalidateRgn(mhwnd, NULL, FALSE); }
         if (curbrsh>0 && curbrsh<=MAXBRSH) InvalidateRgn(mhwnd, NULL, FALSE);

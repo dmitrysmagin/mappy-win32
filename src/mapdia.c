@@ -1946,6 +1946,8 @@ INT_PTR CALLBACK DIAGrabBrushBSProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 
             if (MakeBrushBS(i, j, k, l))
                 MessageBox(hwndDlg, "Error creating brush!", "Grab brush from sequence", MB_OK|MB_ICONEXCLAMATION);
+            else
+                RejigBrshMenu(curbrsh);
 
             SendMessage(hwndDlg, WM_CLOSE, 0, 0L);
             break;
