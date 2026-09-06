@@ -57,6 +57,9 @@ int TS_ResizeDef(int i, int width, int height);
 short TS_GetCell(int i, int x, int y);
 int TS_SetCell(int i, int x, int y, short v);
 void TS_DeleteDef(int i);
+int TS_DuplicateDef(int i);
+int TS_GrabFromLayer(int i, const short *layer, int mapw, int maph,
+	int x1, int y1, int x2, int y2);
 
 int TS_NumInst(void);
 int TS_CurInst(void);

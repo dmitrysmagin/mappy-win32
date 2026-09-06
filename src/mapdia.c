@@ -5,7 +5,9 @@
 #include <string.h>
 #include "mapwin.h"
 #include "compat.h"
+#include "fmp.h"
 #include "fmp14.h"
+#include "tileset.h"
 #include "luabind.h"
 
 #define ANDTMEM (65536*4)
@@ -60,6 +62,8 @@ typedef struct { /* Animation control structure */
 
 extern HINSTANCE hInstance;
 extern short int mapwidth, mapheight, blockwidth, blockheight, blockdepth, numblockstr, numblockgfx, curbrsh;
+extern short int curstr, curanim, numblockanim;
+extern int megetatileset;
 extern int blockgapx, blockgapy, blockstaggerx, blockstaggery, blockstagger;
 extern int clickmask;
 extern int maptype;
@@ -3324,6 +3328,378 @@ INT_PTR CALLBACK DIRemoveProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
 
 void DIRemove(HWND hwnd) {
     DialogBox(hInstance, (LPCSTR) "D_REMOVE", hwnd, AsDlgProc(DIRemoveProc));
+}
+
+/* ---------------- D_TILESET ---------------- */
+
+static int ts_edidx;
+static int ts_w, ts_h, ts_hx, ts_hy;
+static char ts_name[TS_NAMELEN];
+static short *ts_work = NULL;
+static WNDPROC ts_grid_old = NULL;
+
+static short TS_StampValue(void)
+{
+    if (curanim >= 0)
+        return (short)(-((curanim + 1) * FMP_ANI_MEMUNIT));
+    return curstr;
+}
+
+static void TS_WorkFree(void)
+{
+    free(ts_work);
+    ts_work = NULL;
+}
+
+static int TS_WorkAlloc(int w, int h)
+{
+    short *neu;
+    int x, y, ow, oh;
+
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    if (w > TS_MAXDIM) w = TS_MAXDIM;
+    if (h > TS_MAXDIM) h = TS_MAXDIM;
+    if (ts_work != NULL && w == ts_w && h == ts_h)
+        return 0;
+    neu = (short *)calloc((size_t)w * (size_t)h, sizeof(short));
+    if (neu == NULL)
+        return -1;
+    ow = ts_w;
+    oh = ts_h;
+    if (ts_work != NULL) {
+        for (y = 0; y < h && y < oh; y++) {
+            for (x = 0; x < w && x < ow; x++)
+                neu[y * w + x] = ts_work[y * ow + x];
+        }
+        free(ts_work);
+    }
+    ts_work = neu;
+    ts_w = w;
+    ts_h = h;
+    return 0;
+}
+
+static void TS_WorkLoad(int idx)
+{
+    const TilesetDef *d = TS_GetDef(idx);
+    int n;
+
+    TS_WorkFree();
+    ts_edidx = idx;
+    ts_w = 0;
+    ts_h = 0;
+    ts_hx = 0;
+    ts_hy = 0;
+    ts_name[0] = 0;
+    if (d == NULL)
+        return;
+    memcpy(ts_name, d->name, TS_NAMELEN);
+    ts_name[TS_NAMELEN - 1] = 0;
+    ts_hx = d->handle_x;
+    ts_hy = d->handle_y;
+    if (TS_WorkAlloc(d->width, d->height) != 0)
+        return;
+    n = ts_w * ts_h;
+    if (d->tiles != NULL && n > 0)
+        memcpy(ts_work, d->tiles, (size_t)n * sizeof(short));
+}
+
+static int TS_WorkCommit(void)
+{
+    int x, y;
+
+    if (TS_GetDef(ts_edidx) == NULL)
+        return -1;
+    if (TS_ResizeDef(ts_edidx, ts_w, ts_h) != 0)
+        return -1;
+    TS_SetDefMeta(ts_edidx, ts_name, ts_hx, ts_hy);
+    for (y = 0; y < ts_h; y++) {
+        for (x = 0; x < ts_w; x++)
+            TS_SetCell(ts_edidx, x, y, ts_work[y * ts_w + x]);
+    }
+    mapaltered = 1;
+    return 0;
+}
+
+static void TS_BlitCell(HDC hdc, int dx, int dy, int dw, int dh, short cell)
+{
+    unsigned char *buf;
+    HDC mdc;
+    HBITMAP hbm, hold;
+    BITMAPINFOHEADER bih;
+    int pitch, ani;
+
+    if (dw < 1 || dh < 1 || blockwidth < 1 || blockheight < 1)
+        return;
+    pitch = (blockwidth * 3 + 3) & ~3;
+    buf = (unsigned char *)malloc((size_t)pitch * (size_t)blockheight);
+    if (buf == NULL)
+        return;
+    memset(buf, 0x44, (size_t)pitch * (size_t)blockheight);
+    if (cell < 0) {
+        ani = (-(int)cell / FMP_ANI_MEMUNIT) - 1;
+        if (ani >= 0)
+            BlockAnimto24(ani, -1, buf, 0, 0, pitch);
+    } else {
+        BlockStrto24(cell, buf, 0, 0, pitch);
+    }
+    memset(&bih, 0, sizeof(bih));
+    bih.biSize = sizeof(bih);
+    bih.biWidth = blockwidth;
+    bih.biHeight = -blockheight;
+    bih.biPlanes = 1;
+    bih.biBitCount = 24;
+    bih.biCompression = BI_RGB;
+    mdc = CreateCompatibleDC(hdc);
+    if (mdc == NULL) { free(buf); return; }
+    hbm = CreateDIBitmap(hdc, &bih, CBM_INIT, buf, (BITMAPINFO *)&bih, DIB_RGB_COLORS);
+    free(buf);
+    if (hbm == NULL) { DeleteDC(mdc); return; }
+    hold = SelectObject(mdc, hbm);
+    StretchBlt(hdc, dx, dy, dw, dh, mdc, 0, 0, blockwidth, blockheight, SRCCOPY);
+    SelectObject(mdc, hold);
+    DeleteObject(hbm);
+    DeleteDC(mdc);
+}
+
+static void TS_DlgFill(HWND hwndDlg)
+{
+    char txt[128];
+
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSNAME), ts_name);
+    sprintf(txt, "%d", ts_w);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSWIDTH), txt);
+    sprintf(txt, "%d", ts_h);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSHEIGHT), txt);
+    sprintf(txt, "%d", ts_hx);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSHX), txt);
+    sprintf(txt, "%d", ts_hy);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSHY), txt);
+    if (curanim >= 0)
+        sprintf(txt, "Stamp: anim %d. Click a cell to paint, right-click clears.", curanim);
+    else
+        sprintf(txt, "Stamp: still %d. Click a cell to paint, right-click clears.", curstr);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSINFO), txt);
+    sprintf(txt, "Tileset %d", ts_edidx);
+    SetWindowText(hwndDlg, txt);
+    InvalidateRect(GetDlgItem(hwndDlg, IDC_TSGRID), NULL, TRUE);
+}
+
+static int TS_DlgReadMeta(HWND hwndDlg)
+{
+    char tb[80];
+    int w, h;
+
+    GetWindowText(GetDlgItem(hwndDlg, IDC_TSNAME), ts_name, TS_NAMELEN - 1);
+    ts_name[TS_NAMELEN - 1] = 0;
+    GetWindowText(GetDlgItem(hwndDlg, IDC_TSWIDTH), tb, 80);
+    w = atoi(tb);
+    GetWindowText(GetDlgItem(hwndDlg, IDC_TSHEIGHT), tb, 80);
+    h = atoi(tb);
+    GetWindowText(GetDlgItem(hwndDlg, IDC_TSHX), tb, 80);
+    ts_hx = atoi(tb);
+    GetWindowText(GetDlgItem(hwndDlg, IDC_TSHY), tb, 80);
+    ts_hy = atoi(tb);
+    if (TS_WorkAlloc(w, h) != 0)
+        return -1;
+    return 0;
+}
+
+static void TS_GridHit(HWND hwndDlg, LPARAM lParam, int clear)
+{
+    HWND grid;
+    RECT rc;
+    int cw, ch, cx, cy;
+
+    if (ts_work == NULL || ts_w < 1 || ts_h < 1)
+        return;
+    TS_DlgReadMeta(hwndDlg);
+    grid = GetDlgItem(hwndDlg, IDC_TSGRID);
+    GetClientRect(grid, &rc);
+    if (rc.right < 1 || rc.bottom < 1)
+        return;
+    cw = rc.right / ts_w;
+    ch = rc.bottom / ts_h;
+    if (cw < 1) cw = 1;
+    if (ch < 1) ch = 1;
+    cx = LOWORD(lParam) / cw;
+    cy = HIWORD(lParam) / ch;
+    if (cx < 0 || cy < 0 || cx >= ts_w || cy >= ts_h)
+        return;
+    ts_work[cy * ts_w + cx] = clear ? 0 : TS_StampValue();
+    InvalidateRect(grid, NULL, FALSE);
+}
+
+static LRESULT CALLBACK TSGridProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (msg == WM_LBUTTONDOWN) {
+        TS_GridHit(GetParent(hwnd), lParam, 0);
+        return 0;
+    }
+    if (msg == WM_RBUTTONDOWN) {
+        TS_GridHit(GetParent(hwnd), lParam, 1);
+        return 0;
+    }
+    return CallWindowProc(ts_grid_old, hwnd, msg, wParam, lParam);
+}
+
+INT_PTR CALLBACK DIATilesetEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg) {
+    case WM_INITDIALOG:
+        TS_WorkLoad((int)lParam);
+        if (ts_work == NULL) {
+            EndDialog(hwndDlg, -1L);
+            break;
+        }
+        ts_grid_old = (WNDPROC)SetWindowLongPtr(GetDlgItem(hwndDlg, IDC_TSGRID),
+            GWLP_WNDPROC, (LONG_PTR)TSGridProc);
+        TS_DlgFill(hwndDlg);
+        break;
+    case WM_DRAWITEM: {
+            DRAWITEMSTRUCT *di = (DRAWITEMSTRUCT *)lParam;
+            RECT rc;
+            int x, y, cw, ch;
+            HBRUSH br;
+            if (di == NULL || di->CtlID != IDC_TSGRID)
+                return 0;
+            rc = di->rcItem;
+            br = CreateSolidBrush(RGB(0x44, 0x44, 0x44));
+            FillRect(di->hDC, &rc, br);
+            DeleteObject(br);
+            if (ts_work == NULL || ts_w < 1 || ts_h < 1)
+                return -1;
+            cw = (rc.right - rc.left) / ts_w;
+            ch = (rc.bottom - rc.top) / ts_h;
+            if (cw < 1) cw = 1;
+            if (ch < 1) ch = 1;
+            for (y = 0; y < ts_h; y++) {
+                for (x = 0; x < ts_w; x++) {
+                    TS_BlitCell(di->hDC, rc.left + x * cw, rc.top + y * ch,
+                        cw, ch, ts_work[y * ts_w + x]);
+                }
+            }
+            return -1;
+        }
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDC_TSWIDTH:
+        case IDC_TSHEIGHT:
+            if (HIWORD(wParam) == EN_KILLFOCUS) {
+                TS_DlgReadMeta(hwndDlg);
+                InvalidateRect(GetDlgItem(hwndDlg, IDC_TSGRID), NULL, TRUE);
+            }
+            break;
+        case IDC_TSNEW: {
+                int ni;
+                TS_DlgReadMeta(hwndDlg);
+                TS_WorkCommit();
+                ni = TS_NewDef(4, 4);
+                if (ni < 0) {
+                    MessageBox(hwndDlg, "Can't create tileset (max reached).",
+                        "Tileset", MB_OK | MB_ICONINFORMATION);
+                    break;
+                }
+                TS_WorkLoad(ni);
+                TS_DlgFill(hwndDlg);
+                mapaltered = 1;
+                break;
+            }
+        case IDC_TSDUP: {
+                int ni;
+                TS_DlgReadMeta(hwndDlg);
+                TS_WorkCommit();
+                ni = TS_DuplicateDef(ts_edidx);
+                if (ni < 0) {
+                    MessageBox(hwndDlg, "Can't duplicate tileset.",
+                        "Tileset", MB_OK | MB_ICONINFORMATION);
+                    break;
+                }
+                TS_WorkLoad(ni);
+                TS_DlgFill(hwndDlg);
+                mapaltered = 1;
+                break;
+            }
+        case IDC_TSDEL:
+            if (MessageBox(hwndDlg, "Delete this tileset?", "Tileset",
+                MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
+                TS_DeleteDef(ts_edidx);
+                mapaltered = 1;
+                TS_WorkFree();
+                EndDialog(hwndDlg, 0);
+            }
+            break;
+        case IDC_TSPREV:
+        case IDC_TSNEXT: {
+                int ni = ts_edidx;
+                TS_DlgReadMeta(hwndDlg);
+                TS_WorkCommit();
+                if (LOWORD(wParam) == IDC_TSPREV) {
+                    if (ni > 0) ni--;
+                } else if (ni < TS_NumDefs() - 1) {
+                    ni++;
+                }
+                TS_WorkLoad(ni);
+                TS_DlgFill(hwndDlg);
+                break;
+            }
+        case IDC_TSGRAB:
+            TS_DlgReadMeta(hwndDlg);
+            if (TS_WorkCommit() != 0)
+                break;
+            TS_WorkFree();
+            EndDialog(hwndDlg, 3);
+            break;
+        case IDOK:
+            TS_DlgReadMeta(hwndDlg);
+            TS_WorkCommit();
+            TS_WorkFree();
+            EndDialog(hwndDlg, 0);
+            break;
+        case IDCANCEL:
+            TS_WorkFree();
+            EndDialog(hwndDlg, -1);
+            break;
+        }
+        break;
+    case WM_CLOSE:
+        TS_WorkFree();
+        EndDialog(hwndDlg, -1);
+        break;
+    default:
+        return 0;
+    }
+    return -1;
+}
+
+void DIATilesetEdit(HWND hwnd, int idx)
+{
+    int r;
+
+    if (mappt == NULL) {
+        MessageBox(hwnd, "Load or create a map first.", "Tileset",
+            MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (TS_GetDef(idx) == NULL) {
+        idx = TS_NewDef(4, 4);
+        if (idx < 0) {
+            MessageBox(hwnd, "Can't create tileset (max reached).", "Tileset",
+                MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        mapaltered = 1;
+    }
+    TS_SetCurDef(idx);
+    r = (int)DialogBoxParam(hInstance, (LPCSTR)"D_TILESET", hwnd,
+        AsDlgProc(DIATilesetEditProc), (LPARAM)idx);
+    TS_WorkFree();
+    if (r == 3) {
+        megetatileset = 1;
+        MessageBox(hwnd, "Drag a rectangle on the map to copy tiles into this tileset.",
+            "Grab tileset", MB_OK | MB_ICONINFORMATION);
+    }
 }
 
 

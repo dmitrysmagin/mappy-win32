@@ -66,9 +66,9 @@ static int GE_FindBlockForGraphic(int gfx);
 static void GEGetColRGB(int * r, int * g, int * b);
 static void GESetColChan(int chan, int v);
 static void GEPaletteOp(int dest);
-static int painton = 0, gettingbrush = 0;
+static int painton = 0, gettingbrush = 0, gettingtileset = 0;
 static short int * undobuff1, * undobuff2;
-int megetabrush = 0, onion = 0, oniondark = 0, onionlower = 0;
+int megetabrush = 0, megetatileset = 0, onion = 0, oniondark = 0, onionlower = 0;
 int wlayout = 0;
 
 static int meoldbx, meoldby, mebrushx, mebrushy, mebrushx2, mebrushy2;
@@ -116,6 +116,7 @@ extern int panelpro, prographbg, sortobjects;
 
 #include "fmp.h"
 #include "fmp14.h"
+#include "tileset.h"
 
 
 static void MEPlaceLeftPane(HWND whwnd, int wide, int high) {
@@ -2348,13 +2349,18 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         MECopyToUndo();
         curplacetile = -1; painton = 1;
         meoldbx = -1; meoldby = -1; mapaltered = 1;
-        if (megetabrush) { gettingbrush = megetabrush; megetabrush = 0;
+        if (megetabrush || megetatileset) {
+            gettingbrush = 1;
+            gettingtileset = megetatileset;
+            megetabrush = 0;
+            megetatileset = 0;
             xblk = MEGetX(LOWORD(lParam), HIWORD(lParam));
             yblk = MEGetY(LOWORD(lParam), HIWORD(lParam));
             if ((blockstaggerx || blockstaggery) && yblk&1) yblk--;
             MEBrushRect(hwnd, xblk, yblk, xblk, yblk);
             mebrushx = xblk; mebrushx2 = mebrushx;
-            mebrushy = yblk; mebrushy2 = mebrushy; }
+            mebrushy = yblk; mebrushy2 = mebrushy;
+        }
         /* first paint click also updates the hover cell */
         __attribute__((fallthrough));
     case WM_MOUSEMOVE:
@@ -2409,7 +2415,20 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         if (gettingbrush) {
             if (mebrushx2<mebrushx) { i = mebrushx; mebrushx = mebrushx2; mebrushx2 = i; }
             if (mebrushy2<mebrushy) { i = mebrushy; mebrushy = mebrushy2; mebrushy2 = i; }
-            if (MakeBrush(xmapoffset+mebrushx, ymapoffset+mebrushy,
+            if (gettingtileset) {
+                short int *ly = GetLayerpt(maplayer);
+                if (ly == NULL) ly = mappt;
+                if (TS_GrabFromLayer(TS_CurDef(), ly, mapwidth, mapheight,
+                    xmapoffset+mebrushx, ymapoffset+mebrushy,
+                    xmapoffset+mebrushx2, ymapoffset+mebrushy2)!=0)
+                    MessageBox(hwnd, "Grab failed (outside the map, too large, or no tileset).",
+                        "Tileset", MB_ICONEXCLAMATION|MB_OK);
+                else {
+                    mapaltered = 1;
+                    DIATilesetEdit(hwnd, TS_CurDef());
+                }
+                gettingtileset = 0;
+            } else if (MakeBrush(xmapoffset+mebrushx, ymapoffset+mebrushy,
                 xmapoffset+mebrushx2, ymapoffset+mebrushy2)!=0)
             MessageBox(hwnd, "No brush number selected, or part of the brush is outside the map area, the previous brush has been kept", "Brush error", MB_ICONEXCLAMATION|MB_OK);
             gettingbrush = 0;

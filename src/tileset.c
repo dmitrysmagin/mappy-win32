@@ -442,6 +442,60 @@ void TS_DeleteDef(int i)
 	}
 }
 
+int TS_DuplicateDef(int i)
+{
+	const TilesetDef *d;
+	int n, x, y, w, h, hx, hy;
+	char name[TS_NAMELEN];
+
+	d = TS_GetDef(i);
+	if (d == NULL)
+		return -1;
+	w = d->width;
+	h = d->height;
+	hx = d->handle_x;
+	hy = d->handle_y;
+	if (d->name[0])
+		snprintf(name, sizeof(name), "%.54s copy", d->name);
+	else
+		strncpy(name, "Tileset copy", TS_NAMELEN - 1);
+	n = TS_NewDef(w, h);
+	if (n < 0)
+		return -1;
+	TS_SetDefMeta(n, name, hx, hy);
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++)
+			TS_SetCell(n, x, y, TS_GetCell(i, x, y));
+	}
+	return n;
+}
+
+int TS_GrabFromLayer(int i, const short *layer, int mapw, int maph,
+	int x1, int y1, int x2, int y2)
+{
+	int t, x, y, w, h;
+
+	if (layer == NULL || mapw < 1 || maph < 1)
+		return -1;
+	if (x2 < x1) { t = x1; x1 = x2; x2 = t; }
+	if (y2 < y1) { t = y1; y1 = y2; y2 = t; }
+	if (x1 < 0 || y1 < 0 || x2 >= mapw || y2 >= maph)
+		return -1;
+	w = x2 - x1 + 1;
+	h = y2 - y1 + 1;
+	if (w < 1 || h < 1 || w > TS_MAXDIM || h > TS_MAXDIM)
+		return -1;
+	if (TS_GetDef(i) == NULL)
+		return -1;
+	if (TS_ResizeDef(i, w, h) != 0)
+		return -1;
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++)
+			TS_SetCell(i, x, y, layer[(y1 + y) * mapw + (x1 + x)]);
+	}
+	return 0;
+}
+
 int TS_NumInst(void)
 {
 	return tsin.present ? tsin.num : 0;

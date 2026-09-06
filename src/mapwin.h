@@ -140,6 +140,7 @@ int IMLoadImage24 (char *, unsigned char **, int *, int *);
 /* objedit.c prototypes */
 void DIAObjectProps (HWND, int);
 void DIAObjectMgr (HWND);
+void DIATilesetEdit (HWND, int);
 void DIAObjFname (HWND);
 void DIAGraphEdit (HWND);
 void OE_DrawObjects (HDC, RECT *);

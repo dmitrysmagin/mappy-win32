@@ -366,6 +366,20 @@
 #define TBS_NOTICKS	0x0010
 #endif
 
+#define IDC_TSNAME	140
+#define IDC_TSWIDTH	141
+#define IDC_TSHEIGHT	142
+#define IDC_TSHX	143
+#define IDC_TSHY	144
+#define IDC_TSGRID	145
+#define IDC_TSGRAB	146
+#define IDC_TSNEW	147
+#define IDC_TSDEL	148
+#define IDC_TSDUP	149
+#define IDC_TSPREV	150
+#define IDC_TSNEXT	151
+#define IDC_TSINFO	152
+
 #define IDC_PALTITLE	2300
 #define IDC_PALGRID	2301
 #define IDC_PALCPY	2302
