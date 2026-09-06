@@ -28,6 +28,7 @@
 
 static HWND bhwnd = NULL;
 static HWND htab = NULL;
+static int be_minpane = 0;
 static HFONT be_font = NULL;
 static int be_tabh = TAB_H;
 short int beyoff = 0, betype = BETYPE_STILL, bebpr = 1;
@@ -75,12 +76,34 @@ static void BELayoutTabs(HWND parent);
 static void BECreateTabControl(HWND parent);
 static void BESyncTabSel(void);
 static void BESetType(int newtype);
+static void BERecalcMinPane(HWND hwnd);
+
+int BEPaneWidth(int parent_client_w)
+{
+    HWND hwnd = bhwnd;
+    int split, minw, room;
+
+    if (hwnd == NULL)
+        hwnd = htab;
+    split = MapBlockPaneWidth(hwnd, parent_client_w);
+    minw = be_minpane;
+    if (minw < 1)
+        minw = MapDip(hwnd, MAP_DIP_SPLIT);
+    if (split < minw)
+        split = minw;
+    room = parent_client_w - MapDip(hwnd, 160);
+    if (room > 0 && split > room)
+        split = room;
+    return split;
+}
 
 void BEResizeWind(int wide, int high) {
+    int split;
     if (bhwnd == NULL) return;
-    if (wlayout == 0) MoveWindow(bhwnd, wide-(wide/5), 0, wide/5, high, TRUE);
-    if (wlayout == 1) MoveWindow(bhwnd, 0, 0, wide/5, high, TRUE);
-    if (wlayout == -1) MoveWindow(bhwnd, wide-(wide/5), 0, wide/5, high, TRUE);
+    split = BEPaneWidth(wide);
+    if (wlayout == 0) MoveWindow(bhwnd, wide - split, 0, split, high, TRUE);
+    if (wlayout == 1) MoveWindow(bhwnd, 0, 0, split, high, TRUE);
+    if (wlayout == -1) MoveWindow(bhwnd, wide - split, 0, split, high, TRUE);
 }
 
 void BEInvalidate(void) {
@@ -694,6 +717,7 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         break;
     case WM_DPICHANGED:
         BEEnsureUiFont(hwnd);
+        BERecalcMinPane(hwnd);
         BELayoutTabs(hwnd);
         break;
     case WM_VSCROLL:
@@ -919,6 +943,56 @@ static void BESyncTabSel(void) {
         SendMessage(htab, TCM_SETCURSEL, (WPARAM) betype, 0);
 }
 
+static void BERecalcMinPane(HWND hwnd)
+{
+    RECT r;
+    LONG style;
+    int i, n, left, right, chrome, need;
+
+    be_minpane = MapDip(hwnd, MAP_DIP_SPLIT);
+    if (htab == NULL)
+        return;
+
+    SendMessage(htab, TCM_SETPADDING, 0,
+        MAKELPARAM(MapDip(hwnd, 6), MapDip(hwnd, 3)));
+
+    style = GetWindowLong(htab, GWL_STYLE);
+    SetWindowLong(htab, GWL_STYLE, style & ~TCS_MULTILINE);
+    SetWindowPos(htab, NULL, 0, 0, MapDip(hwnd, 2000), MapDip(hwnd, 48),
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    n = (int)SendMessage(htab, TCM_GETITEMCOUNT, 0, 0);
+    left = 0x7fffffff;
+    right = 0;
+    for (i = 0; i < n; i++) {
+        if (!SendMessage(htab, TCM_GETITEMRECT, (WPARAM)i, (LPARAM)&r))
+            continue;
+        if (r.left < left) left = r.left;
+        if (r.right > right) right = r.right;
+    }
+
+    SetWindowLong(htab, GWL_STYLE, style);
+    SetWindowPos(htab, NULL, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    if (right <= left)
+        return;
+
+    if (bhwnd != NULL) {
+        RECT wr, cr;
+        GetWindowRect(bhwnd, &wr);
+        GetClientRect(bhwnd, &cr);
+        chrome = (wr.right - wr.left) - (cr.right - cr.left);
+        if (chrome < 8)
+            chrome = GetSystemMetrics(SM_CXVSCROLL) + GetSystemMetrics(SM_CXSIZEFRAME) * 2;
+    } else {
+        chrome = GetSystemMetrics(SM_CXVSCROLL) + GetSystemMetrics(SM_CXSIZEFRAME) * 2;
+    }
+    need = (right - left) + chrome + MapDip(hwnd, 24);
+    if (need > be_minpane)
+        be_minpane = need;
+}
+
 static void BELayoutTabs(HWND parent) {
     RECT crc, rc;
     int w, dpi, hguess, pad, minstrip;
@@ -977,6 +1051,7 @@ static void BECreateTabControl(HWND parent) {
         SendMessage(htab, TCM_INSERTITEM, (WPARAM) i, (LPARAM) &tie);
     }
     SendMessage(htab, TCM_SETCURSEL, (WPARAM) betype, 0);
+    BERecalcMinPane(parent);
     BELayoutTabs(parent);
 }
 
@@ -1000,9 +1075,12 @@ HWND CreateBlockEditorWindow(HWND hwnd) {
 
     GetWindowRect(hwnd, &rc);
     {
-        int split = MapDip(hwnd, MAP_DIP_SPLIT);
-        int pad = MapDip(hwnd, MAP_DIP_SPLITPAD);
-        int fudge = MapCaptionFudge(hwnd);
+        RECT crc;
+        int split, pad, fudge;
+        GetClientRect(hwnd, &crc);
+        split = BEPaneWidth(crc.right);
+        pad = MapDip(hwnd, MAP_DIP_SPLITPAD);
+        fudge = MapCaptionFudge(hwnd);
         if (wlayout == 0 || wlayout == -1) x = (rc.right)-(rc.left)-split-pad;
         else x = 0;
         bhwnd = CreateWindow(szBlockEdname, szBlockEdname,

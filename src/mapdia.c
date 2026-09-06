@@ -62,7 +62,7 @@ typedef struct { /* Animation control structure */
 
 extern HINSTANCE hInstance;
 extern short int mapwidth, mapheight, blockwidth, blockheight, blockdepth, numblockstr, numblockgfx, curbrsh;
-extern short int curstr, curanim, numblockanim;
+extern short int numblockanim;
 extern int megetatileset;
 extern int blockgapx, blockgapy, blockstaggerx, blockstaggery, blockstagger;
 extern int clickmask;
@@ -3332,18 +3332,26 @@ void DIRemove(HWND hwnd) {
 
 /* ---------------- D_TILESET ---------------- */
 
+#define TS_PANE_MAP  0
+#define TS_PANE_PICK 1
+#define TS_GAP 2
+
+static const char ts_pane_class[] = "MappyTSPane";
+static int ts_pane_class_ok = 0;
+
 static int ts_edidx;
 static int ts_w, ts_h, ts_hx, ts_hy;
 static char ts_name[TS_NAMELEN];
 static short *ts_work = NULL;
-static WNDPROC ts_grid_old = NULL;
-
-static short TS_StampValue(void)
-{
-    if (curanim >= 0)
-        return (short)(-((curanim + 1) * FMP_ANI_MEMUNIT));
-    return curstr;
-}
+static HWND ts_map_hwnd = NULL;
+static HWND ts_pick_hwnd = NULL;
+static HWND ts_dlg = NULL;
+static int ts_map_sx, ts_map_sy;
+static int ts_pick_yoff;
+static int ts_pick_mode; /* 0 still, 1 anim */
+static int ts_pick_idx;
+static short ts_stamp;
+static int ts_paint;
 
 static void TS_WorkFree(void)
 {
@@ -3422,7 +3430,7 @@ static int TS_WorkCommit(void)
     return 0;
 }
 
-static void TS_BlitCell(HDC hdc, int dx, int dy, int dw, int dh, short cell)
+static void TS_BlitCell1(HDC hdc, int dx, int dy, short cell)
 {
     unsigned char *buf;
     HDC mdc;
@@ -3430,7 +3438,7 @@ static void TS_BlitCell(HDC hdc, int dx, int dy, int dw, int dh, short cell)
     BITMAPINFOHEADER bih;
     int pitch, ani;
 
-    if (dw < 1 || dh < 1 || blockwidth < 1 || blockheight < 1)
+    if (blockwidth < 1 || blockheight < 1)
         return;
     pitch = (blockwidth * 3 + 3) & ~3;
     buf = (unsigned char *)malloc((size_t)pitch * (size_t)blockheight);
@@ -3457,10 +3465,36 @@ static void TS_BlitCell(HDC hdc, int dx, int dy, int dw, int dh, short cell)
     free(buf);
     if (hbm == NULL) { DeleteDC(mdc); return; }
     hold = SelectObject(mdc, hbm);
-    StretchBlt(hdc, dx, dy, dw, dh, mdc, 0, 0, blockwidth, blockheight, SRCCOPY);
+    BitBlt(hdc, dx, dy, blockwidth, blockheight, mdc, 0, 0, SRCCOPY);
     SelectObject(mdc, hold);
     DeleteObject(hbm);
     DeleteDC(mdc);
+}
+
+static short TS_PickCell(int idx)
+{
+    if (ts_pick_mode)
+        return (short)(-((idx + 1) * FMP_ANI_MEMUNIT));
+    return (short)idx;
+}
+
+static void TS_SetLocalPick(int idx)
+{
+    int n = ts_pick_mode ? numblockanim : numblockstr;
+    if (idx < 0) idx = 0;
+    if (n > 0 && idx >= n) idx = n - 1;
+    ts_pick_idx = idx;
+    ts_stamp = TS_PickCell(idx);
+}
+
+static void TS_StampInfo(HWND hwndDlg)
+{
+    char txt[80];
+    if (ts_pick_mode)
+        sprintf(txt, "Anim %d", ts_pick_idx);
+    else
+        sprintf(txt, "Still %d", ts_pick_idx);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSINFO), txt);
 }
 
 static void TS_DlgFill(HWND hwndDlg)
@@ -3476,14 +3510,11 @@ static void TS_DlgFill(HWND hwndDlg)
     SetWindowText(GetDlgItem(hwndDlg, IDC_TSHX), txt);
     sprintf(txt, "%d", ts_hy);
     SetWindowText(GetDlgItem(hwndDlg, IDC_TSHY), txt);
-    if (curanim >= 0)
-        sprintf(txt, "Stamp: anim %d. Click a cell to paint, right-click clears.", curanim);
-    else
-        sprintf(txt, "Stamp: still %d. Click a cell to paint, right-click clears.", curstr);
-    SetWindowText(GetDlgItem(hwndDlg, IDC_TSINFO), txt);
     sprintf(txt, "Tileset %d", ts_edidx);
     SetWindowText(hwndDlg, txt);
-    InvalidateRect(GetDlgItem(hwndDlg, IDC_TSGRID), NULL, TRUE);
+    TS_StampInfo(hwndDlg);
+    if (ts_map_hwnd) InvalidateRect(ts_map_hwnd, NULL, FALSE);
+    if (ts_pick_hwnd) InvalidateRect(ts_pick_hwnd, NULL, FALSE);
 }
 
 static int TS_DlgReadMeta(HWND hwndDlg)
@@ -3506,42 +3537,344 @@ static int TS_DlgReadMeta(HWND hwndDlg)
     return 0;
 }
 
-static void TS_GridHit(HWND hwndDlg, LPARAM lParam, int clear)
+static int TS_ScrollPos(HWND hwnd, int bar, int code, int *pos, int maxv, int line)
 {
-    HWND grid;
-    RECT rc;
-    int cw, ch, cx, cy;
+    SCROLLINFO si;
+    int n = *pos;
 
-    if (ts_work == NULL || ts_w < 1 || ts_h < 1)
-        return;
-    TS_DlgReadMeta(hwndDlg);
-    grid = GetDlgItem(hwndDlg, IDC_TSGRID);
-    GetClientRect(grid, &rc);
-    if (rc.right < 1 || rc.bottom < 1)
-        return;
-    cw = rc.right / ts_w;
-    ch = rc.bottom / ts_h;
-    if (cw < 1) cw = 1;
-    if (ch < 1) ch = 1;
-    cx = LOWORD(lParam) / cw;
-    cy = HIWORD(lParam) / ch;
-    if (cx < 0 || cy < 0 || cx >= ts_w || cy >= ts_h)
-        return;
-    ts_work[cy * ts_w + cx] = clear ? 0 : TS_StampValue();
-    InvalidateRect(grid, NULL, FALSE);
+    if (line < 1) line = 1;
+    memset(&si, 0, sizeof(si));
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_PAGE | SIF_TRACKPOS;
+    GetScrollInfo(hwnd, bar, &si);
+    switch (LOWORD(code)) {
+    case SB_LINEUP: n -= line; break;
+    case SB_LINEDOWN: n += line; break;
+    case SB_PAGEUP: n -= (int)si.nPage; break;
+    case SB_PAGEDOWN: n += (int)si.nPage; break;
+    case SB_TOP: n = 0; break;
+    case SB_BOTTOM: n = maxv; break;
+    case SB_THUMBPOSITION:
+    case SB_THUMBTRACK: n = si.nTrackPos; break;
+    default: return 0;
+    }
+    if (n < 0) n = 0;
+    if (n > maxv) n = maxv;
+    if (n == *pos) return 0;
+    *pos = n;
+    SetScrollPos(hwnd, bar, n, TRUE);
+    return 1;
 }
 
-static LRESULT CALLBACK TSGridProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+static void TS_MapUpdateScroll(HWND hwnd)
 {
-    if (msg == WM_LBUTTONDOWN) {
-        TS_GridHit(GetParent(hwnd), lParam, 0);
+    RECT rc;
+    SCROLLINFO si;
+    int cw, ch, maxx, maxy;
+
+    GetClientRect(hwnd, &rc);
+    cw = ts_w * blockwidth;
+    ch = ts_h * blockheight;
+    maxx = cw - rc.right;
+    maxy = ch - rc.bottom;
+    if (maxx < 0) maxx = 0;
+    if (maxy < 0) maxy = 0;
+    if (ts_map_sx > maxx) ts_map_sx = maxx;
+    if (ts_map_sy > maxy) ts_map_sy = maxy;
+    memset(&si, 0, sizeof(si));
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    si.nMin = 0;
+    si.nMax = cw > 0 ? cw - 1 : 0;
+    si.nPage = (UINT)(rc.right > 0 ? rc.right : 1);
+    si.nPos = ts_map_sx;
+    SetScrollInfo(hwnd, SB_HORZ, &si, TRUE);
+    si.nMax = ch > 0 ? ch - 1 : 0;
+    si.nPage = (UINT)(rc.bottom > 0 ? rc.bottom : 1);
+    si.nPos = ts_map_sy;
+    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+}
+
+static int TS_PickCount(void)
+{
+    return ts_pick_mode ? numblockanim : numblockstr;
+}
+
+static int TS_PickBpr(HWND hwnd)
+{
+    RECT rc;
+    int bpr;
+    GetClientRect(hwnd, &rc);
+    bpr = (rc.right - TS_GAP) / (blockwidth + TS_GAP);
+    if (bpr < 1) bpr = 1;
+    return bpr;
+}
+
+static void TS_PickUpdateScroll(HWND hwnd)
+{
+    RECT rc;
+    SCROLLINFO si;
+    int bpr, rows, vis, maxr;
+
+    GetClientRect(hwnd, &rc);
+    bpr = TS_PickBpr(hwnd);
+    rows = (TS_PickCount() + bpr - 1) / bpr;
+    if (rows < 1) rows = 1;
+    vis = rc.bottom / (blockheight + TS_GAP);
+    if (vis < 1) vis = 1;
+    maxr = rows - vis;
+    if (maxr < 0) maxr = 0;
+    if (ts_pick_yoff > maxr) ts_pick_yoff = maxr;
+    memset(&si, 0, sizeof(si));
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    si.nMin = 0;
+    si.nMax = rows > 0 ? rows - 1 : 0;
+    si.nPage = (UINT)vis;
+    si.nPos = ts_pick_yoff;
+    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+}
+
+static void TS_PaintMap(HWND hwnd, HDC hdc)
+{
+    RECT rc;
+    HBRUSH br;
+    int x, y, dx, dy;
+
+    GetClientRect(hwnd, &rc);
+    br = CreateSolidBrush(RGB(0x44, 0x44, 0x44));
+    FillRect(hdc, &rc, br);
+    DeleteObject(br);
+    if (ts_work == NULL || ts_w < 1 || ts_h < 1 || blockwidth < 1 || blockheight < 1)
+        return;
+    for (y = 0; y < ts_h; y++) {
+        dy = y * blockheight - ts_map_sy;
+        if (dy + blockheight < 0 || dy > rc.bottom)
+            continue;
+        for (x = 0; x < ts_w; x++) {
+            dx = x * blockwidth - ts_map_sx;
+            if (dx + blockwidth < 0 || dx > rc.right)
+                continue;
+            TS_BlitCell1(hdc, dx, dy, ts_work[y * ts_w + x]);
+        }
+    }
+}
+
+static void TS_PaintPick(HWND hwnd, HDC hdc)
+{
+    RECT rc;
+    HBRUSH br;
+    int bpr, i, j, idx, n;
+
+    GetClientRect(hwnd, &rc);
+    br = CreateSolidBrush(RGB(0x44, 0x44, 0x44));
+    FillRect(hdc, &rc, br);
+    DeleteObject(br);
+    if (blockwidth < 1 || blockheight < 1)
+        return;
+    bpr = TS_PickBpr(hwnd);
+    n = TS_PickCount();
+    for (i = 0; i <= rc.bottom / (blockheight + TS_GAP) + 1; i++) {
+        for (j = 0; j < bpr; j++) {
+            int dx = j * (blockwidth + TS_GAP) + 1;
+            int dy = i * (blockheight + TS_GAP) + 1;
+            idx = (ts_pick_yoff + i) * bpr + j;
+            if (idx >= n)
+                continue;
+            TS_BlitCell1(hdc, dx, dy, TS_PickCell(idx));
+            if (idx == ts_pick_idx) {
+                HPEN pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+                HPEN old = SelectObject(hdc, pen);
+                HBRUSH oldb = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+                Rectangle(hdc, dx, dy, dx + blockwidth, dy + blockheight);
+                SelectObject(hdc, old);
+                SelectObject(hdc, oldb);
+                DeleteObject(pen);
+            }
+        }
+    }
+}
+
+static void TS_MapHit(HWND hwnd, LPARAM lParam, int clear)
+{
+    int mx, my, cx, cy;
+
+    if (ts_work == NULL || ts_w < 1 || ts_h < 1 || blockwidth < 1 || blockheight < 1)
+        return;
+    if (ts_dlg)
+        TS_DlgReadMeta(ts_dlg);
+    mx = LOWORD(lParam) + ts_map_sx;
+    my = HIWORD(lParam) + ts_map_sy;
+    cx = mx / blockwidth;
+    cy = my / blockheight;
+    if (cx < 0 || cy < 0 || cx >= ts_w || cy >= ts_h)
+        return;
+    ts_work[cy * ts_w + cx] = clear ? 0 : ts_stamp;
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static void TS_PickHit(HWND hwnd, LPARAM lParam)
+{
+    RECT rc;
+    int bpr, col, row, idx, n;
+
+    GetClientRect(hwnd, &rc);
+    if (blockwidth < 1 || blockheight < 1)
+        return;
+    bpr = TS_PickBpr(hwnd);
+    col = LOWORD(lParam) / (blockwidth + TS_GAP);
+    row = ts_pick_yoff + HIWORD(lParam) / (blockheight + TS_GAP);
+    if (col < 0 || col >= bpr)
+        return;
+    idx = row * bpr + col;
+    n = TS_PickCount();
+    if (idx < 0 || idx >= n)
+        return;
+    TS_SetLocalPick(idx);
+    if (ts_dlg)
+        TS_StampInfo(ts_dlg);
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static LRESULT CALLBACK TSPaneProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    int pane = (int)(INT_PTR)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+    PAINTSTRUCT ps;
+    HDC hdc;
+
+    switch (msg) {
+    case WM_NCCREATE: {
+            CREATESTRUCT *cs = (CREATESTRUCT *)lParam;
+            SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)cs->lpCreateParams);
+        }
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    case WM_PAINT:
+        hdc = BeginPaint(hwnd, &ps);
+        if (pane == TS_PANE_MAP)
+            TS_PaintMap(hwnd, hdc);
+        else
+            TS_PaintPick(hwnd, hdc);
+        EndPaint(hwnd, &ps);
+        return 0;
+    case WM_LBUTTONDOWN:
+        SetFocus(hwnd);
+        if (pane == TS_PANE_MAP) {
+            ts_paint = 1;
+            SetCapture(hwnd);
+            TS_MapHit(hwnd, lParam, 0);
+        } else {
+            TS_PickHit(hwnd, lParam);
+        }
+        return 0;
+    case WM_RBUTTONDOWN:
+        if (pane == TS_PANE_MAP) {
+            ts_paint = 2;
+            SetCapture(hwnd);
+            TS_MapHit(hwnd, lParam, 1);
+        }
+        return 0;
+    case WM_MOUSEMOVE:
+        if (pane == TS_PANE_MAP && ts_paint)
+            TS_MapHit(hwnd, lParam, ts_paint == 2);
+        return 0;
+    case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+        if (ts_paint) {
+            ts_paint = 0;
+            ReleaseCapture();
+        }
+        return 0;
+    case WM_VSCROLL:
+        if (pane == TS_PANE_MAP) {
+            int maxy = ts_h * blockheight;
+            RECT rc; GetClientRect(hwnd, &rc);
+            maxy -= rc.bottom;
+            if (maxy < 0) maxy = 0;
+            if (TS_ScrollPos(hwnd, SB_VERT, (int)wParam, &ts_map_sy, maxy, blockheight))
+                InvalidateRect(hwnd, NULL, FALSE);
+        } else {
+            int bpr = TS_PickBpr(hwnd);
+            int rows = (TS_PickCount() + bpr - 1) / bpr;
+            RECT rc; GetClientRect(hwnd, &rc);
+            int vis = rc.bottom / (blockheight + TS_GAP);
+            int maxr = rows - (vis < 1 ? 1 : vis);
+            if (maxr < 0) maxr = 0;
+            if (TS_ScrollPos(hwnd, SB_VERT, (int)wParam, &ts_pick_yoff, maxr, 1))
+                InvalidateRect(hwnd, NULL, FALSE);
+        }
+        return 0;
+    case WM_HSCROLL:
+        if (pane == TS_PANE_MAP) {
+            int maxx = ts_w * blockwidth;
+            RECT rc; GetClientRect(hwnd, &rc);
+            maxx -= rc.right;
+            if (maxx < 0) maxx = 0;
+            if (TS_ScrollPos(hwnd, SB_HORZ, (int)wParam, &ts_map_sx, maxx, blockwidth))
+                InvalidateRect(hwnd, NULL, FALSE);
+        }
+        return 0;
+    case WM_MOUSEWHEEL: {
+            int delta = (short)HIWORD(wParam);
+            if (pane == TS_PANE_MAP) {
+                ts_map_sy += (delta > 0) ? -blockheight : blockheight;
+                TS_MapUpdateScroll(hwnd);
+            } else {
+                ts_pick_yoff += (delta > 0) ? -1 : 1;
+                if (ts_pick_yoff < 0) ts_pick_yoff = 0;
+                TS_PickUpdateScroll(hwnd);
+            }
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+    case WM_SIZE:
+        if (pane == TS_PANE_MAP)
+            TS_MapUpdateScroll(hwnd);
+        else
+            TS_PickUpdateScroll(hwnd);
         return 0;
     }
-    if (msg == WM_RBUTTONDOWN) {
-        TS_GridHit(GetParent(hwnd), lParam, 1);
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+static int TS_RegisterPanes(void)
+{
+    WNDCLASS wc;
+    if (ts_pane_class_ok)
+        return 1;
+    memset(&wc, 0, sizeof(wc));
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+    wc.lpfnWndProc = TSPaneProc;
+    wc.hInstance = hInstance;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)GetStockObject(GRAY_BRUSH);
+    wc.lpszClassName = ts_pane_class;
+    if (!RegisterClass(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
         return 0;
+    ts_pane_class_ok = 1;
+    return 1;
+}
+
+static HWND TS_CreatePane(HWND parent, int id, int pane)
+{
+    HWND ph, child;
+    RECT rc;
+
+    ph = GetDlgItem(parent, id);
+    if (ph == NULL)
+        return NULL;
+    GetWindowRect(ph, &rc);
+    MapWindowPoints(NULL, parent, (POINT *)&rc, 2);
+    ShowWindow(ph, SW_HIDE);
+    {
+        DWORD style = WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | WS_CLIPSIBLINGS;
+        if (pane == TS_PANE_MAP)
+            style |= WS_HSCROLL;
+        child = CreateWindowEx(WS_EX_CLIENTEDGE, ts_pane_class, "",
+            style,
+            rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+            parent, (HMENU)(INT_PTR)id, hInstance, (LPVOID)(INT_PTR)pane);
     }
-    return CallWindowProc(ts_grid_old, hwnd, msg, wParam, lParam);
+    return child;
 }
 
 INT_PTR CALLBACK DIATilesetEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -3553,42 +3886,43 @@ INT_PTR CALLBACK DIATilesetEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
             EndDialog(hwndDlg, -1L);
             break;
         }
-        ts_grid_old = (WNDPROC)SetWindowLongPtr(GetDlgItem(hwndDlg, IDC_TSGRID),
-            GWLP_WNDPROC, (LONG_PTR)TSGridProc);
+        ts_dlg = hwndDlg;
+        ts_map_sx = ts_map_sy = 0;
+        ts_pick_yoff = 0;
+        ts_pick_mode = 0;
+        TS_SetLocalPick(0);
+        ts_paint = 0;
+        if (!TS_RegisterPanes()) {
+            EndDialog(hwndDlg, -1L);
+            break;
+        }
+        ts_map_hwnd = TS_CreatePane(hwndDlg, IDC_TSGRID, TS_PANE_MAP);
+        ts_pick_hwnd = TS_CreatePane(hwndDlg, IDC_TSPICK, TS_PANE_PICK);
+        if (ts_map_hwnd) TS_MapUpdateScroll(ts_map_hwnd);
+        if (ts_pick_hwnd) TS_PickUpdateScroll(ts_pick_hwnd);
         TS_DlgFill(hwndDlg);
         break;
-    case WM_DRAWITEM: {
-            DRAWITEMSTRUCT *di = (DRAWITEMSTRUCT *)lParam;
-            RECT rc;
-            int x, y, cw, ch;
-            HBRUSH br;
-            if (di == NULL || di->CtlID != IDC_TSGRID)
-                return 0;
-            rc = di->rcItem;
-            br = CreateSolidBrush(RGB(0x44, 0x44, 0x44));
-            FillRect(di->hDC, &rc, br);
-            DeleteObject(br);
-            if (ts_work == NULL || ts_w < 1 || ts_h < 1)
-                return -1;
-            cw = (rc.right - rc.left) / ts_w;
-            ch = (rc.bottom - rc.top) / ts_h;
-            if (cw < 1) cw = 1;
-            if (ch < 1) ch = 1;
-            for (y = 0; y < ts_h; y++) {
-                for (x = 0; x < ts_w; x++) {
-                    TS_BlitCell(di->hDC, rc.left + x * cw, rc.top + y * ch,
-                        cw, ch, ts_work[y * ts_w + x]);
-                }
-            }
-            return -1;
-        }
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case IDC_TSWIDTH:
         case IDC_TSHEIGHT:
             if (HIWORD(wParam) == EN_KILLFOCUS) {
                 TS_DlgReadMeta(hwndDlg);
-                InvalidateRect(GetDlgItem(hwndDlg, IDC_TSGRID), NULL, TRUE);
+                if (ts_map_hwnd) {
+                    TS_MapUpdateScroll(ts_map_hwnd);
+                    InvalidateRect(ts_map_hwnd, NULL, FALSE);
+                }
+            }
+            break;
+        case IDC_TSPICKSTILL:
+        case IDC_TSPICKANIM:
+            ts_pick_mode = (LOWORD(wParam) == IDC_TSPICKANIM);
+            ts_pick_yoff = 0;
+            TS_SetLocalPick(0);
+            TS_StampInfo(hwndDlg);
+            if (ts_pick_hwnd) {
+                TS_PickUpdateScroll(ts_pick_hwnd);
+                InvalidateRect(ts_pick_hwnd, NULL, FALSE);
             }
             break;
         case IDC_TSNEW: {
@@ -3601,7 +3935,9 @@ INT_PTR CALLBACK DIATilesetEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
                         "Tileset", MB_OK | MB_ICONINFORMATION);
                     break;
                 }
+                ts_map_sx = ts_map_sy = 0;
                 TS_WorkLoad(ni);
+                if (ts_map_hwnd) TS_MapUpdateScroll(ts_map_hwnd);
                 TS_DlgFill(hwndDlg);
                 mapaltered = 1;
                 break;
@@ -3616,7 +3952,9 @@ INT_PTR CALLBACK DIATilesetEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
                         "Tileset", MB_OK | MB_ICONINFORMATION);
                     break;
                 }
+                ts_map_sx = ts_map_sy = 0;
                 TS_WorkLoad(ni);
+                if (ts_map_hwnd) TS_MapUpdateScroll(ts_map_hwnd);
                 TS_DlgFill(hwndDlg);
                 mapaltered = 1;
                 break;
@@ -3626,6 +3964,9 @@ INT_PTR CALLBACK DIATilesetEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
                 MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
                 TS_DeleteDef(ts_edidx);
                 mapaltered = 1;
+                ts_map_hwnd = NULL;
+                ts_pick_hwnd = NULL;
+                ts_dlg = NULL;
                 TS_WorkFree();
                 EndDialog(hwndDlg, 0);
             }
@@ -3640,7 +3981,9 @@ INT_PTR CALLBACK DIATilesetEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
                 } else if (ni < TS_NumDefs() - 1) {
                     ni++;
                 }
+                ts_map_sx = ts_map_sy = 0;
                 TS_WorkLoad(ni);
+                if (ts_map_hwnd) TS_MapUpdateScroll(ts_map_hwnd);
                 TS_DlgFill(hwndDlg);
                 break;
             }
@@ -3648,22 +3991,34 @@ INT_PTR CALLBACK DIATilesetEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
             TS_DlgReadMeta(hwndDlg);
             if (TS_WorkCommit() != 0)
                 break;
+            ts_map_hwnd = NULL;
+            ts_pick_hwnd = NULL;
+            ts_dlg = NULL;
             TS_WorkFree();
             EndDialog(hwndDlg, 3);
             break;
         case IDOK:
             TS_DlgReadMeta(hwndDlg);
             TS_WorkCommit();
+            ts_map_hwnd = NULL;
+            ts_pick_hwnd = NULL;
+            ts_dlg = NULL;
             TS_WorkFree();
             EndDialog(hwndDlg, 0);
             break;
         case IDCANCEL:
+            ts_map_hwnd = NULL;
+            ts_pick_hwnd = NULL;
+            ts_dlg = NULL;
             TS_WorkFree();
             EndDialog(hwndDlg, -1);
             break;
         }
         break;
     case WM_CLOSE:
+        ts_map_hwnd = NULL;
+        ts_pick_hwnd = NULL;
+        ts_dlg = NULL;
         TS_WorkFree();
         EndDialog(hwndDlg, -1);
         break;

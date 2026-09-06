@@ -115,6 +115,7 @@ int GEAccelPick (void);
 int GEAccelLine (void);
 /* blocked.c prototypes */
 void BEResizeWind (int, int);
+int BEPaneWidth (int);
 void BENewBlock (void);
 void BECutBlock (void);
 void BECopyBlock (void);

@@ -12,8 +12,8 @@
 #include <string.h>
 
 enum {
-	MAP_DIP_SPLIT = 128,	/* block pane width at 96 DPI */
-	MAP_DIP_SPLITPAD = 4,	/* gap so map+block = parent-132 */
+	MAP_DIP_SPLIT = 420,	/* min block pane width at 96 DPI (six tabs, one row) */
+	MAP_DIP_SPLITPAD = 4,	/* gap so map+block = parent-(split+4) */
 	MAP_DIP_MENUFUDGE = 30	/* menu/frame fudge besides SM_CYCAPTION */
 };
 
@@ -58,6 +58,22 @@ static inline int MapScale (int px96, int dpi)
 static inline int MapDip (HWND hwnd, int px96)
 {
 	return MapScale (px96, MapGetDpi (hwnd));
+}
+
+/* Right pane width: never narrower than MAP_DIP_SPLIT (tabs stay on one
+ * row), otherwise 1/4 of the parent client. */
+static inline int MapBlockPaneWidth (HWND hwnd, int parent_client_w)
+{
+	int split = MapDip (hwnd, MAP_DIP_SPLIT);
+	int quarter = parent_client_w / 4;
+	int room;
+
+	if (quarter > split)
+		split = quarter;
+	room = parent_client_w - MapDip (hwnd, 160);
+	if (room > 0 && split > room)
+		split = room;
+	return split;
 }
 
 /* Cosmetic pen width: at least 1 device pixel, 1 DIP at 96. */

@@ -120,9 +120,12 @@ extern int panelpro, prographbg, sortobjects;
 
 
 static void MEPlaceLeftPane(HWND whwnd, int wide, int high) {
+    int split, pad;
     if (whwnd == NULL) return;
-    if (wlayout == 0) MoveWindow(whwnd, 0, 0, wide-(wide/5), high, TRUE);
-    if (wlayout == 1) MoveWindow(whwnd, wide/5, 0, wide-(wide/5), high, TRUE);
+    split = BEPaneWidth(wide);
+    pad = MapDip(whwnd, MAP_DIP_SPLITPAD);
+    if (wlayout == 0) MoveWindow(whwnd, 0, 0, wide - split - pad, high, TRUE);
+    if (wlayout == 1) MoveWindow(whwnd, split + pad, 0, wide - split - pad, high, TRUE);
     if (wlayout == -1) MoveWindow(whwnd, 0, 0, wide, high, TRUE);
 }
 
@@ -2641,9 +2644,12 @@ HWND CreateMapEditorWindow(HWND hwnd) {
 
     GetWindowRect(hwnd, &rc);
     {
-        int split = MapDip(hwnd, MAP_DIP_SPLIT);
-        int pad = MapDip(hwnd, MAP_DIP_SPLITPAD);
-        int fudge = MapCaptionFudge(hwnd);
+        RECT crc;
+        int split, pad, fudge;
+        GetClientRect(hwnd, &crc);
+        split = BEPaneWidth(crc.right);
+        pad = MapDip(hwnd, MAP_DIP_SPLITPAD);
+        fudge = MapCaptionFudge(hwnd);
         if (wlayout == 0) x = 0; else x = split;
         mhwnd = CreateWindow(szMapEdname, szMapEdname,
             WS_MAXIMIZEBOX	| WS_MINIMIZEBOX | WS_CAPTION | WS_CLIPSIBLINGS |
@@ -2762,9 +2768,12 @@ HWND CreateGraphEditorWindow(HWND hwnd) {
 
     GetWindowRect(hwnd, &rc);
     {
-        int split = MapDip(hwnd, MAP_DIP_SPLIT);
-        int pad = MapDip(hwnd, MAP_DIP_SPLITPAD);
-        int fudge = MapCaptionFudge(hwnd);
+        RECT crc;
+        int split, pad, fudge;
+        GetClientRect(hwnd, &crc);
+        split = BEPaneWidth(crc.right);
+        pad = MapDip(hwnd, MAP_DIP_SPLITPAD);
+        fudge = MapCaptionFudge(hwnd);
         if (wlayout == 0) x = 0; else x = split;
         ghwnd = CreateWindow(szGraphEdname, szGraphEdname,
             WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_CAPTION | WS_CLIPSIBLINGS |
