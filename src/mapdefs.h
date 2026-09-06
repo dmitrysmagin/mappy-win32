@@ -375,8 +375,8 @@
 #define CM_BRUSHHANDLEBL	332
 #define CM_BRUSHHANDLEBR	333
 #define CM_HELPINI	335
-#define CM_LAYERBANK0	336	/* banks 0..9 = 336..345 (layers 0-9 .. 90-99) */
-#define CM_LAYERSEL	400	/* visible bank slots 0..9 = 400..409 */
+#define CM_LAYERBANK0	336	/* banks 0..9 = 336..345; inserted only if >10 layers */
+#define CM_LAYERSEL	400	/* current-bank slots 0..9 = 400..409 (Layer 0 always shown) */
 
 #define IDC_SHOWUSERFIELD	200
 #define IDC_SHOWUSERHEX	201

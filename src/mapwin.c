@@ -99,7 +99,7 @@ int sortblocks = 0;		/* BlockSort.lua filters the block window */
 int panelpro = 1;		/* graph panel: 0 none, 1 cluster, 2 bar */
 int prographbg = 1;		/* graph window background (0 black, 1 dark) */
 int luafilemenu = 0;		/* override File menu with luascr/luafile*.lua */
-int objlayeruser = 0;		/* user field holding object layer (0 = off) */
+int objlayeruser = 1;		/* user field 1..7 holding object layer (0 = show on all layers) */
 extern short int betype;
 
 void InvalidateAll(void) {
@@ -143,6 +143,52 @@ static HMENU GetBrushMenu(void)
     return NULL;
 }
 
+static HMENU GetLayerMenu(void)
+{
+    int i, n;
+    if (hMenu == NULL)
+        return NULL;
+    n = GetMenuItemCount(hMenu);
+    for (i = 0; i < n; i++) {
+        HMENU sub = GetSubMenu(hMenu, i);
+        if (sub != NULL && GetMenuState(sub, CM_LAYERADD, MF_BYCOMMAND) != (UINT) -1)
+            return sub;
+    }
+    return NULL;
+}
+
+static int HighestLayerIndex(void)
+{
+    int i, hi = -1;
+    for (i = 0; i < MAXMAPLAYERS; i++)
+        if (GetLayerpt(i) != NULL) hi = i;
+    return hi;
+}
+
+static void LayerMenuText(int li, char * mtxt)
+{
+    const char * lname = F14_LayerName(li);
+    if (lname != NULL && lname[0])
+        sprintf(mtxt, "Layer %d (%s)", li, lname);
+    else
+        sprintf(mtxt, "Layer %d", li);
+}
+
+static void RemoveLayerBankPopup(HMENU lm)
+{
+    int i, n;
+    if (lm == NULL) return;
+    n = GetMenuItemCount(lm);
+    for (i = 0; i < n; i++) {
+        HMENU sub = GetSubMenu(lm, i);
+        if (sub != NULL && GetMenuState(sub, CM_LAYERBANK0, MF_BYCOMMAND) != (UINT) -1) {
+            RemoveMenu(lm, i, MF_BYPOSITION);
+            DestroyMenu(sub);
+            return;
+        }
+    }
+}
+
 void RejigBrshMenu(int brshnum) {
     HMENU bm = GetBrushMenu();
     int i, n, bw, bh;
@@ -179,32 +225,49 @@ void RejigBrshMenu(int brshnum) {
 }
 
 static void RefreshLayerBankMenu(void) {
-    int li, slot, id;
+    HMENU lm, bankm;
+    int li, slot, id, hi, maxbank, bank;
     char mtxt[80];
-    const char * lname;
 
-    if (hMenu==NULL) return;
-    if (layerbank<0) layerbank = 0;
-    if (layerbank>9) layerbank = 9;
-    for (slot=0;slot<10;slot++) {
-        id = CM_LAYERSEL+slot;
-        li = layerbank*10+slot;
-        CheckMenuItem(hMenu, id, MF_UNCHECKED);
-        if (GetLayerpt(li)==NULL)
-            EnableMenuItem(hMenu, id, MF_BYCOMMAND|MF_GRAYED);
-        else
-            EnableMenuItem(hMenu, id, MF_BYCOMMAND|MF_ENABLED);
-        lname = F14_LayerName(li);
-        if (lname!=NULL && lname[0])
-            sprintf(mtxt, "Layer %d (%s)", li, lname);
-        else
-            sprintf(mtxt, "Layer %d", li);
-        ModifyMenu(hMenu, id, MF_BYCOMMAND|MF_STRING, id, mtxt);
-        if (li==curlayer)
-            CheckMenuItem(hMenu, id, MF_CHECKED);
+    lm = GetLayerMenu();
+    if (lm == NULL) return;
+    if (layerbank < 0) layerbank = 0;
+    if (layerbank > 9) layerbank = 9;
+    hi = HighestLayerIndex();
+    maxbank = (hi >= 0) ? hi / 10 : 0;
+    if (layerbank > maxbank) layerbank = maxbank;
+
+    for (slot = 0; slot < 10; slot++)
+        RemoveMenu(lm, CM_LAYERSEL + slot, MF_BYCOMMAND);
+    RemoveLayerBankPopup(lm);
+
+    /* Layer Bank only when a layer past 0-9 exists */
+    if (hi >= 10) {
+        bankm = CreatePopupMenu();
+        if (bankm != NULL) {
+            for (bank = 0; bank <= maxbank; bank++) {
+                sprintf(mtxt, "&%d-%d", bank * 10, bank * 10 + 9);
+                AppendMenu(bankm, MF_STRING | ((bank == layerbank) ? MF_CHECKED : 0),
+                    CM_LAYERBANK0 + bank, mtxt);
+            }
+            InsertMenu(lm, CM_LAYERGOTO, MF_BYCOMMAND | MF_POPUP,
+                (UINT_PTR) bankm, "Layer &Bank");
+        }
     }
-    for (slot=0;slot<10;slot++)
-        CheckMenuItem(hMenu, CM_LAYERBANK0+slot, (slot==layerbank) ? MF_CHECKED : MF_UNCHECKED);
+
+    for (slot = 0; slot < 10; slot++) {
+        id = CM_LAYERSEL + slot;
+        li = layerbank * 10 + slot;
+        if (!(layerbank == 0 && slot == 0) && GetLayerpt(li) == NULL)
+            continue;
+        LayerMenuText(li, mtxt);
+        InsertMenu(lm, CM_LAYERGOTO, MF_BYCOMMAND | MF_STRING, id, mtxt);
+        if (GetLayerpt(li) == NULL)
+            EnableMenuItem(lm, id, MF_BYCOMMAND | MF_GRAYED);
+        if (li == curlayer)
+            CheckMenuItem(lm, id, MF_CHECKED);
+    }
+    DrawMenuBar(hwnd);
 }
 
 static void UpdateToggleMenus(void) {

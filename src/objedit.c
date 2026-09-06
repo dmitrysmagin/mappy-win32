@@ -74,6 +74,29 @@ static const char * OE_Kind(const F14Obj * o) {
     return " (tile)";
 }
 
+/* objlayeruser 1..7 = that user field holds the object's layer; 0 = no filter */
+static int OE_LayerUserIndex(void) {
+    if (objlayeruser >= 1 && objlayeruser <= 7) return objlayeruser - 1;
+    return -1;
+}
+
+static int OE_OnCurLayer(const F14Obj * o) {
+    const int * u;
+    int idx = OE_LayerUserIndex();
+    if (o == NULL) return 0;
+    if (idx < 0) return 1;
+    u = &o->user1;
+    return u[idx] == maplayer;
+}
+
+static void OE_SetObjLayer(F14Obj * o, int ly) {
+    int * u;
+    int idx = OE_LayerUserIndex();
+    if (o == NULL || idx < 0) return;
+    u = &o->user1;
+    u[idx] = ly;
+}
+
 void OE_Describe(int i, char * buf, int n) {
     const F14Obj * o = F14_GetObject(i);
     if (buf == NULL || n < 1) return;
@@ -102,6 +125,7 @@ int OE_CloneAt(int mx, int my, int snap) {
     o.xpos = mx;
     o.ypos = my;
     o.show = 1;
+    OE_SetObjLayer(&o, maplayer);
     F14_SetObject(ni, &o);
     F14_SetCurObject(ni);
     mapaltered = 1;
@@ -119,6 +143,7 @@ int OE_NewDefault(void) {
     o.gheight = blockheight > 0 ? blockheight : 16;
     o.xpos = (xmapoffset + 2) * (blockwidth > 0 ? blockwidth : 16);
     o.ypos = (ymapoffset + 2) * (blockheight > 0 ? blockheight : 16);
+    OE_SetObjLayer(&o, maplayer);
     F14_SetObject(ni, &o);
     F14_SetCurObject(ni);
     mapaltered = 1;
@@ -374,7 +399,7 @@ void OE_DrawObjects(HDC hdc, RECT * client) {
             char txt[32];
             i = OE_SortIdx[order];
             o = F14_GetObject(i);
-            if (o == NULL || !o->show) continue;
+            if (o == NULL || !o->show || !OE_OnCurLayer(o)) continue;
             OE_Rect(o, &mx, &my, &mw, &mh);
             if (mw <= 0) mw = 8;
             if (mh <= 0) mh = 8; /* labels (0x0) stay pickable */
@@ -464,7 +489,7 @@ int OE_PickObject(int mx, int my) {
     for (order = n - 1; order >= 0; order--) {
         const F14Obj * o = F14_GetObject(order);
         int ox, oy, ow, oh;
-        if (o == NULL || !o->show) continue;
+        if (o == NULL || !o->show || !OE_OnCurLayer(o)) continue;
         OE_Rect(o, &ox, &oy, &ow, &oh);
         if (ow <= 0) ow = 8;
         if (oh <= 0) oh = 8;
@@ -472,7 +497,7 @@ int OE_PickObject(int mx, int my) {
             for (i = 0; i < n; i++) {
                 const F14Obj * q = F14_GetObject(i);
                 int qx, qy, qw, qh;
-                if (q == NULL) continue;
+                if (q == NULL || !OE_OnCurLayer(q)) continue;
                 OE_Rect(q, &qx, &qy, &qw, &qh);
                 if (qw <= 0) qw = 8;
                 if (qh <= 0) qh = 8;
@@ -513,16 +538,11 @@ int OE_ObjOverlayText(int tx, int ty, char * buf, int nbuf) {
     for (i = n - 1; i >= 0; i--) {
         const F14Obj * o = F14_GetObject(i);
         int ox, oy, ow, oh, uf, val;
-        if (o == NULL || !o->show) continue;
+        if (o == NULL || !o->show || !OE_OnCurLayer(o)) continue;
         OE_Rect(o, &ox, &oy, &ow, &oh);
         if (ow <= 0) ow = 8;
         if (oh <= 0) oh = 8;
         if (px < ox || py < oy || px >= ox + ow || py >= oy + oh) continue;
-        /* object layer filter: layer lives in user field objlayeruser */
-        if (objlayeruser >= 1 && objlayeruser <= 7) {
-            const int * u = &o->user1;
-            if (u[objlayeruser - 1] != maplayer) continue;
-        }
         uf = showuser;
         if (uf < 1 || uf > 8) return 0;
         if (uf <= 7) {
@@ -1331,6 +1351,7 @@ INT_PTR CALLBACK DIAObjectMgrProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM 
                 o.show = 1;
                 o.tileid = -1; /* area only by default */
                 o.gwidth = blockwidth; o.gheight = blockheight;
+                OE_SetObjLayer(&o, maplayer);
                 F14_SetObject(ni, &o);
                 F14_SetCurObject(ni);
                 mapaltered = 1;
@@ -1357,6 +1378,7 @@ INT_PTR CALLBACK DIAObjectMgrProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM 
                 MessageBox(hwndDlg, "Can't paste object (max reached).", "Objects", MB_OK|MB_ICONINFORMATION);
             } else {
                 objclip.xpos += 16; objclip.ypos += 16;
+                OE_SetObjLayer(&objclip, maplayer);
                 F14_SetObject(ni, &objclip);
                 F14_SetCurObject(ni);
                 mapaltered = 1;
