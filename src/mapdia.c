@@ -71,6 +71,7 @@ extern int csvadjust, csvusebg;
 extern int divideron, dividergapx, dividergapy;
 extern long dividercol;
 extern short int maplayer;
+extern short int xmapoffset, ymapoffset;
 extern char blocklabels[16][64];
 extern int rotatedtiles, flippedtiles, isopillars;
 extern char textexportopts[64];
@@ -1339,6 +1340,13 @@ INT_PTR CALLBACK DIAEditInfoProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM l
         totalmapmem += k;
         sprintf(mytext, "Brushes: Amount=%d, (%d)", i, k);
         SetWindowText(GetDlgItem(hwndDlg, IDC_INFOBRSH), mytext);
+        {
+            int tsb = TS_MemBytes();
+            sprintf(mytext, "Tilesets: %d defs, %d instances, (%d)",
+                TS_NumDefs(), TS_NumInst(), tsb);
+            SetWindowText(GetDlgItem(hwndDlg, IDC_INFOTSET), mytext);
+            totalmapmem += tsb;
+        }
         sprintf(mytext, "Graphics: Amount=%d, Form=%dx%dx%d, (%d)", numblockgfx,
             blockwidth, blockheight, blockdepth, numblockgfx*blockwidth*blockheight*((blockdepth+1)/8));
         SetWindowText(GetDlgItem(hwndDlg, IDC_INFOBGFX), mytext);
@@ -4055,6 +4063,304 @@ void DIATilesetEdit(HWND hwnd, int idx)
         MessageBox(hwnd, "Drag a rectangle on the map to copy tiles into this tileset.",
             "Grab tileset", MB_OK | MB_ICONINFORMATION);
     }
+}
+
+/* ---------------- D_TSINST / D_TSIMGR ---------------- */
+
+static TilesetInst tsiclip;
+static int tsicliphas = 0;
+
+static void TS_GotoInst(int i)
+{
+    const TilesetInst *in = TS_GetInst(i);
+    if (in == NULL || mapwidth < 1 || mapheight < 1)
+        return;
+    xmapoffset = (short int)in->tx;
+    ymapoffset = (short int)in->ty;
+    if (xmapoffset < 0) xmapoffset = 0;
+    if (ymapoffset < 0) ymapoffset = 0;
+    if (xmapoffset > mapwidth - 1) xmapoffset = mapwidth - 1;
+    if (ymapoffset > mapheight - 1) ymapoffset = mapheight - 1;
+    MESetScrollRange(mapwidth - 1, mapheight - 1, xmapoffset, ymapoffset);
+    InvalidateAll();
+}
+
+int DIATilesetExplode(HWND hwnd, int i)
+{
+    const TilesetInst *in = TS_GetInst(i);
+    short int *ly;
+
+    if (mappt == NULL) {
+        MessageBox(hwnd, "Load or create a map first.", "Tileset",
+            MB_OK | MB_ICONINFORMATION);
+        return -1;
+    }
+    if (in == NULL) {
+        MessageBox(hwnd, "No tileset instance selected.", "Tileset",
+            MB_OK | MB_ICONINFORMATION);
+        return -1;
+    }
+    ly = GetLayerpt(in->layer);
+    if (ly == NULL) ly = mappt;
+    MECopyToUndo();
+    if (TS_ExplodeInst(i, ly, mapwidth, mapheight) != 0) {
+        MessageBox(hwnd, "Can't explode this instance.", "Tileset",
+            MB_OK | MB_ICONINFORMATION);
+        return -1;
+    }
+    mapaltered = 1;
+    InvalidateAll();
+    return 0;
+}
+
+static void TS_InstFill(HWND hwndDlg, int idx)
+{
+    const TilesetInst *in = TS_GetInst(idx);
+    const TilesetDef *d;
+    char txt[128];
+
+    if (in == NULL)
+        return;
+    d = TS_GetDef(in->tset);
+    if (d != NULL && d->name[0])
+        SetWindowText(GetDlgItem(hwndDlg, IDC_TSINAME), d->name);
+    else {
+        sprintf(txt, "Tileset %d", in->tset);
+        SetWindowText(GetDlgItem(hwndDlg, IDC_TSINAME), txt);
+    }
+    sprintf(txt, "%d", in->layer);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSILAYER), txt);
+    sprintf(txt, "%d", in->tx);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSITX), txt);
+    sprintf(txt, "%d", in->ty);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSITY), txt);
+    CheckDlgButton(hwndDlg, IDC_TSISHOW, in->show ? BST_CHECKED : BST_UNCHECKED);
+}
+
+static int TS_InstApply(HWND hwndDlg, int idx)
+{
+    const TilesetInst *cur = TS_GetInst(idx);
+    TilesetInst inst;
+    char tb[80];
+
+    if (cur == NULL)
+        return -1;
+    inst = *cur;
+    GetWindowText(GetDlgItem(hwndDlg, IDC_TSILAYER), tb, 80);
+    inst.layer = atoi(tb);
+    if (inst.layer < 0) inst.layer = 0;
+    if (inst.layer > 99) inst.layer = 99;
+    GetWindowText(GetDlgItem(hwndDlg, IDC_TSITX), tb, 80);
+    inst.tx = atoi(tb);
+    GetWindowText(GetDlgItem(hwndDlg, IDC_TSITY), tb, 80);
+    inst.ty = atoi(tb);
+    inst.show = IsDlgButtonChecked(hwndDlg, IDC_TSISHOW) == BST_CHECKED;
+    if (inst.layer != cur->layer || inst.tx != cur->tx || inst.ty != cur->ty ||
+        inst.show != cur->show) {
+        MECopyToUndo();
+        TS_SetInst(idx, &inst);
+        mapaltered = 1;
+    }
+    return 0;
+}
+
+INT_PTR CALLBACK DIATilesetInstProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    int idx = (int)(INT_PTR)GetWindowLongPtr(hwndDlg, DWLP_USER);
+
+    switch (msg) {
+    case WM_INITDIALOG:
+        SetWindowLongPtr(hwndDlg, DWLP_USER, (LONG_PTR)lParam);
+        idx = (int)lParam;
+        TS_InstFill(hwndDlg, idx);
+        break;
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDC_TSIEXPLODE:
+            idx = (int)(INT_PTR)GetWindowLongPtr(hwndDlg, DWLP_USER);
+            if (DIATilesetExplode(hwndDlg, idx) == 0)
+                EndDialog(hwndDlg, 1);
+            break;
+        case IDOK:
+            idx = (int)(INT_PTR)GetWindowLongPtr(hwndDlg, DWLP_USER);
+            TS_InstApply(hwndDlg, idx);
+            EndDialog(hwndDlg, 0);
+            break;
+        case IDCANCEL:
+            EndDialog(hwndDlg, -1);
+            break;
+        }
+        break;
+    default:
+        return 0;
+    }
+    return -1;
+}
+
+void DIATilesetInstEdit(HWND hwnd, int idx)
+{
+    if (mappt == NULL) {
+        MessageBox(hwnd, "Load or create a map first.", "Tileset",
+            MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (TS_GetInst(idx) == NULL)
+        return;
+    TS_SetCurInst(idx);
+    DialogBoxParam(hInstance, (LPCSTR)"D_TSINST", hwnd,
+        AsDlgProc(DIATilesetInstProc), (LPARAM)idx);
+    InvalidateAll();
+}
+
+static void TS_MgrRefresh(HWND hwndDlg)
+{
+    int i, n;
+    char txt[160];
+
+    n = TS_NumInst();
+    SendDlgItemMessage(hwndDlg, IDC_TSILIST, LB_RESETCONTENT, 0, 0);
+    for (i = 0; i < n; i++) {
+        const TilesetInst *in = TS_GetInst(i);
+        const TilesetDef *d = (in != NULL) ? TS_GetDef(in->tset) : NULL;
+        const char *nm = (d != NULL && d->name[0]) ? d->name : "Tileset";
+        if (in == NULL)
+            sprintf(txt, "%d", i);
+        else
+            sprintf(txt, "%d: %s @ %d,%d L%d%s", i, nm, in->tx, in->ty,
+                in->layer, in->show ? "" : " [hidden]");
+        SendDlgItemMessage(hwndDlg, IDC_TSILIST, LB_ADDSTRING, 0, (LPARAM)txt);
+    }
+    if (n > 0)
+        SendDlgItemMessage(hwndDlg, IDC_TSILIST, LB_SETCURSEL, TS_CurInst(), 0);
+    sprintf(txt, "Tileset instances (%d/%d)", n ? TS_CurInst() + 1 : 0, n);
+    SetWindowText(hwndDlg, txt);
+}
+
+INT_PTR CALLBACK DIATilesetInstMgrProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    int sel, ni;
+
+    UNUSED(lParam);
+    switch (msg) {
+    case WM_INITDIALOG:
+        TS_MgrRefresh(hwndDlg);
+        break;
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDC_TSILIST:
+            if (HIWORD(wParam) == LBN_SELCHANGE) {
+                sel = (int)SendDlgItemMessage(hwndDlg, IDC_TSILIST, LB_GETCURSEL, 0, 0);
+                if (sel >= 0) {
+                    TS_SetCurInst(sel);
+                    TS_GotoInst(sel);
+                }
+                TS_MgrRefresh(hwndDlg);
+            } else if (HIWORD(wParam) == LBN_DBLCLK) {
+                sel = (int)SendDlgItemMessage(hwndDlg, IDC_TSILIST, LB_GETCURSEL, 0, 0);
+                if (sel >= 0) {
+                    TS_SetCurInst(sel);
+                    DIATilesetInstEdit(hwndDlg, sel);
+                    TS_MgrRefresh(hwndDlg);
+                }
+            }
+            break;
+        case IDC_TSINEW:
+            if (TS_GetDef(TS_CurDef()) == NULL) {
+                MessageBox(hwndDlg, "Create or select a tileset definition first.",
+                    "Tileset", MB_OK | MB_ICONINFORMATION);
+                break;
+            }
+            MECopyToUndo();
+            ni = TS_PlaceNew(TS_CurDef(), maplayer, xmapoffset, ymapoffset);
+            if (ni < 0) {
+                MessageBox(hwndDlg, "Can't create instance (max reached).",
+                    "Tileset", MB_OK | MB_ICONINFORMATION);
+            } else {
+                mapaltered = 1;
+                TS_GotoInst(ni);
+            }
+            TS_MgrRefresh(hwndDlg);
+            break;
+        case IDC_TSICUT:
+        case IDC_TSICOPY:
+            sel = TS_CurInst();
+            if (TS_GetInst(sel) != NULL) {
+                tsiclip = *TS_GetInst(sel);
+                tsicliphas = 1;
+                if (LOWORD(wParam) == IDC_TSICUT) {
+                    MECopyToUndo();
+                    TS_DeleteInst(sel);
+                    mapaltered = 1;
+                    InvalidateAll();
+                }
+            }
+            TS_MgrRefresh(hwndDlg);
+            break;
+        case IDC_TSIPASTE:
+            if (!tsicliphas) break;
+            MECopyToUndo();
+            ni = TS_NewInst();
+            if (ni < 0) {
+                MessageBox(hwndDlg, "Can't paste instance (max reached).",
+                    "Tileset", MB_OK | MB_ICONINFORMATION);
+            } else {
+                tsiclip.tx += 1;
+                tsiclip.ty += 1;
+                TS_SetInst(ni, &tsiclip);
+                TS_SetCurInst(ni);
+                mapaltered = 1;
+                TS_GotoInst(ni);
+            }
+            TS_MgrRefresh(hwndDlg);
+            break;
+        case IDC_TSIEDIT:
+            sel = TS_CurInst();
+            if (TS_GetInst(sel) != NULL)
+                DIATilesetInstEdit(hwndDlg, sel);
+            TS_MgrRefresh(hwndDlg);
+            break;
+        case IDC_TSIDEL:
+            sel = TS_CurInst();
+            if (TS_GetInst(sel) != NULL &&
+                MessageBox(hwndDlg, "Delete this instance?", "Tileset",
+                MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
+                MECopyToUndo();
+                TS_DeleteInst(sel);
+                mapaltered = 1;
+                InvalidateAll();
+            }
+            TS_MgrRefresh(hwndDlg);
+            break;
+        case IDC_TSIEXPLODE:
+            sel = TS_CurInst();
+            if (TS_GetInst(sel) != NULL &&
+                MessageBox(hwndDlg, "Bake this instance into the layer and remove the overlay?",
+                    "Explode tileset", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
+                DIATilesetExplode(hwndDlg, sel);
+            }
+            TS_MgrRefresh(hwndDlg);
+            break;
+        case IDOK:
+        case IDCANCEL:
+            EndDialog(hwndDlg, 0);
+            break;
+        }
+        break;
+    default:
+        return 0;
+    }
+    return -1;
+}
+
+void DIATilesetInstMgr(HWND hwnd)
+{
+    if (mappt == NULL) {
+        MessageBox(hwnd, "Load or create a map first.", "Tileset",
+            MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    DialogBox(hInstance, (LPCSTR)"D_TSIMGR", hwnd, AsDlgProc(DIATilesetInstMgrProc));
+    InvalidateAll();
 }
 
 

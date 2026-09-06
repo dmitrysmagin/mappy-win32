@@ -275,7 +275,7 @@ A definition is not a placement. Instances live in `TSIN`.
 
 ### `TSIN` — tileset instances (this editor)
 
-Placements of a `TSDF` definition on a layer, in **tile** coordinates. Overlay: not baked into `BODY` unless the editor later explodes them.
+Placements of a `TSDF` definition on a layer, in **tile** coordinates. Overlay: not baked into `BODY` unless the editor explodes them (Tilesets → Explode selected).
 
 ```
 off  type   field

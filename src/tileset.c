@@ -40,6 +40,14 @@ static struct {
 	TilesetInst inst[TS_MAXINST];
 } tsin;
 
+static struct {
+	int have;
+	int present;
+	int num;
+	int cur;
+	TilesetInst inst[TS_MAXINST];
+} ts_undo;
+
 static void ts_free_def_tiles(void)
 {
 	int i;
@@ -54,6 +62,7 @@ void TS_FreeAll(void)
 	ts_free_def_tiles();
 	memset(&tsdf, 0, sizeof(tsdf));
 	memset(&tsin, 0, sizeof(tsin));
+	memset(&ts_undo, 0, sizeof(ts_undo));
 }
 
 static short ts_disk_to_mem(short v, int maptype, int blockstrsize)
@@ -636,6 +645,86 @@ int TS_FindInstOfDef(int def, int layer)
 		return i;
 	}
 	return -1;
+}
+
+void TS_CopyToUndo(void)
+{
+	ts_undo.have = 1;
+	ts_undo.present = tsin.present;
+	ts_undo.num = tsin.num;
+	ts_undo.cur = tsin.cur;
+	memcpy(ts_undo.inst, tsin.inst, sizeof(ts_undo.inst));
+}
+
+void TS_Undo(void)
+{
+	int present, num, cur;
+	TilesetInst tmp[TS_MAXINST];
+
+	if (!ts_undo.have)
+		return;
+	present = tsin.present;
+	num = tsin.num;
+	cur = tsin.cur;
+	memcpy(tmp, tsin.inst, sizeof(tmp));
+	tsin.present = ts_undo.present;
+	tsin.num = ts_undo.num;
+	tsin.cur = ts_undo.cur;
+	memcpy(tsin.inst, ts_undo.inst, sizeof(tsin.inst));
+	ts_undo.present = present;
+	ts_undo.num = num;
+	ts_undo.cur = cur;
+	memcpy(ts_undo.inst, tmp, sizeof(ts_undo.inst));
+}
+
+void TS_DestroyUndo(void)
+{
+	memset(&ts_undo, 0, sizeof(ts_undo));
+}
+
+int TS_MemBytes(void)
+{
+	int i, n;
+
+	n = TS_TSIN_HDR_SIZE + TS_NumInst() * TS_INST_DISK_SIZE;
+	for (i = 0; i < TS_NumDefs(); i++) {
+		const TilesetDef *d = TS_GetDef(i);
+		if (d == NULL)
+			continue;
+		n += 8 + TS_NAMELEN + d->width * d->height * (int)sizeof(short);
+	}
+	return n;
+}
+
+int TS_ExplodeInst(int i, short *layer, int mapw, int maph)
+{
+	const TilesetInst *in;
+	const TilesetDef *d;
+	int ox, oy, w, h, x, y;
+
+	if (layer == NULL || mapw < 1 || maph < 1)
+		return -1;
+	in = TS_GetInst(i);
+	if (in == NULL)
+		return -1;
+	d = TS_GetDef(in->tset);
+	if (d == NULL || d->tiles == NULL)
+		return -1;
+	if (TS_InstBounds(i, &ox, &oy, &w, &h) != 0)
+		return -1;
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++) {
+			short cell = d->tiles[y * w + x];
+			int mx = ox + x, my = oy + y;
+			if (cell == 0)
+				continue;
+			if (mx < 0 || my < 0 || mx >= mapw || my >= maph)
+				continue;
+			layer[my * mapw + mx] = cell;
+		}
+	}
+	TS_DeleteInst(i);
+	return 0;
 }
 
 static int ts_read_chunk(FILE *f, unsigned char **out, int *bodysize)

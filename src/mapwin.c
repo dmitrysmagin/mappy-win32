@@ -11,6 +11,7 @@
 #include "compat.h"
 #include "dpi.h"
 #include "fmp14.h"
+#include "tileset.h"
 #include "luabind.h"
 
 HINSTANCE hInstance;
@@ -589,6 +590,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 if (objshow) CheckMenuItem(hMenu, CM_OBJSHOW, MF_CHECKED);
                 else CheckMenuItem(hMenu, CM_OBJSHOW, MF_UNCHECKED);
                 InvalidateAll();
+                break;
+            case CM_TSMGR:
+                DIATilesetInstMgr(hwnd);
+                InvalidateAll();
+                break;
+            case CM_TSEXPLODE:
+                DIATilesetExplode(hwnd, TS_CurInst());
                 break;
             case CM_TSPLACE:
                 tsplace = 1-tsplace;

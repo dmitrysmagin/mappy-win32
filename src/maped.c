@@ -91,6 +91,7 @@ static int pathmode = 0;		/* 1=lay-path active */
 static int pathcx, pathcy;		/* path cursor (map coords) */
 static int tsdrag = 0;
 static int tsgrabdx, tsgrabdy;
+static int ts_undo_on_move = 0;
 
 extern HINSTANCE hInstance;
 extern short int blockwidth, blockheight, blockdepth, gridon, zoomon, curbrsh;
@@ -147,6 +148,7 @@ void MESetScrollRange(int xrng, int yrng, int xpos, int ypos) {
 void MEDestroyUndoBuffs(void) {
     if (undobuff1!=NULL) { free(undobuff1); undobuff1 = NULL; }
     if (undobuff2!=NULL) { free(undobuff2); undobuff2 = NULL; }
+    TS_DestroyUndo();
 }
 
 void MEUndo(void) {
@@ -154,6 +156,7 @@ void MEUndo(void) {
     memcpy(undobuff2, mappt, mapwidth*mapheight*2);
     memcpy(mappt, undobuff1, mapwidth*mapheight*2);
     memcpy(undobuff1, undobuff2, mapwidth*mapheight*2);
+    TS_Undo();
 }
 
 void MECopyToUndo(void) {
@@ -169,6 +172,7 @@ void MECopyToUndo(void) {
         memset(undobuff2, 0, mapwidth*mapheight*2);
     }
     memcpy(undobuff1, mappt, mapwidth*mapheight*2);
+    TS_CopyToUndo();
 }
 
 static void MEEnsureUndoBuf(void) {
@@ -2538,10 +2542,17 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                     "Tileset", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
-            if (MEPlaceTilesetAt(xblk, yblk, GetKeyState(VK_CONTROL) < 0) >= 0) {
-                tsdrag = 1;
-                SetCapture(hwnd);
-                InvalidateRgn(mhwnd, NULL, FALSE);
+            {
+                int hit = TS_HitInst(xblk, yblk, maplayer);
+                int creating = (GetKeyState(VK_CONTROL) < 0) || hit < 0;
+                if (creating)
+                    MECopyToUndo();
+                ts_undo_on_move = !creating;
+                if (MEPlaceTilesetAt(xblk, yblk, GetKeyState(VK_CONTROL) < 0) >= 0) {
+                    tsdrag = 1;
+                    SetCapture(hwnd);
+                    InvalidateRgn(mhwnd, NULL, FALSE);
+                }
             }
             return 0;
         }
@@ -2627,6 +2638,10 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
             yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
             if (meoldbx != xblk || meoldby != yblk) {
+                if (ts_undo_on_move) {
+                    MECopyToUndo();
+                    ts_undo_on_move = 0;
+                }
                 MEMoveCurTileset(xblk, yblk);
                 meoldbx = xblk;
                 meoldby = yblk;
@@ -2716,6 +2731,7 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
             i = TS_HitInst(xblk, yblk, maplayer);
             if (i >= 0) {
+                MECopyToUndo();
                 TS_DeleteInst(i);
                 mapaltered = 1;
                 InvalidateRgn(mhwnd, NULL, FALSE);
@@ -2907,6 +2923,7 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         case VK_DELETE:
         case VK_BACK:
             if (tsplace && TS_GetInst(TS_CurInst()) != NULL) {
+                MECopyToUndo();
                 TS_DeleteInst(TS_CurInst());
                 mapaltered = 1;
                 InvalidateRgn(mhwnd, NULL, FALSE);
