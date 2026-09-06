@@ -667,10 +667,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 else CheckMenuItem(hMenu, CM_TSSHOW, MF_UNCHECKED);
                 InvalidateAll();
                 break;
-            case CM_GRAPHEDIT:
-                DIAGraphEdit(hwnd);
-                InvalidateAll();
-                break;
             case CM_SHOWUSER:
                 DIAShowUser(hwnd);
                 InvalidateAll();

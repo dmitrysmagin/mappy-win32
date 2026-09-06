@@ -148,7 +148,6 @@ void DIATilesetInstMgr (HWND);
 void DIATilesetInstEdit (HWND, int);
 int DIATilesetExplode (HWND, int);
 void DIAObjFname (HWND);
-void DIAGraphEdit (HWND);
 void OE_DrawObjects (HDC, RECT *);
 int OE_PickObject (int, int);
 void OE_PlaceSelected (int, int, int);
