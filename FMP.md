@@ -16,7 +16,7 @@ offset  size  field
 
 The FORM size is patched after the rest of the file is written.
 
-There is **no** leading pad between chunks. Some writers pad an individual chunk body to an even number of bytes; the size field includes that pad.
+There is **no** leading pad between chunks. Some writers pad an individual chunk body to an even number of bytes; the size field includes that pad. The pad is based on the payload length, not the file offset: an odd-sized `OBFN` can start the next chunk at an odd offset. Older saves of this editor reserved the pad in the size but omitted the byte (ftell was already even); the loader backs up one byte when the next chunk ID is not printable ASCII.
 
 ### Chunk header (always big-endian)
 

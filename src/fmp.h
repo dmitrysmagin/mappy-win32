@@ -91,4 +91,14 @@ static inline int fmp_write_be32(FILE *f, uint32_t v) {
     return (fwrite(buf, 1, 4, f) == 4) ? 0 : -1;
 }
 
+/* Pad a chunk body to even length. Use payload byte count, not ftell:
+ * an earlier odd-sized chunk can leave the file offset odd, in which case
+ * ftell-based padding skips the byte the size field already reserved. */
+static inline int fmp_write_odd_pad(FILE *f, uint32_t payload) {
+    unsigned char z = 0;
+    if (payload & 1)
+        return (fwrite(&z, 1, 1, f) == 1) ? 0 : -1;
+    return 0;
+}
+
 #endif /* FMP_H */

@@ -93,15 +93,9 @@ static short ts_mem_to_disk(short v, int maptype, int blockstrsize)
 	return v;
 }
 
-static int ts_write_pad_even(FILE *f)
+static int ts_write_pad_even(FILE *f, uint32_t payload)
 {
-	long p = ftell(f);
-	unsigned char z = 0;
-	if (p < 0)
-		return -1;
-	if (p & 1)
-		return (fwrite(&z, 1, 1, f) == 1) ? 0 : -1;
-	return 0;
+	return fmp_write_odd_pad(f, payload);
 }
 
 static int ts_alloc_tiles(TilesetDef *d, int w, int h)
@@ -244,9 +238,7 @@ int TS_SaveTSDF(FILE *f, int is_lsb, int maptype, int blockstrsize)
 		int n = tsdf.defs[i].width * tsdf.defs[i].height;
 		body += (uint32_t)(8 + TS_NAMELEN + n * 2);
 	}
-	if (body & 1)
-		body++;
-	if (fmp_write_chunk_header(f, 'T', 'S', 'D', 'F', body) != 0)
+	if (fmp_write_chunk_header(f, 'T', 'S', 'D', 'F', body + (body & 1)) != 0)
 		return -1;
 	memset(hdr, 0, sizeof(hdr));
 	fmp_put_i32(hdr + 0, TS_TSDF_HDR_SIZE, is_lsb);
@@ -274,7 +266,7 @@ int TS_SaveTSDF(FILE *f, int is_lsb, int maptype, int blockstrsize)
 				return -1;
 		}
 	}
-	return ts_write_pad_even(f);
+	return ts_write_pad_even(f, body);
 }
 
 int TS_SaveTSIN(FILE *f, int is_lsb)

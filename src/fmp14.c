@@ -15,7 +15,9 @@
  *
  * TSTR (sub_425780 @00425780 load, fwrite @0042866C save):
  *   +0 u32 offset to strings (16), +4 u32 count, +8/+12 u32 spare,
- *   strings at body+offset, then a pad byte if ftell is odd.
+ *   strings at body+offset, then a pad byte if the payload length is odd
+ *   (size includes that pad). Do not pad from ftell — an odd OBFN can
+ *   start TSTR at an odd file offset.
  *   (ATHR is the 4 packed author strings; that is sub_4256B0.)
  *
  * LSTR (sub_4258B0 @004258B0 load, fwrite @004287F0 save):
@@ -168,12 +170,8 @@ static struct {
     char s[F14_MAXTSTRCOUNT][F14_MAXTEXTSTR];
 } tstr;
 
-static int f14_write_pad_even(FILE *f) {
-    long p = ftell(f);
-    unsigned char z = 0;
-    if (p < 0) return -1;
-    if (p & 1) return (fwrite(&z, 1, 1, f) == 1) ? 0 : -1;
-    return 0;
+static int f14_write_pad_even(FILE *f, uint32_t payload) {
+    return fmp_write_odd_pad(f, payload);
 }
 
 static void f14_read_packed_strings(const unsigned char *chunk, int bodysize, int pos) {
@@ -238,7 +236,7 @@ int F14_SaveTSTR(FILE *f, int is_lsb) {
     for (i = 0; i < tstr.count; i++)
         if (fwrite(tstr.s[i], 1, strlen(tstr.s[i]) + 1, f) != strlen(tstr.s[i]) + 1)
             return -1;
-    return f14_write_pad_even(f);
+    return f14_write_pad_even(f, (uint32_t)(16 + strbytes));
 }
 
 int F14_TstrCount(void) { return tstr.present ? tstr.count : 0; }
@@ -330,7 +328,7 @@ int F14_SaveLSTR(FILE *f, int is_lsb) {
     for (i = 0; i < lstr.count; i++)
         if (fwrite(lstr.names[i], 1, strlen(lstr.names[i]) + 1, f) != strlen(lstr.names[i]) + 1)
             return -1;
-    return f14_write_pad_even(f);
+    return f14_write_pad_even(f, (uint32_t)(8 + total));
 }
 
 int F14_NlyrInfo(const unsigned char *chunk, int bodysize, int is_lsb, int *layer, int *dataoff) {
@@ -396,8 +394,9 @@ int F14_DecodeOBFN(const unsigned char *chunk, int bodysize) {
     int pos = 8, n = 0;
     memset(obs.images, 0, sizeof(obs.images));
     obs.numimg = 0;
-    while (pos < 8 + bodysize - 1 && n < F14_MAXIMAGES) {
+    while (pos < 8 + bodysize && n < F14_MAXIMAGES) {
         int start = pos, len = 0;
+        if (chunk[pos] == 0) { pos++; break; } /* trailing even-size pad */
         while (pos < 8 + bodysize && chunk[pos] != 0) { pos++; len++; }
         if (len >= F14_MAXIMGNAMELEN) len = F14_MAXIMGNAMELEN - 1;
         memcpy(obs.images[n], chunk + start, (size_t)len);
@@ -448,14 +447,17 @@ int F14_HasOBFN(void) { return obs.numimg > 0; }
 int F14_SaveOBFN(FILE *f) {
     int i;
     size_t total = 0;
+    uint32_t body;
     if (!F14_HasOBFN()) return 0;
     for (i = 0; i < obs.numimg; i++) total += strlen(obs.images[i]) + 1;
-    if (fmp_write_chunk_header(f, 'O', 'B', 'F', 'N', (uint32_t)total) != 0)
+    body = (uint32_t)total;
+    if (body & 1) body++;
+    if (fmp_write_chunk_header(f, 'O', 'B', 'F', 'N', body) != 0)
         return -1;
     for (i = 0; i < obs.numimg; i++)
         if (fwrite(obs.images[i], 1, strlen(obs.images[i]) + 1, f) != strlen(obs.images[i]) + 1)
             return -1;
-    return 0;
+    return fmp_write_odd_pad(f, (uint32_t)total);
 }
 
 int F14_SaveOBDT(FILE *f, int is_lsb) {

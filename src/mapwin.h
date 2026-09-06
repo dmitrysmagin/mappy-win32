@@ -3,7 +3,7 @@
 /* mapfunc.c prototypes */
 void FreeAll (void);
 int CreateNewMap (int, int, int, int, int, int, int, int, int, int);
-void LoadProject (void);
+int LoadProject (void);
 int SaveProject (void);
 int SaveProjectEx (int skipgfx);
 void RemoveMarkerGraphics (void);

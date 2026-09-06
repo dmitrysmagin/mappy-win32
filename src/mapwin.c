@@ -307,7 +307,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             case 99:
                 if (argvline[0]!=0) {
                     strcpy(mapfilename, argvline);
-                    LoadProject(); Rejig();
+                    if (LoadProject()) mapfilename[0] = 0;
+                    Rejig();
                     argvline[0]=0;
                     /* Run deferred Lua script after map is loaded */
                     if (argluascript[0]) {
@@ -385,7 +386,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                             MessageBox(hwnd, "Error loading map", "Map Editor", MB_OK | MB_ICONEXCLAMATION);
                             mapfilename[0] = 0;
                         }
-                    } else LoadProject();
+                    } else if (LoadProject()) {
+                        MessageBox(hwnd, "Error loading map", "Map Editor", MB_OK | MB_ICONEXCLAMATION);
+                        mapfilename[0] = 0;
+                    }
                     Rejig();
                 }
                 break;
@@ -1287,7 +1291,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 InvalidateAll();
                 break;
             } else {
-                LoadProject();
+                if (LoadProject()) {
+                    MessageBox(hwnd, "Error loading map", "Map Editor", MB_OK | MB_ICONEXCLAMATION);
+                    mapfilename[0] = 0;
+                }
             }
             Rejig();
             mapaltered = 0;

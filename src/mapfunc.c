@@ -552,6 +552,16 @@ static int chunk_is(const unsigned char * p, const char * id, size_t n) {
     return memcmp(p, id, n) == 0;
 }
 
+/* FMP chunk IDs are 4 printable ASCII bytes (ATHR, LYR1, LY10, ...). */
+static int chunk_id_ok(const unsigned char * p) {
+    int i;
+    for (i = 0; i < 4; i++) {
+        if (p[i] < 33 || p[i] > 126)
+            return 0;
+    }
+    return 1;
+}
+
 void MapPutshort(unsigned char * locpt, int shrt) {
     if (mapislsb) {
         locpt[0] = (unsigned char) ((shrt)&0xFF);
@@ -1161,6 +1171,7 @@ int FindFreeBrush(void) {
 
 int MapDecode(FILE * mfpt, int mpfilesize) {
     int chkdn;
+    int did_resync;
     unsigned char * fmappospt;
     char mphdr[8];
     char * held_gfx = NULL;
@@ -1175,6 +1186,7 @@ int MapDecode(FILE * mfpt, int mpfilesize) {
     FreeAll();
     logit("After FreeAll\n");
     mpfilesize -= 12;
+    did_resync = 0;
     while (mpfilesize > 0) {
 
         if (fread(mphdr, 1, 8, mfpt) != 8) {
@@ -1185,6 +1197,19 @@ int MapDecode(FILE * mfpt, int mpfilesize) {
         }
         {
             int chksz = MapGetchksz(mphdr+4);
+            int bad = !chunk_id_ok((const unsigned char *)mphdr)
+                || chksz < 0 || chksz > 64*1024*1024 || chksz > mpfilesize - 8;
+            /* Even-sized TSTR/LSTR/TSDF reserved a pad they did not write when
+             * the chunk started at an odd file offset (odd OBFN). The next ID's
+             * first byte was consumed as that pad. Back up one byte and retry. */
+            if (bad && !did_resync) {
+                if (fseek(mfpt, -9, SEEK_CUR) == 0) {
+                    mpfilesize += 1;
+                    did_resync = 1;
+                    continue;
+                }
+            }
+            did_resync = 0;
             if (chksz < 0 || chksz > 64*1024*1024) {
                 merror = ER_MAPLOADERROR;
                 if (held_gfx) free(held_gfx);
@@ -1209,16 +1234,18 @@ int MapDecode(FILE * mfpt, int mpfilesize) {
         }
 
         chkdn = 0;
+        /* Optional 1.4 / tileset chunks: keep the raw bytes and continue if
+         * decode fails so CMAP/BKDT/BODY still load. */
         if (chunk_is(fmappospt, "ATHR", 4)) { chkdn = 1; DecodeATHR(fmappospt); }
         if (chunk_is(fmappospt, "MPHD", 4)) { chkdn = 1; DecodeMPHD(fmappospt); }
         if (chunk_is(fmappospt, "EDHD", 4)) { chkdn = 1; DecodeEDHD(fmappospt); }
-        if (chunk_is(fmappospt, "EPHD", 4)) { chkdn = 1; if (F14_DecodeEPHD(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
-        if (chunk_is(fmappospt, "TSTR", 4)) { chkdn = 1; if (F14_DecodeTSTR(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
-        if (chunk_is(fmappospt, "LSTR", 4)) { chkdn = 1; if (F14_DecodeLSTR(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
-        if (chunk_is(fmappospt, "OBDT", 4)) { chkdn = 1; if (F14_DecodeOBDT(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
-        if (chunk_is(fmappospt, "OBFN", 4)) { chkdn = 1; if (F14_DecodeOBFN(fmappospt, MapGetchksz(fmappospt+4))) { merror = ER_MAPLOADERROR; } }
-        if (chunk_is(fmappospt, "TSDF", 4)) { chkdn = 1; if (TS_DecodeTSDF(fmappospt, MapGetchksz(fmappospt+4), mapislsb, maptype, blockstrsize)) { merror = ER_MAPLOADERROR; } }
-        if (chunk_is(fmappospt, "TSIN", 4)) { chkdn = 1; if (TS_DecodeTSIN(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) { merror = ER_MAPLOADERROR; } }
+        if (chunk_is(fmappospt, "EPHD", 4)) { chkdn = 1; if (F14_DecodeEPHD(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) DecodeNULL(fmappospt); }
+        if (chunk_is(fmappospt, "TSTR", 4)) { chkdn = 1; if (F14_DecodeTSTR(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) DecodeNULL(fmappospt); }
+        if (chunk_is(fmappospt, "LSTR", 4)) { chkdn = 1; if (F14_DecodeLSTR(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) DecodeNULL(fmappospt); }
+        if (chunk_is(fmappospt, "OBDT", 4)) { chkdn = 1; if (F14_DecodeOBDT(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) DecodeNULL(fmappospt); }
+        if (chunk_is(fmappospt, "OBFN", 4)) { chkdn = 1; if (F14_DecodeOBFN(fmappospt, MapGetchksz(fmappospt+4))) DecodeNULL(fmappospt); }
+        if (chunk_is(fmappospt, "TSDF", 4)) { chkdn = 1; if (TS_DecodeTSDF(fmappospt, MapGetchksz(fmappospt+4), mapislsb, maptype, blockstrsize)) DecodeNULL(fmappospt); }
+        if (chunk_is(fmappospt, "TSIN", 4)) { chkdn = 1; if (TS_DecodeTSIN(fmappospt, MapGetchksz(fmappospt+4), mapislsb)) DecodeNULL(fmappospt); }
         if (chunk_is(fmappospt, "NLYR", 4)) {
             int nlyr, nloff;
             chkdn = 1;
