@@ -41,7 +41,8 @@ extern HINSTANCE hInstance;
 extern short int blockwidth, blockheight, blockdepth, gridon, zoomon;
 extern int panelzoom;
 static int BEZoom(void) { return panelzoom ? zoomon : 1; }
-extern short int mapwidth, mapheight, xmapoffset, ymapoffset;
+extern short int mapwidth, mapheight, xmapoffset, ymapoffset, maplayer;
+extern int tsplace;
 extern short int numblockstr, curstr, numblockanim, curanim, curbrsh;
 extern char * blockgfxpt, * blockstrpt, * animstrpt;
 extern short int numblockgfx;
@@ -778,7 +779,28 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
                 if (clicked >= TS_NumDefs()) clicked = TS_NumDefs() - 1;
                 curtilesetsel = (short int)clicked;
                 TS_SetCurDef(clicked);
-                DIATilesetEdit(hwnd, clicked);
+                if (GetKeyState(VK_SHIFT) < 0) {
+                    int ii = TS_FindInstOfDef(clicked, maplayer);
+                    if (ii < 0) ii = TS_FindInstOfDef(clicked, -1);
+                    if (ii >= 0) {
+                        const TilesetInst *in = TS_GetInst(ii);
+                        TS_SetCurInst(ii);
+                        if (in != NULL && blockwidth > 0 && blockheight > 0) {
+                            xmapoffset = (short int)in->tx;
+                            ymapoffset = (short int)in->ty;
+                            if (xmapoffset < 0) xmapoffset = 0;
+                            if (ymapoffset < 0) ymapoffset = 0;
+                            if (xmapoffset > mapwidth - 1) xmapoffset = mapwidth - 1;
+                            if (ymapoffset > mapheight - 1) ymapoffset = mapheight - 1;
+                            MESetScrollRange(mapwidth - 1, mapheight - 1, xmapoffset, ymapoffset);
+                        }
+                    }
+                    BESetScrollRange();
+                    InvalidateAll();
+                    break;
+                }
+                if (!tsplace)
+                    DIATilesetEdit(hwnd, clicked);
                 BESetScrollRange();
                 InvalidateAll();
                 break;
@@ -845,7 +867,19 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         break;
     case WM_LBUTTONDBLCLK:
         if (blockstrpt == NULL) break;
-        if (betype == BETYPE_TILESETS) break;
+        if (betype == BETYPE_TILESETS) {
+            int rowh, clicked;
+            if (HIWORD(lParam) < BETabStripHeight()) break;
+            rowh = BETilesetRowH(hwnd);
+            clicked = beyoff + ((HIWORD(lParam) - BETabStripHeight()) / rowh);
+            if (clicked < 0 || clicked >= TS_NumDefs()) break;
+            curtilesetsel = (short int)clicked;
+            TS_SetCurDef(clicked);
+            DIATilesetEdit(hwnd, clicked);
+            BESetScrollRange();
+            InvalidateAll();
+            break;
+        }
         if (LOWORD(lParam)>((blockwidth+2)*BEZoom()*bebpr)) break;
         if (HIWORD(lParam) < BETabStripHeight()) break;
         {

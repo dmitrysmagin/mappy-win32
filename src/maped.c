@@ -89,6 +89,8 @@ static int dragox, dragoy;		/* drag-map origin pixel */
 static int dragoxoff, dragoyoff;	/* drag-map origin offset */
 static int pathmode = 0;		/* 1=lay-path active */
 static int pathcx, pathcy;		/* path cursor (map coords) */
+static int tsdrag = 0;
+static int tsgrabdx, tsgrabdy;
 
 extern HINSTANCE hInstance;
 extern short int blockwidth, blockheight, blockdepth, gridon, zoomon, curbrsh;
@@ -112,6 +114,7 @@ extern int mb_l, mb_m, mb_r, mb_x1, mb_x2;
 extern int key1, key2, key3, keyi, keyk, keym;
 extern int keyF[10];
 extern int objplace;
+extern int tsplace, tsetshow;
 extern int panelpro, prographbg, sortobjects;
 
 #include "fmp.h"
@@ -859,6 +862,232 @@ int MEClickmask(int x, int y, int xory) {
 static int ZX(int v) { return (v * zoomon) / zoomdiv; }
 static int ZD(int v) { return (v * zoomdiv) / zoomon; }
 
+static void METilesetCellDest(int mx, int my, int *dx, int *dy)
+{
+    int relx = mx - xmapoffset;
+    int rely = my - ymapoffset;
+    if (blockstaggerx || blockstaggery) {
+        *dx = relx * blockgapx + ((my & 1) ? blockstaggerx : 0);
+        *dy = (rely / 2) * blockgapy + ((my & 1) ? blockstaggery : 0);
+    } else {
+        *dx = relx * blockgapx;
+        *dy = rely * blockgapy;
+    }
+}
+
+static void MEBlitTsCell(unsigned char *dest, int pitch, int bufw, int bufh, short cell, int dx, int dy)
+{
+    int ani;
+    if (cell == 0 || dest == NULL)
+        return;
+    if (dx < 0 || dy < 0 || dx + blockwidth > bufw || dy + blockheight > bufh)
+        return;
+    if (cell < 0) {
+        ani = (-(int)cell / FMP_ANI_MEMUNIT) - 1;
+        if (ani >= 0)
+            BlockAnimto24(ani, -1, dest, dx, dy, pitch);
+    } else {
+        BlockStrto24(cell, dest, dx, dy, pitch);
+    }
+}
+
+/* Overlay tileset cells that cover map tile (mx,my) onto a 1-tile buffer. */
+static void MEOverlayTilesetOnBuf(unsigned char *dest, int pitch, int mx, int my)
+{
+    int i, n, ox, oy, tw, th;
+
+    if (!tsetshow || dest == NULL || blockwidth < 1 || blockheight < 1)
+        return;
+    n = TS_NumInst();
+    for (i = 0; i < n; i++) {
+        const TilesetInst *in = TS_GetInst(i);
+        const TilesetDef *d;
+        short cell;
+        if (in == NULL || !in->show || in->layer != maplayer)
+            continue;
+        if (TS_InstBounds(i, &ox, &oy, &tw, &th) != 0)
+            continue;
+        if (mx < ox || my < oy || mx >= ox + tw || my >= oy + th)
+            continue;
+        d = TS_GetDef(in->tset);
+        if (d == NULL || d->tiles == NULL)
+            continue;
+        cell = d->tiles[(my - oy) * tw + (mx - ox)];
+        MEBlitTsCell(dest, pitch, blockwidth, blockheight, cell, 0, 0);
+    }
+}
+
+/* Redraw divider segments that cross one tile (hover blit wipes them). */
+static void MEDrawDividersTile(HDC hdc, HWND hwnd, int tilex, int tiley)
+{
+    int stepx, stepy, ox, oy, sx, sy, sw, sh, x, y;
+    HPEN hpen, hold;
+
+    if (!divideron || dividergapx < 8 || dividergapy < 8 || hdc == NULL)
+        return;
+    if (blockwidth < 1 || blockheight < 1)
+        return;
+    stepx = dividergapx * zoomon / zoomdiv;
+    stepy = dividergapy * zoomon / zoomdiv;
+    if (stepx < 1) stepx = 1;
+    if (stepy < 1) stepy = 1;
+    ox = (xmapoffset * blockwidth * zoomon / zoomdiv) % stepx;
+    oy = (ymapoffset * blockheight * zoomon / zoomdiv) % stepy;
+    if (ox < 0) ox += stepx;
+    if (oy < 0) oy += stepy;
+    sx = ZX((tilex - xmapoffset) * blockwidth);
+    sy = ZX((tiley - ymapoffset) * blockheight);
+    sw = ZX(blockwidth);
+    sh = ZX(blockheight);
+    if (sw < 1) sw = 1;
+    if (sh < 1) sh = 1;
+    hpen = CreatePen(PS_SOLID, MapPenWidth(hwnd),
+        RGB((dividercol >> 16) & 0xFF, (dividercol >> 8) & 0xFF, dividercol & 0xFF));
+    hold = SelectObject(hdc, hpen);
+    for (x = -ox; x < sx + sw; x += stepx) {
+        if (x >= sx && x < sx + sw) {
+            MoveToEx(hdc, x, sy, NULL);
+            LineTo(hdc, x, sy + sh);
+        }
+    }
+    for (y = -oy; y < sy + sh; y += stepy) {
+        if (y >= sy && y < sy + sh) {
+            MoveToEx(hdc, sx, y, NULL);
+            LineTo(hdc, sx + sw, y);
+        }
+    }
+    SelectObject(hdc, hold);
+    DeleteObject(hpen);
+}
+
+static void MEDrawTilesets24(unsigned char *dest, int k, int l, int pitch)
+{
+    int i, n, x, y, ox, oy, tw, th, bufw, bufh;
+
+    if (!tsetshow || dest == NULL || mappt == NULL)
+        return;
+    bufw = k * blockgapx;
+    bufh = l * blockgapy;
+    n = TS_NumInst();
+    for (i = 0; i < n; i++) {
+        const TilesetInst *in = TS_GetInst(i);
+        const TilesetDef *d;
+        if (in == NULL || !in->show || in->layer != maplayer)
+            continue;
+        d = TS_GetDef(in->tset);
+        if (d == NULL || d->tiles == NULL)
+            continue;
+        if (TS_InstBounds(i, &ox, &oy, &tw, &th) != 0)
+            continue;
+        for (y = 0; y < th; y++) {
+            for (x = 0; x < tw; x++) {
+                int mx = ox + x, my = oy + y, dx, dy;
+                METilesetCellDest(mx, my, &dx, &dy);
+                MEBlitTsCell(dest, pitch, bufw, bufh, d->tiles[y * tw + x], dx, dy);
+            }
+        }
+    }
+}
+
+static void MEDrawTilesetBoxes(HDC hdc, RECT *client)
+{
+    int i, n, ox, oy, tw, th, cx, cy, cw, ch;
+    HPEN pen, old;
+    HBRUSH oldb;
+    HWND mapw;
+
+    if (!tsetshow || hdc == NULL || mappt == NULL)
+        return;
+    n = TS_NumInst();
+    if (n < 1)
+        return;
+    mapw = MEGetHWND();
+    for (i = 0; i < n; i++) {
+        const TilesetInst *in = TS_GetInst(i);
+        if (in == NULL || !in->show || in->layer != maplayer)
+            continue;
+        if (TS_InstBounds(i, &ox, &oy, &tw, &th) != 0)
+            continue;
+        cx = ZX((ox - xmapoffset) * blockgapx);
+        cy = ZX((oy - ymapoffset) * blockgapy);
+        cw = ZX(tw * blockgapx);
+        ch = ZX(th * blockgapy);
+        if (cw < 1) cw = 1;
+        if (ch < 1) ch = 1;
+        if (cx + cw < 0 || cy + ch < 0 || cx > client->right || cy > client->bottom)
+            continue;
+        if (i == TS_CurInst())
+            pen = CreatePen(PS_SOLID, MapPenWidth(mapw), RGB(255, 255, 0));
+        else if (tsplace)
+            pen = CreatePen(PS_DOT, MapPenWidth(mapw), RGB(180, 180, 80));
+        else
+            continue;
+        old = SelectObject(hdc, pen);
+        oldb = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+        Rectangle(hdc, cx, cy, cx + cw + 1, cy + ch + 1);
+        SelectObject(hdc, old);
+        SelectObject(hdc, oldb);
+        DeleteObject(pen);
+    }
+}
+
+static int MEPlaceTilesetAt(int xblk, int yblk, int ctrl)
+{
+    int hit, ni, def;
+    const TilesetInst *cur;
+
+    def = TS_CurDef();
+    hit = TS_HitInst(xblk, yblk, maplayer);
+    if (ctrl) {
+        if (hit >= 0) {
+            cur = TS_GetInst(hit);
+            if (cur != NULL)
+                def = cur->tset;
+        }
+        if (TS_GetDef(def) == NULL)
+            return -1;
+        ni = TS_PlaceNew(def, maplayer, xblk, yblk);
+        if (ni < 0)
+            return -1;
+        tsgrabdx = 0;
+        tsgrabdy = 0;
+        mapaltered = 1;
+        return ni;
+    }
+    if (hit < 0) {
+        if (TS_GetDef(def) == NULL)
+            return -1;
+        ni = TS_PlaceNew(def, maplayer, xblk, yblk);
+        if (ni < 0)
+            return -1;
+        tsgrabdx = 0;
+        tsgrabdy = 0;
+        mapaltered = 1;
+        return ni;
+    }
+    TS_SetCurInst(hit);
+    cur = TS_GetInst(hit);
+    if (cur == NULL)
+        return -1;
+    tsgrabdx = xblk - cur->tx;
+    tsgrabdy = yblk - cur->ty;
+    return hit;
+}
+
+static void MEMoveCurTileset(int xblk, int yblk)
+{
+    const TilesetInst *cur = TS_GetInst(TS_CurInst());
+    TilesetInst inst;
+
+    if (cur == NULL)
+        return;
+    inst = *cur;
+    inst.tx = xblk - tsgrabdx;
+    inst.ty = yblk - tsgrabdy;
+    TS_SetInst(TS_CurInst(), &inst);
+    mapaltered = 1;
+}
+
 int MEGetX(int xpix, int ypix) {
     int xb;
 
@@ -1092,6 +1321,7 @@ void MEDrawUnderTile(HWND hwnd, int xoff, int yoff) {
     bih.biCompression = BI_RGB;
 
     Blockto24(xoff, yoff, destmempt, 0, 0, bwpitch);
+    MEOverlayTilesetOnBuf(destmempt, bwpitch, xoff, yoff);
 
     temphbm = CreateDIBitmap(myhdc, &bih, CBM_INIT,
         destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
@@ -1115,6 +1345,7 @@ void MEDrawUnderTile(HWND hwnd, int xoff, int yoff) {
         StretchBlt(myhdc, ZX((xoff-xmapoffset)*blockwidth), ZX((yoff-ymapoffset)*blockheight),
             ZX(blockwidth), ZX(blockheight), fromhdc, 0, 0, blockwidth, blockheight, SRCCOPY);
     }
+    MEDrawDividersTile(myhdc, hwnd, xoff, yoff);
 
     SelectObject(fromhdc, hbmpold);
     DeleteObject(temphbm);
@@ -1225,6 +1456,8 @@ void MEDrawMap(HWND phwnd, HDC myhdc) {
             }
     } }
 
+    MEDrawTilesets24(destmempt, k, l, bwpitch);
+
     temphbm = CreateDIBitmap(myhdc, &bih, CBM_INIT,
         destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
     if (temphbm==NULL) { DeleteDC(fromhdc); free(destmempt); return; }
@@ -1334,6 +1567,7 @@ void MEDrawMap(HWND phwnd, HDC myhdc) {
         RECT oeclient;
         GetClientRect(phwnd, &oeclient);
         OE_DrawObjects(myhdc, &oeclient);
+        MEDrawTilesetBoxes(myhdc, &oeclient);
     }
 
     DeleteDC(fromhdc);
@@ -1383,6 +1617,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
                 *darkenpt = ((*darkenpt)>>1)&0x7F; darkenpt++; i--;
         } }
         if (onion) Overlayto24(meoldbx, meoldby, destmempt, 0, 0, bwpitch, -1);
+        MEOverlayTilesetOnBuf(destmempt, bwpitch, meoldbx, meoldby);
 
         temphbm = CreateDIBitmap(myhdc, &bih, CBM_INIT,
             destmempt, (BITMAPINFO *) &bih, DIB_RGB_COLORS);
@@ -1397,6 +1632,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
             ZX(blockwidth), ZX(blockheight), fromhdc, 0, 0, blockwidth, blockheight, SRCCOPY);
         SelectObject(fromhdc, hbmpold);
         DeleteObject(temphbm);
+        MEDrawDividersTile(myhdc, hwnd, meoldbx, meoldby);
     }
 
     if (xoff<0 || xoff>=mapwidth || yoff<0 || yoff>=mapheight) {
@@ -1410,6 +1646,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
         if (gridstyle == 2) {
             /* crosshatch grid: draw transparent-pixel checkered pattern */
             Blockto24(xoff, yoff, destmempt, 0, 0, bwpitch);
+            MEOverlayTilesetOnBuf(destmempt, bwpitch, xoff, yoff);
             for (i=0;i<blockheight;i++) {
                 for (j=0;j<blockwidth;j++) {
                     /* checkerboard: if (i+j)&1 then darken */
@@ -1423,6 +1660,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
         } else {
             /* cursor-border grid */
             Blockto24(xoff, yoff, destmempt, 0, 0, bwpitch);
+            MEOverlayTilesetOnBuf(destmempt, bwpitch, xoff, yoff);
             for (i=0;i<blockwidth;i++) {
                 destmempt[i*3] = 0; destmempt[i*3+1] = 0; destmempt[i*3+2] = 0;
             }
@@ -1442,6 +1680,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
         }
     } else {
         Blockto24(xoff, yoff, destmempt, 0, 0, bwpitch);
+        MEOverlayTilesetOnBuf(destmempt, bwpitch, xoff, yoff);
         for (i=0;i<blockheight;i++) {
             for (j=0;j<blockwidth;j++) {
                 if (destmempt[i*bwpitch+(j*3)] ||
@@ -1480,6 +1719,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
     else
         StretchBlt(myhdc, x, y,
         ZX(blockwidth), ZX(blockheight), fromhdc, 0, 0, blockwidth, blockheight, blttype);
+    MEDrawDividersTile(myhdc, hwnd, xoff, yoff);
 
     SelectObject(fromhdc, hbmpold);
     DeleteObject(temphbm);
@@ -2290,6 +2530,21 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         break;
     case WM_LBUTTONDOWN:
         if (mappt==NULL) return 0;
+        if (tsplace) {
+            xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
+            yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
+            if (TS_GetDef(TS_CurDef()) == NULL && TS_HitInst(xblk, yblk, maplayer) < 0) {
+                MessageBox(hwnd, "Select a tileset in the Tilesets tab first.",
+                    "Tileset", MB_OK | MB_ICONINFORMATION);
+                return 0;
+            }
+            if (MEPlaceTilesetAt(xblk, yblk, GetKeyState(VK_CONTROL) < 0) >= 0) {
+                tsdrag = 1;
+                SetCapture(hwnd);
+                InvalidateRgn(mhwnd, NULL, FALSE);
+            }
+            return 0;
+        }
         if (objplace) {
             /* object placement: click places selected, ctrl+click duplicates */
             int mpx = ZD(LOWORD(lParam)) + xmapoffset * blockwidth;
@@ -2368,6 +2623,18 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         __attribute__((fallthrough));
     case WM_MOUSEMOVE:
         if (mappt==NULL) return 0;
+        if (tsplace && tsdrag) {
+            xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
+            yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
+            if (meoldbx != xblk || meoldby != yblk) {
+                MEMoveCurTileset(xblk, yblk);
+                meoldbx = xblk;
+                meoldby = yblk;
+                InvalidateRgn(mhwnd, NULL, FALSE);
+            }
+            MEShowCoords(xblk, yblk);
+            return 0;
+        }
         if (dragmode) {
             MEDragMap(LOWORD(lParam), HIWORD(lParam));
             return 0;
@@ -2413,7 +2680,11 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             LuaSetMouseBlock(lua_area_x, lua_area_y, xblk, yblk);
             LuaRunMouseButton(10, xblk, yblk);
             lua_mb_act = 0;
-        } else lua_mb_act = 0;
+        } else         lua_mb_act = 0;
+        if (tsdrag) {
+            tsdrag = 0;
+            ReleaseCapture();
+        }
         painton = 0;
         if (gettingbrush) {
             if (mebrushx2<mebrushx) { i = mebrushx; mebrushx = mebrushx2; mebrushx2 = i; }
@@ -2440,6 +2711,18 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         break;
     case WM_RBUTTONUP:
         if (mappt==NULL) break;
+        if (tsplace) {
+            xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
+            yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
+            i = TS_HitInst(xblk, yblk, maplayer);
+            if (i >= 0) {
+                TS_DeleteInst(i);
+                mapaltered = 1;
+                InvalidateRgn(mhwnd, NULL, FALSE);
+            }
+            rmapped = 0;
+            break;
+        }
         if (lua_mb_act == 10) {
             xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
             yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
@@ -2465,6 +2748,7 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         break;
     case WM_RBUTTONDOWN:
         if (mappt==NULL) break;
+        if (tsplace) break;
         if (MBDoAction(mb_r, hwnd, lParam)) rmapped = 1;
         break;
     case WM_XBUTTONDOWN:
@@ -2582,7 +2866,15 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         case 'L': /* line tool */
             if (linemode) linemode = 0; else { linemode = 1; pathmode = 0; }
             break;
-        case 'P': /* lay-path tool (or pick object in place mode) */
+        case 'P': /* lay-path tool (or pick object/tileset in place mode) */
+            if (tsplace) {
+                int pi = TS_HitInst(meoldbx, meoldby, maplayer);
+                if (pi >= 0) {
+                    TS_SetCurInst(pi);
+                    InvalidateRgn(mhwnd, NULL, FALSE);
+                }
+                break;
+            }
             if (objplace) {
                 int mpx = meoldbx * blockwidth + blockwidth / 2;
                 int mpy = meoldby * blockheight + blockheight / 2;
@@ -2612,8 +2904,17 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             if (curanim>=0) DIAEditAnimProperties(mhwnd, curanim);
             else DIAEditProperties(mhwnd, curstr);
             break;
+        case VK_DELETE:
+        case VK_BACK:
+            if (tsplace && TS_GetInst(TS_CurInst()) != NULL) {
+                TS_DeleteInst(TS_CurInst());
+                mapaltered = 1;
+                InvalidateRgn(mhwnd, NULL, FALSE);
+            }
+            break;
         case VK_ESCAPE:
             linemode = 0; pathmode = 0;
+            if (tsdrag) { tsdrag = 0; ReleaseCapture(); }
             if (dragmode) MEDragFinish();
             break;
         }

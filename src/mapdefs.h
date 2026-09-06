@@ -40,6 +40,8 @@
 #define CM_OBJPLACE	170
 #define CM_OBJSHOW	171
 #define CM_GRAPHEDIT	172
+#define CM_TSPLACE	173
+#define CM_TSSHOW	174
 #define IDC_OBJX	101
 #define IDC_OBJY	102
 #define IDC_OBJGFX	103

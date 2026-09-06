@@ -68,6 +68,10 @@ const TilesetInst *TS_GetInst(int i);
 void TS_SetInst(int i, const TilesetInst *inst);
 int TS_NewInst(void);
 void TS_DeleteInst(int i);
+int TS_PlaceNew(int def, int layer, int tx, int ty);
+int TS_InstBounds(int i, int *ox, int *oy, int *w, int *h);
+int TS_HitInst(int tx, int ty, int layer);
+int TS_FindInstOfDef(int def, int layer);
 
 /* Returns 0 if encode/decode of a built-in sample matches. */
 int TS_SelfTest(void);

@@ -196,6 +196,12 @@ MAPMENU MENU
   MENUITEM "&Show objects", CM_OBJSHOW
  }
 
+  POPUP "Tile&sets"
+ {
+  MENUITEM "&Place mode", CM_TSPLACE
+  MENUITEM "&Show tilesets", CM_TSSHOW
+ }
+
   POPUP "&Help"
  {
   MENUITEM "&Contents\tF1", CM_HELPCONTENTS

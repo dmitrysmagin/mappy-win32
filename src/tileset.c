@@ -565,6 +565,79 @@ void TS_DeleteInst(int i)
 		tsin.present = 0;
 }
 
+int TS_PlaceNew(int def, int layer, int tx, int ty)
+{
+	int i;
+	TilesetInst inst;
+
+	if (TS_GetDef(def) == NULL)
+		return -1;
+	i = TS_NewInst();
+	if (i < 0)
+		return -1;
+	memset(&inst, 0, sizeof(inst));
+	inst.tset = def;
+	inst.layer = layer;
+	inst.tx = tx;
+	inst.ty = ty;
+	inst.show = 1;
+	TS_SetInst(i, &inst);
+	return i;
+}
+
+int TS_InstBounds(int i, int *ox, int *oy, int *w, int *h)
+{
+	const TilesetInst *in = TS_GetInst(i);
+	const TilesetDef *d;
+
+	if (in == NULL)
+		return -1;
+	d = TS_GetDef(in->tset);
+	if (d == NULL)
+		return -1;
+	if (ox) *ox = in->tx - d->handle_x;
+	if (oy) *oy = in->ty - d->handle_y;
+	if (w) *w = d->width;
+	if (h) *h = d->height;
+	return 0;
+}
+
+int TS_HitInst(int tx, int ty, int layer)
+{
+	int i;
+
+	for (i = TS_NumInst() - 1; i >= 0; i--) {
+		int ox, oy, w, h;
+		const TilesetInst *in = TS_GetInst(i);
+		if (in == NULL || !in->show)
+			continue;
+		if (layer >= 0 && in->layer != layer)
+			continue;
+		if (TS_InstBounds(i, &ox, &oy, &w, &h) != 0)
+			continue;
+		if (tx >= ox && ty >= oy && tx < ox + w && ty < oy + h)
+			return i;
+	}
+	return -1;
+}
+
+int TS_FindInstOfDef(int def, int layer)
+{
+	int i;
+
+	for (i = 0; i < TS_NumInst(); i++) {
+		const TilesetInst *in = TS_GetInst(i);
+		if (in == NULL)
+			continue;
+		if (in->tset != def)
+			continue;
+		if (layer >= 0 && in->layer != layer)
+			continue;
+		return i;
+	}
+	return -1;
+}
+
 static int ts_read_chunk(FILE *f, unsigned char **out, int *bodysize)
 {
 	unsigned char hdr[8];

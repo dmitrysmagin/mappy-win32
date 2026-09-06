@@ -90,6 +90,8 @@ char objlabels[16][64] = {
 };	/* object properties dialogue labels */
 int objplace = 0;		/* object placement mode (map clicks place) */
 int objshow = 1;		/* draw objects on map */
+int tsplace = 0;		/* tileset instance place/move mode */
+int tsetshow = 1;		/* draw tileset instances on map */
 int sortobjects = 0;		/* ObjectSort.lua + Y-order draw */
 int sortblocks = 0;		/* BlockSort.lua filters the block window */
 int panelpro = 1;		/* graph panel: 0 none, 1 cluster, 2 bar */
@@ -277,6 +279,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             if (objshow) CheckMenuItem(hMenu, CM_OBJSHOW, MF_CHECKED);
             else CheckMenuItem(hMenu, CM_OBJSHOW, MF_UNCHECKED);
             CheckMenuItem(hMenu, CM_OBJPLACE, MF_UNCHECKED);
+            if (tsetshow) CheckMenuItem(hMenu, CM_TSSHOW, MF_CHECKED);
+            else CheckMenuItem(hMenu, CM_TSSHOW, MF_UNCHECKED);
+            CheckMenuItem(hMenu, CM_TSPLACE, MF_UNCHECKED);
             UpdateToggleMenus();
         }
         SendMessage(hwnd, WM_COMMAND, 99, 0L);
@@ -573,13 +578,31 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 break;
             case CM_OBJPLACE:
                 objplace = 1-objplace;
-                if (objplace) CheckMenuItem(hMenu, CM_OBJPLACE, MF_CHECKED);
-                else CheckMenuItem(hMenu, CM_OBJPLACE, MF_UNCHECKED);
+                if (objplace) {
+                    tsplace = 0;
+                    CheckMenuItem(hMenu, CM_TSPLACE, MF_UNCHECKED);
+                    CheckMenuItem(hMenu, CM_OBJPLACE, MF_CHECKED);
+                } else CheckMenuItem(hMenu, CM_OBJPLACE, MF_UNCHECKED);
                 break;
             case CM_OBJSHOW:
                 objshow = 1-objshow;
                 if (objshow) CheckMenuItem(hMenu, CM_OBJSHOW, MF_CHECKED);
                 else CheckMenuItem(hMenu, CM_OBJSHOW, MF_UNCHECKED);
+                InvalidateAll();
+                break;
+            case CM_TSPLACE:
+                tsplace = 1-tsplace;
+                if (tsplace) {
+                    objplace = 0;
+                    CheckMenuItem(hMenu, CM_OBJPLACE, MF_UNCHECKED);
+                    CheckMenuItem(hMenu, CM_TSPLACE, MF_CHECKED);
+                    BESetWindowType(5); /* BETYPE_TILESETS */
+                } else CheckMenuItem(hMenu, CM_TSPLACE, MF_UNCHECKED);
+                break;
+            case CM_TSSHOW:
+                tsetshow = 1-tsetshow;
+                if (tsetshow) CheckMenuItem(hMenu, CM_TSSHOW, MF_CHECKED);
+                else CheckMenuItem(hMenu, CM_TSSHOW, MF_UNCHECKED);
                 InvalidateAll();
                 break;
             case CM_GRAPHEDIT:
