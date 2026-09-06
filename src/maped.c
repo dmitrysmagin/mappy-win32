@@ -1110,6 +1110,31 @@ static void MEDrawTilesetBoxesTile(HDC hdc, HWND hwnd, int tilex, int tiley)
     }
 }
 
+/* Redraw object graphics/outlines that cross one tile (hover blit wipes them). */
+static void MEDrawObjectsTile(HDC hdc, HWND hwnd, int tilex, int tiley)
+{
+    RECT client;
+    int sx, sy, sw, sh, pad, saved;
+
+    if (hdc == NULL || mappt == NULL)
+        return;
+    if (blockwidth < 1 || blockheight < 1)
+        return;
+    GetClientRect(hwnd, &client);
+    sx = ZX((tilex - xmapoffset) * blockwidth);
+    sy = ZX((tiley - ymapoffset) * blockheight);
+    sw = ZX(blockwidth);
+    sh = ZX(blockheight);
+    if (sw < 1) sw = 1;
+    if (sh < 1) sh = 1;
+    pad = MapPenWidth(hwnd);
+    if (pad < 1) pad = 1;
+    saved = SaveDC(hdc);
+    IntersectClipRect(hdc, sx - pad, sy - pad, sx + sw + pad, sy + sh + pad);
+    OE_DrawObjects(hdc, &client);
+    RestoreDC(hdc, saved);
+}
+
 static int MEPlaceTilesetAt(int xblk, int yblk, int ctrl)
 {
     int hit, ni, def;
@@ -1426,6 +1451,7 @@ void MEDrawUnderTile(HWND hwnd, int xoff, int yoff) {
     }
     MEDrawDividersTile(myhdc, hwnd, xoff, yoff);
     MEDrawTilesetBoxesTile(myhdc, hwnd, xoff, yoff);
+    MEDrawObjectsTile(myhdc, hwnd, xoff, yoff);
 
     SelectObject(fromhdc, hbmpold);
     DeleteObject(temphbm);
@@ -1714,6 +1740,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
         DeleteObject(temphbm);
         MEDrawDividersTile(myhdc, hwnd, meoldbx, meoldby);
         MEDrawTilesetBoxesTile(myhdc, hwnd, meoldbx, meoldby);
+        MEDrawObjectsTile(myhdc, hwnd, meoldbx, meoldby);
     }
 
     if (xoff<0 || xoff>=mapwidth || yoff<0 || yoff>=mapheight) {
@@ -1802,6 +1829,7 @@ void MEDrawGrid(HWND hwnd, int xoff, int yoff) {
         ZX(blockwidth), ZX(blockheight), fromhdc, 0, 0, blockwidth, blockheight, blttype);
     MEDrawDividersTile(myhdc, hwnd, xoff, yoff);
     MEDrawTilesetBoxesTile(myhdc, hwnd, xoff, yoff);
+    MEDrawObjectsTile(myhdc, hwnd, xoff, yoff);
 
     SelectObject(fromhdc, hbmpold);
     DeleteObject(temphbm);
