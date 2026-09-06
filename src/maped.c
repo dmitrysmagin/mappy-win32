@@ -2612,7 +2612,9 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         break;
     case WM_LBUTTONDOWN:
         if (mappt==NULL) return 0;
-        if (tsplace) {
+        /* Grab-from-map (brush or tileset) must win over place modes so a
+         * region can be dragged; place mode stays on and resumes after. */
+        if (!(megetabrush || megetatileset) && tsplace) {
             xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
             yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
             if (TS_GetDef(TS_CurDef()) == NULL && TS_HitInst(xblk, yblk, maplayer) < 0) {
@@ -2634,7 +2636,7 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             }
             return 0;
         }
-        if (objplace) {
+        if (!(megetabrush || megetatileset) && objplace) {
             /* object placement: click places selected, ctrl+click duplicates */
             int mpx = ZD(LOWORD(lParam)) + xmapoffset * blockwidth;
             int mpy = ZD(HIWORD(lParam)) + ymapoffset * blockheight;
@@ -2654,10 +2656,10 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             InvalidateRgn(mhwnd, NULL, FALSE);
             return 0;
         }
-        if (MBDoAction(mb_l, hwnd, lParam)) return 0;
+        if (!(megetabrush || megetatileset) && MBDoAction(mb_l, hwnd, lParam)) return 0;
         xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
         yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
-        if (linemode) {
+        if (!(megetabrush || megetatileset) && linemode) {
             /* line tool: first click sets start, second draws */
             if (linemode==1) {
                 linecx = xblk; linecy = yblk;
@@ -2672,7 +2674,7 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             MEShowCoords(xblk, yblk);
             return 0;
         }
-        if (pathmode) {
+        if (!(megetabrush || megetatileset) && pathmode) {
             /* lay-path: click to place tiles along mouse path */
             if (pathmode==1) {
                 pathcx = xblk; pathcy = yblk;
