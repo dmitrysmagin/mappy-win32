@@ -487,9 +487,10 @@ static int PalParseValue(HWND dlg, int id) {
     return v;
 }
 
-static void PalLayoutDialog(HWND dlg) {
+/* Stack controls from the top. Returns client height through the Hex tick. */
+static int PalLayoutDialog(HWND dlg) {
     RECT rc;
-    int dpi, cw, ch, m, titleh, btnh, barh, edith, checkh, spinw, gap;
+    int dpi, cw, m, titleh, btnh, barh, edith, checkh, spinw, gap;
     int cols, rows, cell, gridw, gridh, gx, gy, i, x, y, bw;
     static const int btns[] = { IDC_PALCPY, IDC_PALEXG, IDC_PALSPR, IDC_PALTRN, IDC_PALPICK };
     static const int bars[] = { IDC_PALTBARR, IDC_PALTBARG, IDC_PALTBARB };
@@ -497,10 +498,9 @@ static void PalLayoutDialog(HWND dlg) {
     static const int vals[] = { IDC_PALDECR, IDC_PALDECG, IDC_PALDECB };
     static const int uds[] = { IDC_PALUDR, IDC_PALUDG, IDC_PALUDB };
 
-    if (dlg == NULL) return;
+    if (dlg == NULL) return 0;
     GetClientRect(dlg, &rc);
     cw = rc.right - rc.left;
-    ch = rc.bottom - rc.top;
     dpi = MapGetDpi(dlg);
     m = MapScale(6, dpi);
     titleh = MapScale(16, dpi);
@@ -519,20 +519,9 @@ static void PalLayoutDialog(HWND dlg) {
     gridw = cw - m * 2;
     cell = gridw / cols;
     if (cell < MapScale(8, dpi)) cell = MapScale(8, dpi);
-    if (cell > MapScale(20, dpi)) cell = MapScale(20, dpi);
+    if (cell > MapScale(16, dpi)) cell = MapScale(16, dpi);
     gridw = cell * cols;
     gridh = cell * rows;
-    {
-        int leftover = ch - gy - btnh - gap - MapScale(12, dpi) - barh
-        - gap - edith - gap - checkh - m;
-        if (leftover < 0) leftover = 0;
-        if (gridh > leftover && leftover >= rows * MapScale(8, dpi)) {
-            cell = leftover / rows;
-            if (cell < MapScale(8, dpi)) cell = MapScale(8, dpi);
-            gridw = cell * cols;
-            gridh = cell * rows;
-        }
-    }
     gx = (cw - gridw) / 2;
     if (gx < m) gx = m;
     MoveWindow(GetDlgItem(dlg, IDC_PALGRID), gx, gy, gridw, gridh, TRUE);
@@ -564,6 +553,7 @@ static void PalLayoutDialog(HWND dlg) {
         y += lblh + barh + gap + edith + gap;
     }
     MoveWindow(GetDlgItem(dlg, IDC_PALHEXVIEW), m, y, cw - m * 2, checkh, TRUE);
+    return y + checkh + m;
 }
 
 static void GEPlacePalette(HWND graph) {
@@ -581,8 +571,17 @@ static void GEPlacePalette(HWND graph) {
     palw = GEPaletteWidth(graph);
     if (palw > pw / 2) palw = pw / 2;
     if (palw < 120) palw = 120;
-    MoveWindow(palhwnd, pw - palw, 0, palw, ph - toolh, TRUE);
-    PalLayoutDialog(palhwnd);
+    {
+        int avail = ph - toolh;
+        int palh;
+        if (avail < 80) avail = 80;
+        /* Width first so PalLayoutDialog can measure through Hex, then clip height. */
+        MoveWindow(palhwnd, pw - palw, 0, palw, avail, FALSE);
+        palh = PalLayoutDialog(palhwnd);
+        if (palh < 80) palh = 80;
+        if (palh > avail) palh = avail;
+        MoveWindow(palhwnd, pw - palw, 0, palw, palh, TRUE);
+    }
     ShowWindow(palhwnd, SW_SHOW);
     PalSyncButtons();
     PalSyncFromColor();
@@ -2737,7 +2736,7 @@ HWND CreateGraphEditorWindow(HWND hwnd) {
     wndclass.hInstance = hInstance;
     wndclass.hIcon = LoadIcon(hInstance, "MAPWINIC");
     wndclass.hCursor = LoadCursor(NULL, (LPCSTR) IDC_ARROW);
-    wndclass.hbrBackground = (HBRUSH) GetStockObject(GRAY_BRUSH);
+    wndclass.hbrBackground = (HBRUSH) GetStockObject(BLACK_BRUSH);
     wndclass.lpszMenuName = NULL;
     wndclass.lpszClassName = szGraphEdname;
     RegisterClass(&wndclass);
