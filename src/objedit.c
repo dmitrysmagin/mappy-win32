@@ -32,7 +32,7 @@ extern int blockgapx, blockgapy;
 extern unsigned char transred, transgreen, transblue;
 /* mapwin.c settings */
 extern int objplace, objshow, sortobjects, objlayeruser, zoomdiv;
-extern int showuser, megetaobjpos;
+extern int showuser, megetaobjpos, onion;
 extern short int curobjsel;
 extern char objlabels[16][64];
 
@@ -81,11 +81,15 @@ static int OE_LayerUserIndex(void) {
     return -1;
 }
 
+/* Visible in the map view. Onion shows every object; single-layer view
+ * keeps only those whose layer field matches the current map layer.
+ * objlayeruser 0 = no filter (always visible). */
 static int OE_OnCurLayer(const F14Obj * o) {
     const int * u;
     int idx = OE_LayerUserIndex();
     if (o == NULL) return 0;
     if (idx < 0) return 1;
+    if (onion) return 1;
     u = &o->user1;
     return u[idx] == maplayer;
 }

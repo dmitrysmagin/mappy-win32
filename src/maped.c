@@ -900,6 +900,19 @@ static void MEBlitTsCell(unsigned char *dest, int pitch, int bufw, int bufh, sho
     }
 }
 
+/* Onion view: all instances. Single-layer view: current map layer only. */
+static int METsHitLayer(void)
+{
+    return onion ? -1 : (int) maplayer;
+}
+
+static int METsOnView(const TilesetInst *in)
+{
+    if (in == NULL || !in->show) return 0;
+    if (onion) return 1;
+    return in->layer == maplayer;
+}
+
 /* Overlay tileset cells that cover map tile (mx,my) onto a 1-tile buffer. */
 static void MEOverlayTilesetOnBuf(unsigned char *dest, int pitch, int mx, int my)
 {
@@ -912,7 +925,7 @@ static void MEOverlayTilesetOnBuf(unsigned char *dest, int pitch, int mx, int my
         const TilesetInst *in = TS_GetInst(i);
         const TilesetDef *d;
         short cell;
-        if (in == NULL || !in->show || in->layer != maplayer)
+        if (!METsOnView(in))
             continue;
         if (TS_InstBounds(i, &ox, &oy, &tw, &th) != 0)
             continue;
@@ -981,7 +994,7 @@ static void MEDrawTilesets24(unsigned char *dest, int k, int l, int pitch)
     for (i = 0; i < n; i++) {
         const TilesetInst *in = TS_GetInst(i);
         const TilesetDef *d;
-        if (in == NULL || !in->show || in->layer != maplayer)
+        if (!METsOnView(in))
             continue;
         d = TS_GetDef(in->tset);
         if (d == NULL || d->tiles == NULL)
@@ -1013,7 +1026,7 @@ static void MEDrawTilesetBoxes(HDC hdc, RECT *client)
     mapw = MEGetHWND();
     for (i = 0; i < n; i++) {
         const TilesetInst *in = TS_GetInst(i);
-        if (in == NULL || !in->show || in->layer != maplayer)
+        if (!METsOnView(in))
             continue;
         if (TS_InstBounds(i, &ox, &oy, &tw, &th) != 0)
             continue;
@@ -1089,7 +1102,7 @@ static void MEDrawTilesetBoxesTile(HDC hdc, HWND hwnd, int tilex, int tiley)
     if (sh < 1) sh = 1;
     for (i = 0; i < n; i++) {
         const TilesetInst *in = TS_GetInst(i);
-        if (in == NULL || !in->show || in->layer != maplayer)
+        if (!METsOnView(in))
             continue;
         if (TS_InstBounds(i, &ox, &oy, &tw, &th) != 0)
             continue;
@@ -1146,7 +1159,7 @@ static int MEPlaceTilesetAt(int xblk, int yblk, int ctrl)
     const TilesetInst *cur;
 
     def = TS_CurDef();
-    hit = TS_HitInst(xblk, yblk, maplayer);
+    hit = TS_HitInst(xblk, yblk, METsHitLayer());
     if (ctrl) {
         if (hit >= 0) {
             cur = TS_GetInst(hit);
@@ -2719,13 +2732,13 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         if (!(megetabrush || megetatileset) && tsplace) {
             xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
             yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
-            if (TS_GetDef(TS_CurDef()) == NULL && TS_HitInst(xblk, yblk, maplayer) < 0) {
+            if (TS_GetDef(TS_CurDef()) == NULL && TS_HitInst(xblk, yblk, METsHitLayer()) < 0) {
                 MessageBox(hwnd, "Select a tileset in the Tilesets tab first.",
                     "Tileset", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
             {
-                int hit = TS_HitInst(xblk, yblk, maplayer);
+                int hit = TS_HitInst(xblk, yblk, METsHitLayer());
                 int creating = (GetKeyState(VK_CONTROL) < 0) || hit < 0;
                 if (creating)
                     MECopyToUndo();
@@ -2932,7 +2945,7 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         if (tsplace) {
             xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
             yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));
-            i = TS_HitInst(xblk, yblk, maplayer);
+            i = TS_HitInst(xblk, yblk, METsHitLayer());
             if (i >= 0) {
                 MECopyToUndo();
                 TS_DeleteInst(i);
@@ -3099,7 +3112,7 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             break;
         case 'P': /* lay-path tool (or pick object/tileset in place mode) */
             if (tsplace) {
-                int pi = TS_HitInst(meoldbx, meoldby, maplayer);
+                int pi = TS_HitInst(meoldbx, meoldby, METsHitLayer());
                 if (pi >= 0) {
                     TS_SetCurInst(pi);
                     InvalidateRgn(mhwnd, NULL, FALSE);
