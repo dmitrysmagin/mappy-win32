@@ -1394,7 +1394,7 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
             if (clicked < 0 || brshpt[clicked] == NULL) break;
             curbrushsel = (short int) clicked;
             curbrsh = (short int) (clicked + 1);
-            DIAGetBrushName(hwnd, GetBrushName(clicked));
+            DIABrushEdit(hwnd, clicked);
             RejigBrshMenu(curbrsh);
             BESetScrollRange();
             InvalidateAll();

@@ -62,8 +62,11 @@ typedef struct { /* Animation control structure */
 
 extern HINSTANCE hInstance;
 extern short int mapwidth, mapheight, blockwidth, blockheight, blockdepth, numblockstr, numblockgfx, curbrsh;
-extern short int numblockanim;
-extern int megetatileset;
+extern short int numblockanim, curanim, curbrushsel;
+extern int megetatileset, megetabrush;
+extern short int pastebrushnt;
+extern int brushhandle;
+extern char brshname[MAXBRSH][64];
 extern int blockgapx, blockgapy, blockstaggerx, blockstaggery, blockstagger;
 extern int clickmask;
 extern int maptype;
@@ -2554,8 +2557,8 @@ void DIARangeEditBlocks(HWND hwnd) {
 
 void DIAGrabBrushBS(HWND hwnd) {
 
-    if (curbrsh<1 || curbrsh>8) {
-        MessageBox(hwnd, "Select brush number to grab to first", "Grab Brush from sequence",
+    if (curbrsh<1 || curbrsh>MAXBRSH) {
+        MessageBox(hwnd, "Select a brush first", "Grab Brush from sequence",
             MB_ICONINFORMATION|MB_OK);
         return;
     }
@@ -3377,6 +3380,8 @@ static short *ts_work = NULL;
 static HWND ts_map_hwnd = NULL;
 static HWND ts_pick_hwnd = NULL;
 static HWND ts_dlg = NULL;
+static int ts_is_brush = 0;
+static int br_saved_handle, br_saved_nt;
 static int ts_map_sx, ts_map_sy;
 static int ts_pick_yoff;
 static int ts_pick_mode; /* 0 still, 1 anim */
@@ -3397,8 +3402,11 @@ static int TS_WorkAlloc(int w, int h)
 
     if (w < 1) w = 1;
     if (h < 1) h = 1;
-    if (w > TS_MAXDIM) w = TS_MAXDIM;
-    if (h > TS_MAXDIM) h = TS_MAXDIM;
+    {
+        int maxd = ts_is_brush ? 128 : TS_MAXDIM;
+        if (w > maxd) w = maxd;
+        if (h > maxd) h = maxd;
+    }
     if (ts_work != NULL && w == ts_w && h == ts_h)
         return 0;
     neu = (short *)calloc((size_t)w * (size_t)h, sizeof(short));
@@ -3559,10 +3567,12 @@ static int TS_DlgReadMeta(HWND hwndDlg)
     w = atoi(tb);
     GetWindowText(GetDlgItem(hwndDlg, IDC_TSHEIGHT), tb, 80);
     h = atoi(tb);
-    GetWindowText(GetDlgItem(hwndDlg, IDC_TSHX), tb, 80);
-    ts_hx = atoi(tb);
-    GetWindowText(GetDlgItem(hwndDlg, IDC_TSHY), tb, 80);
-    ts_hy = atoi(tb);
+    if (!ts_is_brush) {
+        GetWindowText(GetDlgItem(hwndDlg, IDC_TSHX), tb, 80);
+        ts_hx = atoi(tb);
+        GetWindowText(GetDlgItem(hwndDlg, IDC_TSHY), tb, 80);
+        ts_hy = atoi(tb);
+    }
     if (TS_WorkAlloc(w, h) != 0)
         return -1;
     return 0;
@@ -3688,6 +3698,23 @@ static void TS_PaintMap(HWND hwnd, HDC hdc)
                 continue;
             TS_BlitCell1(hdc, dx, dy, ts_work[y * ts_w + x]);
         }
+    }
+    if (ts_is_brush && ts_w > 0 && ts_h > 0 && blockwidth > 0 && blockheight > 0) {
+        int hx = 0, hy = 0;
+        HPEN pen, old;
+        HBRUSH oldb;
+        if (brushhandle == 1) hx = ts_w - 1;
+        else if (brushhandle == 2) hy = ts_h - 1;
+        else if (brushhandle == 3) { hx = ts_w - 1; hy = ts_h - 1; }
+        dx = hx * blockwidth - ts_map_sx;
+        dy = hy * blockheight - ts_map_sy;
+        pen = CreatePen(PS_SOLID, 2, RGB(255, 255, 0));
+        old = SelectObject(hdc, pen);
+        oldb = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+        Rectangle(hdc, dx, dy, dx + blockwidth, dy + blockheight);
+        SelectObject(hdc, old);
+        SelectObject(hdc, oldb);
+        DeleteObject(pen);
     }
 }
 
@@ -3912,6 +3939,7 @@ INT_PTR CALLBACK DIATilesetEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 {
     switch (msg) {
     case WM_INITDIALOG:
+        ts_is_brush = 0;
         TS_WorkLoad((int)lParam);
         if (ts_work == NULL) {
             EndDialog(hwndDlg, -1L);
@@ -4085,6 +4113,430 @@ void DIATilesetEdit(HWND hwnd, int idx)
         megetatileset = 1;
         MessageBox(hwnd, "Drag a rectangle on the map to copy tiles into this tileset.",
             "Grab tileset", MB_OK | MB_ICONINFORMATION);
+    }
+}
+
+static void BR_SelectSlot(int slot)
+{
+    ts_edidx = slot;
+    curbrsh = (short int)(slot + 1);
+    curbrushsel = (short int)slot;
+    curanim = -1;
+}
+
+static int BR_FindNext(int slot, int dir)
+{
+    int i;
+    for (i = slot + dir; i >= 0 && i < MAXBRSH; i += dir)
+        if (brshpt[i] != NULL)
+            return i;
+    return slot;
+}
+
+static int BR_EnsureSlot(int slot, int w, int h)
+{
+    short int * p;
+    int n;
+
+    if (slot < 0 || slot >= MAXBRSH)
+        return -1;
+    if (brshpt[slot] != NULL)
+        return slot;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    n = w * h;
+    p = (short int *) malloc((size_t)n * 2 + 4);
+    if (p == NULL)
+        return -1;
+    p[0] = (short int) w;
+    p[1] = (short int) h;
+    memset(p + 2, 0, (size_t)n * 2);
+    brshpt[slot] = p;
+    strcpy(brshname[slot], "Brush");
+    return slot;
+}
+
+static int BR_NewEmpty(int w, int h)
+{
+    int s = FindFreeBrush();
+    short int * p;
+    int n;
+
+    if (s < 1)
+        return -1;
+    s--;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    n = w * h;
+    p = (short int *) malloc((size_t)n * 2 + 4);
+    if (p == NULL)
+        return -1;
+    p[0] = (short int) w;
+    p[1] = (short int) h;
+    memset(p + 2, 0, (size_t)n * 2);
+    if (brshpt[s] != NULL)
+        free(brshpt[s]);
+    brshpt[s] = p;
+    strcpy(brshname[s], "Brush");
+    return s;
+}
+
+static void BR_DestroySlot(int slot)
+{
+    if (slot < 0 || slot >= MAXBRSH)
+        return;
+    if (brshpt[slot] != NULL) {
+        free(brshpt[slot]);
+        brshpt[slot] = NULL;
+    }
+    strcpy(brshname[slot], "Brush");
+}
+
+static int BR_DuplicateSlot(int src)
+{
+    int dst, nbytes;
+    short int * p;
+
+    if (src < 0 || src >= MAXBRSH || brshpt[src] == NULL)
+        return -1;
+    dst = FindFreeBrush();
+    if (dst < 1)
+        return -1;
+    dst--;
+    nbytes = brshpt[src][0] * brshpt[src][1] * 2 + 4;
+    p = (short int *) malloc((size_t)nbytes);
+    if (p == NULL)
+        return -1;
+    memcpy(p, brshpt[src], (size_t)nbytes);
+    if (brshpt[dst] != NULL)
+        free(brshpt[dst]);
+    brshpt[dst] = p;
+    memcpy(brshname[dst], brshname[src], 64);
+    brshname[dst][63] = 0;
+    return dst;
+}
+
+static void BR_WorkLoad(int slot)
+{
+    short int * bp;
+    int n;
+
+    TS_WorkFree();
+    ts_w = 0;
+    ts_h = 0;
+    ts_name[0] = 0;
+    BR_SelectSlot(slot);
+    bp = (slot >= 0 && slot < MAXBRSH) ? brshpt[slot] : NULL;
+    if (bp == NULL) {
+        if (TS_WorkAlloc(1, 1) != 0)
+            return;
+        strcpy(ts_name, "Brush");
+        return;
+    }
+    memcpy(ts_name, brshname[slot], TS_NAMELEN);
+    ts_name[TS_NAMELEN - 1] = 0;
+    if (TS_WorkAlloc(bp[0], bp[1]) != 0)
+        return;
+    n = ts_w * ts_h;
+    if (n > 0)
+        memcpy(ts_work, bp + 2, (size_t)n * sizeof(short));
+}
+
+static int BR_WorkCommit(void)
+{
+    short int * p;
+    int n, slot = ts_edidx;
+
+    if (slot < 0 || slot >= MAXBRSH)
+        return -1;
+    if (ts_w < 1) ts_w = 1;
+    if (ts_h < 1) ts_h = 1;
+    n = ts_w * ts_h;
+    p = (short int *) malloc((size_t)n * 2 + 4);
+    if (p == NULL)
+        return -1;
+    p[0] = (short int) ts_w;
+    p[1] = (short int) ts_h;
+    if (ts_work != NULL && n > 0)
+        memcpy(p + 2, ts_work, (size_t)n * sizeof(short));
+    else
+        memset(p + 2, 0, (size_t)n * 2);
+    if (brshpt[slot] != NULL)
+        free(brshpt[slot]);
+    brshpt[slot] = p;
+    memcpy(brshname[slot], ts_name, 64);
+    brshname[slot][63] = 0;
+    if (brshname[slot][0] == 0)
+        strcpy(brshname[slot], "Brush");
+    mapaltered = 1;
+    return 0;
+}
+
+static void BR_ReadHandleTrans(HWND hwndDlg)
+{
+    if (IsDlgButtonChecked(hwndDlg, IDC_BRHANDLETR) == BST_CHECKED)
+        brushhandle = 1;
+    else if (IsDlgButtonChecked(hwndDlg, IDC_BRHANDLEBL) == BST_CHECKED)
+        brushhandle = 2;
+    else if (IsDlgButtonChecked(hwndDlg, IDC_BRHANDLEBR) == BST_CHECKED)
+        brushhandle = 3;
+    else
+        brushhandle = 0;
+    pastebrushnt = (IsDlgButtonChecked(hwndDlg, IDC_BRSKIPTRANS) == BST_CHECKED) ? 0 : 1;
+}
+
+static void BR_DlgFill(HWND hwndDlg)
+{
+    char txt[128];
+    int hid;
+
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSNAME), ts_name);
+    sprintf(txt, "%d", ts_w);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSWIDTH), txt);
+    sprintf(txt, "%d", ts_h);
+    SetWindowText(GetDlgItem(hwndDlg, IDC_TSHEIGHT), txt);
+    hid = IDC_BRHANDLETL;
+    if (brushhandle == 1) hid = IDC_BRHANDLETR;
+    else if (brushhandle == 2) hid = IDC_BRHANDLEBL;
+    else if (brushhandle == 3) hid = IDC_BRHANDLEBR;
+    CheckRadioButton(hwndDlg, IDC_BRHANDLETL, IDC_BRHANDLEBR, hid);
+    CheckDlgButton(hwndDlg, IDC_BRSKIPTRANS, pastebrushnt ? BST_UNCHECKED : BST_CHECKED);
+    sprintf(txt, "Brush %d", ts_edidx + 1);
+    SetWindowText(hwndDlg, txt);
+    TS_StampInfo(hwndDlg);
+    if (ts_map_hwnd) {
+        TS_MapUpdateScroll(ts_map_hwnd);
+        InvalidateRect(ts_map_hwnd, NULL, FALSE);
+    }
+    if (ts_pick_hwnd) {
+        TS_PickUpdateScroll(ts_pick_hwnd);
+        InvalidateRect(ts_pick_hwnd, NULL, FALSE);
+    }
+}
+
+static void BR_DlgClose(HWND hwndDlg, int restore)
+{
+    ts_map_hwnd = NULL;
+    ts_pick_hwnd = NULL;
+    ts_dlg = NULL;
+    ts_is_brush = 0;
+    TS_WorkFree();
+    if (restore) {
+        brushhandle = br_saved_handle;
+        pastebrushnt = (short int) br_saved_nt;
+    }
+    EndDialog(hwndDlg, restore ? -1 : 0);
+}
+
+INT_PTR CALLBACK DIABrushEditProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg) {
+    case WM_INITDIALOG:
+        ts_is_brush = 1;
+        br_saved_handle = brushhandle;
+        br_saved_nt = pastebrushnt;
+        BR_WorkLoad((int) lParam);
+        if (ts_work == NULL) {
+            ts_is_brush = 0;
+            EndDialog(hwndDlg, -1L);
+            break;
+        }
+        ts_dlg = hwndDlg;
+        ts_map_sx = ts_map_sy = 0;
+        ts_pick_yoff = 0;
+        ts_pick_mode = 0;
+        TS_SetLocalPick(0);
+        ts_paint = 0;
+        if (!TS_RegisterPanes()) {
+            ts_is_brush = 0;
+            TS_WorkFree();
+            EndDialog(hwndDlg, -1L);
+            break;
+        }
+        ts_map_hwnd = TS_CreatePane(hwndDlg, IDC_TSGRID, TS_PANE_MAP);
+        ts_pick_hwnd = TS_CreatePane(hwndDlg, IDC_TSPICK, TS_PANE_PICK);
+        if (ts_map_hwnd) TS_MapUpdateScroll(ts_map_hwnd);
+        if (ts_pick_hwnd) TS_PickUpdateScroll(ts_pick_hwnd);
+        BR_DlgFill(hwndDlg);
+        break;
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDC_TSWIDTH:
+        case IDC_TSHEIGHT:
+            if (HIWORD(wParam) == EN_KILLFOCUS) {
+                TS_DlgReadMeta(hwndDlg);
+                if (ts_map_hwnd) {
+                    TS_MapUpdateScroll(ts_map_hwnd);
+                    InvalidateRect(ts_map_hwnd, NULL, FALSE);
+                }
+            }
+            break;
+        case IDC_BRHANDLETL:
+        case IDC_BRHANDLETR:
+        case IDC_BRHANDLEBL:
+        case IDC_BRHANDLEBR:
+            BR_ReadHandleTrans(hwndDlg);
+            if (ts_map_hwnd) InvalidateRect(ts_map_hwnd, NULL, FALSE);
+            break;
+        case IDC_BRSKIPTRANS:
+            BR_ReadHandleTrans(hwndDlg);
+            break;
+        case IDC_TSPICKSTILL:
+        case IDC_TSPICKANIM:
+            ts_pick_mode = (LOWORD(wParam) == IDC_TSPICKANIM);
+            ts_pick_yoff = 0;
+            TS_SetLocalPick(0);
+            TS_StampInfo(hwndDlg);
+            if (ts_pick_hwnd) {
+                TS_PickUpdateScroll(ts_pick_hwnd);
+                InvalidateRect(ts_pick_hwnd, NULL, FALSE);
+            }
+            break;
+        case IDC_TSNEW: {
+                int ni;
+                TS_DlgReadMeta(hwndDlg);
+                BR_ReadHandleTrans(hwndDlg);
+                BR_WorkCommit();
+                ni = BR_NewEmpty(1, 1);
+                if (ni < 0) {
+                    MessageBox(hwndDlg, "All 16 brush slots are used. Delete a brush first.",
+                        "Brush", MB_OK | MB_ICONINFORMATION);
+                    break;
+                }
+                ts_map_sx = ts_map_sy = 0;
+                BR_WorkLoad(ni);
+                BR_DlgFill(hwndDlg);
+                mapaltered = 1;
+                break;
+            }
+        case IDC_TSDUP: {
+                int ni;
+                TS_DlgReadMeta(hwndDlg);
+                BR_ReadHandleTrans(hwndDlg);
+                BR_WorkCommit();
+                ni = BR_DuplicateSlot(ts_edidx);
+                if (ni < 0) {
+                    MessageBox(hwndDlg, "Can't duplicate brush (no free slot?).",
+                        "Brush", MB_OK | MB_ICONINFORMATION);
+                    break;
+                }
+                ts_map_sx = ts_map_sy = 0;
+                BR_WorkLoad(ni);
+                BR_DlgFill(hwndDlg);
+                mapaltered = 1;
+                break;
+            }
+        case IDC_TSDEL:
+            if (MessageBox(hwndDlg, "Delete this brush?", "Brush",
+                MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
+                int ni;
+                BR_DestroySlot(ts_edidx);
+                mapaltered = 1;
+                ni = BR_FindNext(ts_edidx, -1);
+                if (ni == ts_edidx)
+                    ni = BR_FindNext(ts_edidx, 1);
+                if (ni == ts_edidx || brshpt[ni] == NULL) {
+                    curbrsh = 0;
+                    curbrushsel = -1;
+                    BR_DlgClose(hwndDlg, 0);
+                    break;
+                }
+                ts_map_sx = ts_map_sy = 0;
+                BR_WorkLoad(ni);
+                BR_DlgFill(hwndDlg);
+            }
+            break;
+        case IDC_TSPREV:
+        case IDC_TSNEXT: {
+                int ni;
+                TS_DlgReadMeta(hwndDlg);
+                BR_ReadHandleTrans(hwndDlg);
+                BR_WorkCommit();
+                ni = BR_FindNext(ts_edidx, LOWORD(wParam) == IDC_TSPREV ? -1 : 1);
+                ts_map_sx = ts_map_sy = 0;
+                BR_WorkLoad(ni);
+                BR_DlgFill(hwndDlg);
+                break;
+            }
+        case IDC_BRGRABBS:
+            TS_DlgReadMeta(hwndDlg);
+            BR_ReadHandleTrans(hwndDlg);
+            BR_WorkCommit();
+            DIAGrabBrushBS(hwndDlg);
+            BR_WorkLoad(ts_edidx);
+            BR_DlgFill(hwndDlg);
+            break;
+        case IDC_TSGRAB:
+            TS_DlgReadMeta(hwndDlg);
+            BR_ReadHandleTrans(hwndDlg);
+            if (BR_WorkCommit() != 0)
+                break;
+            ts_map_hwnd = NULL;
+            ts_pick_hwnd = NULL;
+            ts_dlg = NULL;
+            ts_is_brush = 0;
+            TS_WorkFree();
+            EndDialog(hwndDlg, 3);
+            break;
+        case IDOK:
+            TS_DlgReadMeta(hwndDlg);
+            BR_ReadHandleTrans(hwndDlg);
+            BR_WorkCommit();
+            ts_map_hwnd = NULL;
+            ts_pick_hwnd = NULL;
+            ts_dlg = NULL;
+            ts_is_brush = 0;
+            TS_WorkFree();
+            EndDialog(hwndDlg, 0);
+            break;
+        case IDCANCEL:
+            BR_DlgClose(hwndDlg, 1);
+            break;
+        }
+        break;
+    case WM_CLOSE:
+        BR_DlgClose(hwndDlg, 1);
+        break;
+    default:
+        return 0;
+    }
+    return -1;
+}
+
+void DIABrushEdit(HWND hwnd, int slot)
+{
+    int r;
+
+    if (mappt == NULL) {
+        MessageBox(hwnd, "Load or create a map first.", "Brush",
+            MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (slot < 0 || slot >= MAXBRSH) {
+        slot = FindFreeBrush();
+        if (slot < 1) {
+            MessageBox(hwnd, "All 16 brush slots are used.", "Brush",
+                MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        slot--;
+    }
+    if (BR_EnsureSlot(slot, 1, 1) < 0) {
+        MessageBox(hwnd, "Can't create brush.", "Brush",
+            MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    BR_SelectSlot(slot);
+    r = (int) DialogBoxParam(hInstance, (LPCSTR) "D_BRUSHEDIT", hwnd,
+        AsDlgProc(DIABrushEditProc), (LPARAM) slot);
+    ts_is_brush = 0;
+    TS_WorkFree();
+    RejigBrshMenu(curbrsh);
+    InvalidateAll();
+    if (r == 3) {
+        megetabrush = 1;
+        MessageBox(hwnd, "Drag a rectangle on the map to copy tiles into this brush.",
+            "Grab brush", MB_OK | MB_ICONINFORMATION);
     }
 }
 

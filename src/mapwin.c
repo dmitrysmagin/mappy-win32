@@ -212,11 +212,11 @@ void RejigBrshMenu(int brshnum) {
             sprintf(txt, "%s  (%dx%d)", nm, bw, bh);
         else
             sprintf(txt, "Brush %d  (%dx%d)", i + 1, bw, bh);
-        InsertMenu(bm, CM_BRUSHRENAME, MF_BYCOMMAND | MF_STRING, CM_BRUSH1 + i, txt);
+        InsertMenu(bm, CM_BRUSHDESTROY, MF_BYCOMMAND | MF_STRING, CM_BRUSH1 + i, txt);
         n++;
     }
     if (n > 0)
-        InsertMenu(bm, CM_BRUSHRENAME, MF_BYCOMMAND | MF_SEPARATOR, CM_BRUSHSEP, NULL);
+        InsertMenu(bm, CM_BRUSHDESTROY, MF_BYCOMMAND | MF_SEPARATOR, CM_BRUSHSEP, NULL);
 
     if (brshnum > 0 && brshnum <= MAXBRSH && brshpt[brshnum - 1] != NULL)
         CheckMenuItem(bm, CM_BRUSH1 + (brshnum - 1), MF_CHECKED);
@@ -278,10 +278,6 @@ static void UpdateToggleMenus(void) {
     CheckMenuItem(hMenu, CM_TOOLWNES, wnesmode ? MF_CHECKED : MF_UNCHECKED);
     CheckMenuItem(hMenu, CM_TOOLPILLARS, isopillars ? MF_CHECKED : MF_UNCHECKED);
     CheckMenuItem(hMenu, CM_TOOLREVEAL, isoreveal ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, CM_BRUSHHANDLETL, (brushhandle==0) ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, CM_BRUSHHANDLETR, (brushhandle==1) ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, CM_BRUSHHANDLEBL, (brushhandle==2) ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, CM_BRUSHHANDLEBR, (brushhandle==3) ? MF_CHECKED : MF_UNCHECKED);
 }
 
 void RejigLayerMenu(int lyernum) {
@@ -375,7 +371,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             if (zoomon==1) CheckMenuItem(hMenu, CM_TOOLZOOM1, MF_CHECKED);
             if (zoomon==2) CheckMenuItem(hMenu, CM_TOOLZOOM2, MF_CHECKED);
             if (zoomon==4) CheckMenuItem(hMenu, CM_TOOLZOOM4, MF_CHECKED);
-            CheckMenuItem(hMenu, CM_BRUSHGRABNT, MF_UNCHECKED);
             if (objshow) CheckMenuItem(hMenu, CM_OBJSHOW, MF_CHECKED);
             else CheckMenuItem(hMenu, CM_OBJSHOW, MF_UNCHECKED);
             CheckMenuItem(hMenu, CM_OBJPLACE, MF_UNCHECKED);
@@ -931,11 +926,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 }
                 break;
             case CM_BRUSHRENAME:
-                if (curbrsh >=1 && curbrsh <= MAXBRSH && brshpt[curbrsh-1] != NULL) {
-                    DIAGetBrushName(hwnd, GetBrushName(curbrsh-1));
-                    Rejig();
+                if (curbrsh >=1 && curbrsh <= MAXBRSH) {
+                    DIABrushEdit(hwnd, curbrsh - 1);
                 } else {
-                    MessageBox(hwnd, "Please select a grabbed brush first...", "Brush Rename", MB_ICONINFORMATION|MB_OK);
+                    MessageBox(hwnd, "Please select a grabbed brush first...", "Brush", MB_ICONINFORMATION|MB_OK);
                 }
                 break;
             case CM_BRUSHHANDLE:
