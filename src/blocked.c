@@ -36,6 +36,8 @@ short int curgfxsel = -1;   /* selected graphic index (Graph mode) */
 short int curbrushsel = -1; /* selected brush index (Brushes mode) */
 short int curobjsel = -1;   /* selected object index (Objects mode) */
 short int curtilesetsel = -1; /* selected tileset index */
+static int betsinstoff = 0; /* Tilesets panel: instance-list scroll */
+static int bets_pane = 0;   /* 0 = types half, 1 = instances half */
 static char szBlockEdname[] = "Block Editor";
 extern HINSTANCE hInstance;
 extern short int blockwidth, blockheight, blockdepth, gridon, zoomon;
@@ -57,6 +59,8 @@ static TilesetDef tsclip;
 static short *tscliptiles = NULL;
 static int tsclipw, tscliph, tscliphas = 0;
 
+static int BETabStripHeight(void);
+
 static int BETilesetRowH(HWND hwnd)
 {
     int dpi = MapGetDpi(hwnd);
@@ -69,6 +73,140 @@ static int BETilesetRowH(HWND hwnd)
     t = MapScale(22, dpi);
     if (h < t) h = t;
     return h;
+}
+
+static int BEListHdrH(HWND hwnd)
+{
+    int h = MapScale(18, MapGetDpi(hwnd));
+    if (h < 16) h = 16;
+    return h;
+}
+
+typedef struct {
+    RECT types_hdr, types, insts_hdr, insts;
+    int split, rowh, pad, thumb;
+} BETsLay;
+
+static void BETsGetLayout(HWND hwnd, BETsLay * L)
+{
+    RECT rc;
+    int tabht, body, hdrh;
+
+    GetClientRect(hwnd, &rc);
+    tabht = BETabStripHeight();
+    body = rc.bottom - tabht;
+    if (body < 4) body = 4;
+    hdrh = BEListHdrH(hwnd);
+    L->split = tabht + body / 2;
+    L->rowh = BETilesetRowH(hwnd);
+    L->pad = MapDip(hwnd, 4);
+    L->thumb = L->rowh - L->pad * 2;
+    if (L->thumb < 8) L->thumb = 8;
+    L->types_hdr.left = L->types.left = L->insts_hdr.left = L->insts.left = 0;
+    L->types_hdr.right = L->types.right = L->insts_hdr.right = L->insts.right = rc.right;
+    L->types_hdr.top = tabht;
+    L->types_hdr.bottom = tabht + hdrh;
+    L->types.top = L->types_hdr.bottom;
+    L->types.bottom = L->split;
+    L->insts_hdr.top = L->split + 1;
+    L->insts_hdr.bottom = L->insts_hdr.top + hdrh;
+    L->insts.top = L->insts_hdr.bottom;
+    L->insts.bottom = rc.bottom;
+}
+
+static int BETsPaneFromY(HWND hwnd, int y)
+{
+    BETsLay L;
+    BETsGetLayout(hwnd, &L);
+    return (y >= L.split) ? 1 : 0;
+}
+
+static int BETsListMax(HWND hwnd, int pane)
+{
+    BETsLay L;
+    RECT * p;
+    int vis, count, m;
+
+    BETsGetLayout(hwnd, &L);
+    p = pane ? &L.insts : &L.types;
+    vis = L.rowh > 0 ? (p->bottom - p->top) / L.rowh : 0;
+    if (vis < 1) vis = 1;
+    count = pane ? TS_NumInst() : (TS_NumDefs() + 1);
+    m = count - vis;
+    if (m < 0) m = 0;
+    return m;
+}
+
+static void BETsClampScroll(HWND hwnd)
+{
+    int mt = BETsListMax(hwnd, 0);
+    int mi = BETsListMax(hwnd, 1);
+    if (beyoff > mt) beyoff = (short int) mt;
+    if (beyoff < 0) beyoff = 0;
+    if (betsinstoff > mi) betsinstoff = mi;
+    if (betsinstoff < 0) betsinstoff = 0;
+}
+
+static void BETsScrollBy(HWND hwnd, int delta)
+{
+    int maxoff = BETsListMax(hwnd, bets_pane);
+    int pos;
+    if (bets_pane) {
+        betsinstoff += delta;
+        if (betsinstoff < 0) betsinstoff = 0;
+        if (betsinstoff > maxoff) betsinstoff = maxoff;
+        pos = betsinstoff;
+    } else {
+        beyoff = (short int) (beyoff + delta);
+        if (beyoff < 0) beyoff = 0;
+        if (beyoff > maxoff) beyoff = (short int) maxoff;
+        pos = beyoff;
+    }
+    SetScrollPos(bhwnd, SB_VERT, pos, TRUE);
+}
+
+static void BETsScrollTo(HWND hwnd, int pos)
+{
+    int maxoff = BETsListMax(hwnd, bets_pane);
+    if (pos < 0) pos = 0;
+    if (pos > maxoff) pos = maxoff;
+    if (bets_pane)
+        betsinstoff = pos;
+    else
+        beyoff = (short int) pos;
+    SetScrollPos(bhwnd, SB_VERT, pos, TRUE);
+}
+
+/* Row index in the pane under y, or -1 for a header/splitter. Sets *pane. */
+static int BETsHitRow(HWND hwnd, int y, int * pane)
+{
+    BETsLay L;
+    BETsGetLayout(hwnd, &L);
+    if (y < L.split) {
+        *pane = 0;
+        if (y < L.types.top || L.rowh < 1) return -1;
+        return beyoff + (y - L.types.top) / L.rowh;
+    }
+    *pane = 1;
+    if (y < L.insts.top || L.rowh < 1) return -1;
+    return betsinstoff + (y - L.insts.top) / L.rowh;
+}
+
+static void BETsSelectInst(int i, int panmap)
+{
+    const TilesetInst * in = TS_GetInst(i);
+    if (in == NULL) return;
+    TS_SetCurInst(i);
+    curtilesetsel = (short int) in->tset;
+    TS_SetCurDef(in->tset);
+    if (!panmap || mapwidth < 1 || mapheight < 1) return;
+    xmapoffset = (short int) in->tx;
+    ymapoffset = (short int) in->ty;
+    if (xmapoffset < 0) xmapoffset = 0;
+    if (ymapoffset < 0) ymapoffset = 0;
+    if (xmapoffset > mapwidth - 1) xmapoffset = mapwidth - 1;
+    if (ymapoffset > mapheight - 1) ymapoffset = mapheight - 1;
+    MESetScrollRange(mapwidth - 1, mapheight - 1, xmapoffset, ymapoffset);
 }
 
 static int BEIsListType(int t)
@@ -215,7 +353,16 @@ void BEBlockNext(void) {
         F14_SetCurObject(curobjsel);
         BEInvalidate();
     }
-    if (betype == BETYPE_TILESETS && curtilesetsel < TS_NumDefs() - 1) { curtilesetsel++; TS_SetCurDef(curtilesetsel); BEInvalidate(); }
+    if (betype == BETYPE_TILESETS) {
+        if (bets_pane == 1) {
+            if (TS_CurInst() < TS_NumInst() - 1)
+                BETsSelectInst(TS_CurInst() + 1, 0);
+        } else if (curtilesetsel < TS_NumDefs() - 1) {
+            curtilesetsel++;
+            TS_SetCurDef(curtilesetsel);
+        }
+        BEInvalidate();
+    }
 }
 
 void BEBlockPrev(void) {
@@ -237,7 +384,16 @@ void BEBlockPrev(void) {
         F14_SetCurObject(curobjsel);
         BEInvalidate();
     }
-    if (betype == BETYPE_TILESETS && curtilesetsel > 0) { curtilesetsel--; TS_SetCurDef(curtilesetsel); BEInvalidate(); }
+    if (betype == BETYPE_TILESETS) {
+        if (bets_pane == 1) {
+            if (TS_CurInst() > 0)
+                BETsSelectInst(TS_CurInst() - 1, 0);
+        } else if (curtilesetsel > 0) {
+            curtilesetsel--;
+            TS_SetCurDef(curtilesetsel);
+        }
+        BEInvalidate();
+    }
 }
 
 static int BEItemCount(void) {
@@ -304,6 +460,25 @@ void BESetScrollRange(void) {
     case BETYPE_BRUSHES: title = "Brushes"; break;
     case BETYPE_OBJECTS: title = "Objects"; break;
     case BETYPE_TILESETS: title = "Tilesets"; break;
+    }
+    if (betype == BETYPE_TILESETS && bhwnd != NULL) {
+        char buf[80];
+        int pane = bets_pane;
+        int n = pane ? TS_NumInst() : TS_NumDefs();
+        int sel = pane ? TS_CurInst() : (int) curtilesetsel;
+        int maxoff;
+        BETsClampScroll(bhwnd);
+        maxoff = BETsListMax(bhwnd, pane);
+        if (n > 0 && sel >= 0)
+            sprintf(buf, "%s (%d/%d)", pane ? "Tileset instances" : "Tileset types",
+                sel + 1, n);
+        else
+            sprintf(buf, "%s", pane ? "Tileset instances" : "Tileset types");
+        SetWindowText(bhwnd, buf);
+        BESyncBpr(bhwnd);
+        SetScrollRange(bhwnd, SB_VERT, 0, maxoff, FALSE);
+        SetScrollPos(bhwnd, SB_VERT, pane ? betsinstoff : beyoff, TRUE);
+        return;
     }
     if (total > 0 && beyoff >= 0) {
         char buf[64];
@@ -659,44 +834,82 @@ static void BEDrawAddNewRow(HDC hdc, RECT * row, int pad, int thumb)
     SetTextColor(hdc, RGB(255, 255, 255));
 }
 
+static void BEDrawSectionHdr(HDC hdc, HWND hwnd, RECT * hdr, const char * title)
+{
+    HBRUSH br;
+    RECT bar;
+    int pad = MapDip(hwnd, 4);
+
+    br = CreateSolidBrush(RGB(0x2a, 0x2a, 0x2a));
+    FillRect(hdc, hdr, br);
+    DeleteObject(br);
+    bar = *hdr;
+    bar.top = bar.bottom - 1;
+    br = CreateSolidBrush(RGB(0x22, 0x22, 0x22));
+    FillRect(hdc, &bar, br);
+    DeleteObject(br);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(180, 180, 180));
+    TextOut(hdc, hdr->left + pad, hdr->top + 2, title, (int) strlen(title));
+    SetTextColor(hdc, RGB(255, 255, 255));
+}
+
 static void BEDrawTilesetList(HWND phwnd, HDC myhdc)
 {
-    RECT rc, row;
-    int tabht = BETabStripHeight();
-    int rowh, i, n, thumb, pad;
+    RECT rc, row, bar, splitr;
+    BETsLay L;
+    int i, n, ni, saved;
     HBRUSH bg, sel, line;
     HFONT oldf = NULL;
+    char txt[128];
 
     GetClientRect(phwnd, &rc);
-    rc.top = tabht;
+    rc.top = BETabStripHeight();
     bg = CreateSolidBrush(RGB(0x44, 0x44, 0x44));
     FillRect(myhdc, &rc, bg);
     DeleteObject(bg);
     bebpr = 1;
-    rowh = BETilesetRowH(phwnd);
-    pad = MapDip(phwnd, 4);
-    thumb = rowh - pad * 2;
-    if (thumb < 8) thumb = 8;
+    BETsGetLayout(phwnd, &L);
+    BETsClampScroll(phwnd);
     n = TS_NumDefs();
+    ni = TS_NumInst();
     sel = CreateSolidBrush(RGB(0x66, 0x66, 0x88));
     line = CreateSolidBrush(RGB(0x33, 0x33, 0x33));
     SetBkMode(myhdc, TRANSPARENT);
     SetTextColor(myhdc, RGB(255, 255, 255));
     if (be_font != NULL)
         oldf = SelectObject(myhdc, be_font);
-    for (i = 0; (tabht + (i + 1) * rowh) <= rc.bottom + rowh; i++) {
-        const TilesetDef *d;
+
+    sprintf(txt, "Types (%d)", n);
+    BEDrawSectionHdr(myhdc, phwnd, &L.types_hdr, txt);
+    sprintf(txt, "Instances (%d)", ni);
+    BEDrawSectionHdr(myhdc, phwnd, &L.insts_hdr, txt);
+
+    splitr.left = 0;
+    splitr.right = rc.right;
+    splitr.top = L.split;
+    splitr.bottom = L.split + 1;
+    {
+        HBRUSH sp = CreateSolidBrush(RGB(0x18, 0x18, 0x18));
+        FillRect(myhdc, &splitr, sp);
+        DeleteObject(sp);
+    }
+
+    saved = SaveDC(myhdc);
+    IntersectClipRect(myhdc, L.types.left, L.types.top, L.types.right, L.types.bottom);
+    for (i = 0; ; i++) {
+        const TilesetDef * d;
         int idx = beyoff + i;
-        char txt[96];
-        RECT bar;
+        row.left = L.types.left;
+        row.right = L.types.right;
+        row.top = L.types.top + i * L.rowh;
+        row.bottom = row.top + L.rowh;
+        if (row.top >= L.types.bottom)
+            break;
         if (idx > n)
             break;
-        row.left = rc.left;
-        row.right = rc.right;
-        row.top = tabht + i * rowh;
-        row.bottom = row.top + rowh;
         if (idx == n) {
-            BEDrawAddNewRow(myhdc, &row, pad, thumb);
+            BEDrawAddNewRow(myhdc, &row, L.pad, L.thumb);
             break;
         }
         if (idx == curtilesetsel)
@@ -706,13 +919,52 @@ static void BEDrawTilesetList(HWND phwnd, HDC myhdc)
         FillRect(myhdc, &bar, line);
         d = TS_GetDef(idx);
         if (d != NULL && d->tiles != NULL)
-            BEBlitCell(myhdc, row.left + pad, row.top + pad, thumb, thumb, d->tiles[0]);
+            BEBlitCell(myhdc, row.left + L.pad, row.top + L.pad, L.thumb, L.thumb, d->tiles[0]);
         if (d != NULL)
             sprintf(txt, "%s  (%dx%d)", d->name[0] ? d->name : "Tileset", d->width, d->height);
         else
             sprintf(txt, "Tileset %d", idx);
-        TextOut(myhdc, row.left + pad + thumb + pad, row.top + pad, txt, (int)strlen(txt));
+        TextOut(myhdc, row.left + L.pad + L.thumb + L.pad, row.top + L.pad, txt, (int) strlen(txt));
     }
+    RestoreDC(myhdc, saved);
+
+    saved = SaveDC(myhdc);
+    IntersectClipRect(myhdc, L.insts.left, L.insts.top, L.insts.right, L.insts.bottom);
+    for (i = 0; ; i++) {
+        const TilesetInst * in;
+        const TilesetDef * d;
+        int idx = betsinstoff + i;
+        row.left = L.insts.left;
+        row.right = L.insts.right;
+        row.top = L.insts.top + i * L.rowh;
+        row.bottom = row.top + L.rowh;
+        if (row.top >= L.insts.bottom)
+            break;
+        if (idx >= ni)
+            break;
+        in = TS_GetInst(idx);
+        if (idx == TS_CurInst())
+            FillRect(myhdc, &row, sel);
+        bar = row;
+        bar.top = row.bottom - 1;
+        FillRect(myhdc, &bar, line);
+        d = (in != NULL) ? TS_GetDef(in->tset) : NULL;
+        if (d != NULL && d->tiles != NULL)
+            BEBlitCell(myhdc, row.left + L.pad, row.top + L.pad, L.thumb, L.thumb, d->tiles[0]);
+        if (in == NULL)
+            sprintf(txt, "%d", idx);
+        else {
+            const char * nm = (d != NULL && d->name[0]) ? d->name : "Tileset";
+            sprintf(txt, "%d: %s @ %d,%d  L%d%s", idx, nm, in->tx, in->ty,
+                in->layer, in->show ? "" : " [hidden]");
+        }
+        if (in != NULL && !in->show)
+            SetTextColor(myhdc, RGB(160, 160, 160));
+        TextOut(myhdc, row.left + L.pad + L.thumb + L.pad, row.top + L.pad, txt, (int) strlen(txt));
+        SetTextColor(myhdc, RGB(255, 255, 255));
+    }
+    RestoreDC(myhdc, saved);
+
     if (oldf != NULL)
         SelectObject(myhdc, oldf);
     DeleteObject(sel);
@@ -1105,6 +1357,8 @@ static void BESetType(int newtype) {
     if (newtype == BETYPE_TILESETS) {
         curtilesetsel = (short int)TS_CurDef();
         if (curtilesetsel < 0 && TS_NumDefs() > 0) curtilesetsel = 0;
+        betsinstoff = 0;
+        bets_pane = 0;
     }
     if (newtype == BETYPE_OBJECTS) {
         curobjsel = (short int) F14_CurObject();
@@ -1167,6 +1421,25 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         break;
     case WM_VSCROLL:
         BERefreshSort();
+        if (betype == BETYPE_TILESETS) {
+            int maxoff = BETsListMax(hwnd, bets_pane);
+            int pos = bets_pane ? betsinstoff : beyoff;
+            switch (LOWORD(wParam)) {
+            case SB_TOP: pos = 0; break;
+            case SB_LINEUP: pos--; break;
+            case SB_LINEDOWN: pos++; break;
+            case SB_PAGEUP: pos -= 10; break;
+            case SB_PAGEDOWN: pos += 10; break;
+            case SB_BOTTOM: pos = maxoff; break;
+            case SB_THUMBPOSITION: pos = HIWORD(wParam); break;
+            case SB_THUMBTRACK:
+                if (thumbtrack) pos = HIWORD(wParam);
+                break;
+            }
+            BETsScrollTo(hwnd, pos);
+            InvalidateRgn(bhwnd, NULL, FALSE);
+            break;
+        }
         i = (short int) BEMaxScrollRow();
         switch (LOWORD(wParam)) {
         case SB_TOP:
@@ -1207,41 +1480,44 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         {
             int clicked;
             if (betype == BETYPE_TILESETS) {
-                int rowh = BETilesetRowH(hwnd);
-                int n = TS_NumDefs();
-                clicked = beyoff + ((HIWORD(lParam) - BETabStripHeight()) / rowh);
-                if (clicked < 0) break;
-                if (clicked == n) {
-                    BEAddTileset(hwnd);
-                    BESetScrollRange();
-                    InvalidateAll();
-                    break;
-                }
-                if (clicked >= n) break;
-                curtilesetsel = (short int)clicked;
-                TS_SetCurDef(clicked);
-                if (GetKeyState(VK_SHIFT) < 0) {
-                    int ii = TS_FindInstOfDef(clicked, maplayer);
-                    if (ii < 0) ii = TS_FindInstOfDef(clicked, -1);
-                    if (ii >= 0) {
-                        const TilesetInst *in = TS_GetInst(ii);
-                        TS_SetCurInst(ii);
-                        if (in != NULL && blockwidth > 0 && blockheight > 0) {
-                            xmapoffset = (short int)in->tx;
-                            ymapoffset = (short int)in->ty;
-                            if (xmapoffset < 0) xmapoffset = 0;
-                            if (ymapoffset < 0) ymapoffset = 0;
-                            if (xmapoffset > mapwidth - 1) xmapoffset = mapwidth - 1;
-                            if (ymapoffset > mapheight - 1) ymapoffset = mapheight - 1;
-                            MESetScrollRange(mapwidth - 1, mapheight - 1, xmapoffset, ymapoffset);
-                        }
+                int pane, clicked, n;
+                if (HIWORD(lParam) < BETabStripHeight()) break;
+                clicked = BETsHitRow(hwnd, HIWORD(lParam), &pane);
+                bets_pane = pane;
+                n = TS_NumDefs();
+                if (pane == 0) {
+                    if (clicked < 0) {
+                        BESetScrollRange();
+                        break;
                     }
+                    if (clicked == n) {
+                        BEAddTileset(hwnd);
+                        BESetScrollRange();
+                        InvalidateAll();
+                        break;
+                    }
+                    if (clicked >= n) break;
+                    curtilesetsel = (short int) clicked;
+                    TS_SetCurDef(clicked);
+                    if (GetKeyState(VK_SHIFT) < 0) {
+                        int ii = TS_FindInstOfDef(clicked, maplayer);
+                        if (ii < 0) ii = TS_FindInstOfDef(clicked, -1);
+                        if (ii >= 0)
+                            BETsSelectInst(ii, 1);
+                        BESetScrollRange();
+                        InvalidateAll();
+                        break;
+                    }
+                    DIATilesetEdit(hwnd, clicked);
                     BESetScrollRange();
                     InvalidateAll();
                     break;
                 }
-                if (!tsplace)
-                    DIATilesetEdit(hwnd, clicked);
+                if (clicked < 0 || clicked >= TS_NumInst()) {
+                    BESetScrollRange();
+                    break;
+                }
+                BETsSelectInst(clicked, GetKeyState(VK_SHIFT) < 0);
                 BESetScrollRange();
                 InvalidateAll();
                 break;
@@ -1335,21 +1611,29 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
     case WM_LBUTTONDBLCLK:
         if (blockstrpt == NULL) break;
         if (betype == BETYPE_TILESETS) {
-            int rowh, clicked, n;
+            int pane, clicked, n;
             if (HIWORD(lParam) < BETabStripHeight()) break;
-            rowh = BETilesetRowH(hwnd);
+            clicked = BETsHitRow(hwnd, HIWORD(lParam), &pane);
+            bets_pane = pane;
             n = TS_NumDefs();
-            clicked = beyoff + ((HIWORD(lParam) - BETabStripHeight()) / rowh);
-            if (clicked == n) {
-                BEAddTileset(hwnd);
+            if (pane == 0) {
+                if (clicked == n) {
+                    BEAddTileset(hwnd);
+                    BESetScrollRange();
+                    InvalidateAll();
+                    break;
+                }
+                if (clicked < 0 || clicked >= n) break;
+                curtilesetsel = (short int) clicked;
+                TS_SetCurDef(clicked);
+                DIATilesetEdit(hwnd, clicked);
                 BESetScrollRange();
                 InvalidateAll();
                 break;
             }
-            if (clicked < 0 || clicked >= n) break;
-            curtilesetsel = (short int)clicked;
-            TS_SetCurDef(clicked);
-            DIATilesetEdit(hwnd, clicked);
+            if (clicked < 0 || clicked >= TS_NumInst()) break;
+            BETsSelectInst(clicked, 0);
+            DIATilesetInstEdit(hwnd, clicked);
             BESetScrollRange();
             InvalidateAll();
             break;
@@ -1443,6 +1727,17 @@ LRESULT CALLBACK BlockWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         {
             int bdelta = (short)HIWORD(wParam);
             int bstep = (bdelta>0) ? -mwheelblks : mwheelblks;
+            if (betype == BETYPE_TILESETS) {
+                POINT pt;
+                pt.x = (short) LOWORD(lParam);
+                pt.y = (short) HIWORD(lParam);
+                ScreenToClient(hwnd, &pt);
+                bets_pane = BETsPaneFromY(hwnd, pt.y);
+                BETsScrollBy(hwnd, bstep);
+                BESetScrollRange();
+                InvalidateRgn(bhwnd, NULL, FALSE);
+                break;
+            }
             BERefreshSort();
             i = (short int) BEMaxScrollRow();
             beyoff += (short int) bstep;
