@@ -59,6 +59,11 @@ static int OE_IsArea(const F14Obj * o) {
     return (o->gfxid == 0 && o->tileid < 0 && (o->gwidth > 0 || o->gheight > 0));
 }
 
+/* Area/label have no graphic; they need a rectangle or they vanish. */
+static int OE_OutlineOnly(const F14Obj * o) {
+    return o != NULL && o->gfxid == 0 && o->tileid < 0;
+}
+
 static void OE_Rect(const F14Obj * o, int * x, int * y, int * w, int * h) {
     if (o->gfxid > 0) { *w = blockwidth; *h = blockheight; }
     else { *w = o->gwidth; *h = o->gheight; }
@@ -449,8 +454,12 @@ void OE_DrawObjects(HDC hdc, RECT * client) {
                 hpen = CreatePen(PS_DOT, pw, RGB(180, 180, 80));
             } else {
                 bc = OE_BorderCol(i);
-                if (bc == 0) continue; /* 000000 = no border */
-                hpen = CreatePen(PS_SOLID, pw, RGB((bc >> 16) & 0xFF, (bc >> 8) & 0xFF, bc & 0xFF));
+                if (bc == 0) {
+                    if (!OE_OutlineOnly(o)) continue; /* 000000 = no border on graphics */
+                    hpen = CreatePen(PS_SOLID, pw, RGB(255, 255, 0));
+                } else {
+                    hpen = CreatePen(PS_SOLID, pw, RGB((bc >> 16) & 0xFF, (bc >> 8) & 0xFF, bc & 0xFF));
+                }
             }
             hold = SelectObject(hdc, hpen);
             hbrold = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
