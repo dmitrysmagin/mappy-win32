@@ -68,7 +68,7 @@ static void GESetColChan(int chan, int v);
 static void GEPaletteOp(int dest);
 static int painton = 0, gettingbrush = 0, gettingtileset = 0;
 static short int * undobuff1, * undobuff2;
-int megetabrush = 0, megetatileset = 0, onion = 0, oniondark = 0, onionlower = 0;
+int megetabrush = 0, megetatileset = 0, megetaobjpos = 0, onion = 0, oniondark = 0, onionlower = 0;
 int wlayout = 0;
 
 static int meoldbx, meoldby, mebrushx, mebrushy, mebrushx2, mebrushy2;
@@ -2707,8 +2707,15 @@ LRESULT CALLBACK MapWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         break;
     case WM_LBUTTONDOWN:
         if (mappt==NULL) return 0;
-        /* Grab-from-map (brush or tileset) must win over place modes so a
-         * region can be dragged; place mode stays on and resumes after. */
+        /* Grab-from-map (object position, brush, or tileset) must win over
+         * place modes so a click/drag is captured; place mode stays on. */
+        if (megetaobjpos) {
+            megetaobjpos = 0;
+            OE_PlaceSelected(MEMapPixX(lParam), MEMapPixY(lParam),
+                GetKeyState(VK_SHIFT) < 0 && blockwidth > 0 && blockheight > 0);
+            InvalidateAll();
+            return 0;
+        }
         if (!(megetabrush || megetatileset) && tsplace) {
             xblk = xmapoffset + MEGetX(LOWORD(lParam), HIWORD(lParam));
             yblk = ymapoffset + MEGetY(LOWORD(lParam), HIWORD(lParam));

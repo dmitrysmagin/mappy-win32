@@ -32,7 +32,8 @@ extern int blockgapx, blockgapy;
 extern unsigned char transred, transgreen, transblue;
 /* mapwin.c settings */
 extern int objplace, objshow, sortobjects, objlayeruser, zoomdiv;
-extern int showuser;
+extern int showuser, megetaobjpos;
+extern short int curobjsel;
 extern char objlabels[16][64];
 
 static F14Obj objclip;
@@ -1067,64 +1068,141 @@ static int OE_PickRegion(HWND hwnd, int imgidx, int * x, int * y, int * w, int *
     return 1;
 }
 
-INT_PTR CALLBACK DIAObjectPropsProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+static void OE_SyncSel(int idx)
+{
+    F14_SetCurObject(idx);
+    if (F14_GetObject(idx) != NULL)
+        curobjsel = (short int) idx;
+    else
+        curobjsel = -1;
+}
+
+static int OE_PropsFill(HWND hwndDlg, int edidx)
+{
+    const F14Obj * o;
     char txt[300];
+    int i, kind;
+
+    oe_filling = 1;
+    LuaRunObjectProp(edidx);
+    o = F14_GetObject(edidx);
+    if (o == NULL) {
+        oe_filling = 0;
+        return 0;
+    }
+    OE_SetDlgInt(hwndDlg, IDC_OBJX, o->xpos);
+    OE_SetDlgInt(hwndDlg, IDC_OBJY, o->ypos);
+    oe_edgfx = o->gfxid;
+    if (oe_edgfx < 1 && numblockgfx > 1) oe_edgfx = 1;
+    if (o->gfxid > 0) kind = IDC_OBJKIND_TILE;
+    else if (o->tileid < 0) kind = IDC_OBJKIND_AREA;
+    else kind = IDC_OBJKIND_FILE;
+    CheckRadioButton(hwndDlg, IDC_OBJKIND_AREA, IDC_OBJKIND_FILE, kind);
+    OE_FillFileCombo(hwndDlg, o->tileid);
+    OE_SetDlgInt(hwndDlg, IDC_OBJGXOFF, o->gxoff);
+    OE_SetDlgInt(hwndDlg, IDC_OBJGYOFF, o->gyoff);
+    OE_SetDlgInt(hwndDlg, IDC_OBJGW, o->gwidth);
+    OE_SetDlgInt(hwndDlg, IDC_OBJGH, o->gheight);
+    OE_SetDlgInt(hwndDlg, IDC_OBJHX, o->ghandlexoff);
+    OE_SetDlgInt(hwndDlg, IDC_OBJHY, o->ghandleyoff);
+    CheckDlgButton(hwndDlg, IDC_OBJSHOW, o->show ? 1 : 0);
+    {
+        const int * u = &o->user1;
+        int ids[7] = { IDC_OBJUSER1, IDC_OBJUSER2, IDC_OBJUSER3,
+            IDC_OBJUSER4, IDC_OBJUSER5, IDC_OBJUSER6, IDC_OBJUSER7 };
+        for (i = 0; i < 7; i++) OE_SetDlgInt(hwndDlg, ids[i], u[i]);
+    }
+    {
+        int ids[8] = { IDC_OBJF1, IDC_OBJF2, IDC_OBJF3, IDC_OBJF4,
+            IDC_OBJF5, IDC_OBJF6, IDC_OBJF7, IDC_OBJF8 };
+        for (i = 0; i < 8; i++) {
+            CheckDlgButton(hwndDlg, ids[i], (o->flags >> i) & 1);
+            SetDlgItemText(hwndDlg, ids[i], objlabels[8 + i]);
+        }
+    }
+    SetDlgItemText(hwndDlg, IDC_OBJLBLMAIN, objlabels[0]);
+    sprintf(txt, "%06X", OE_BorderCol(edidx));
+    SetWindowText(GetDlgItem(hwndDlg, IDC_OBJCOL), txt);
+    if (objlayeruser >= 1 && objlayeruser <= 7) {
+        const int * u = &o->user1;
+        OE_SetDlgInt(hwndDlg, IDC_OBJLAYER, u[objlayeruser - 1]);
+    } else SetDlgItemText(hwndDlg, IDC_OBJLAYER, "0");
+    sprintf(txt, "Object %d", edidx);
+    SetWindowText(hwndDlg, txt);
+    OE_FillStrCombo(hwndDlg, o);
+    OE_InitPropSpins(hwndDlg);
+    OE_PropsShowMode(hwndDlg, OE_PropsGetMode(hwndDlg));
+    oe_filling = 0;
+    return 1;
+}
+
+static int OE_PropsApply(HWND hwndDlg, int edidx)
+{
+    F14Obj o;
+    char tb[300];
+    int i, mode, gsel;
+
+    if (F14_GetObject(edidx) == NULL) return 0;
+    o = *F14_GetObject(edidx);
+    o.xpos = OE_GetDlgInt(hwndDlg, IDC_OBJX);
+    o.ypos = OE_GetDlgInt(hwndDlg, IDC_OBJY);
+    o.gxoff = OE_GetDlgInt(hwndDlg, IDC_OBJGXOFF);
+    o.gyoff = OE_GetDlgInt(hwndDlg, IDC_OBJGYOFF);
+    o.gwidth = OE_GetDlgInt(hwndDlg, IDC_OBJGW);
+    o.gheight = OE_GetDlgInt(hwndDlg, IDC_OBJGH);
+    o.ghandlexoff = OE_GetDlgInt(hwndDlg, IDC_OBJHX);
+    o.ghandleyoff = OE_GetDlgInt(hwndDlg, IDC_OBJHY);
+    o.show = IsDlgButtonChecked(hwndDlg, IDC_OBJSHOW) ? 1 : 0;
+    mode = OE_PropsGetMode(hwndDlg);
+    if (mode == OE_MODE_AREA) {
+        o.gfxid = 0;
+        o.tileid = -1;
+    } else if (mode == OE_MODE_TILE) {
+        o.gfxid = oe_edgfx;
+        if (o.gfxid < 1) o.gfxid = (numblockgfx > 1) ? 1 : 0;
+        o.tileid = -1;
+        o.gwidth = blockwidth;
+        o.gheight = blockheight;
+    } else {
+        o.gfxid = 0;
+        gsel = (int) SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_GETCURSEL, 0, 0);
+        o.tileid = (F14_NumImages() > 0 && gsel >= 0) ? gsel : 0;
+    }
+    {
+        int * u = &o.user1;
+        int ids[7] = { IDC_OBJUSER1, IDC_OBJUSER2, IDC_OBJUSER3,
+            IDC_OBJUSER4, IDC_OBJUSER5, IDC_OBJUSER6, IDC_OBJUSER7 };
+        for (i = 0; i < 7; i++) u[i] = OE_GetDlgInt(hwndDlg, ids[i]);
+    }
+    {
+        int ids[8] = { IDC_OBJF1, IDC_OBJF2, IDC_OBJF3, IDC_OBJF4,
+            IDC_OBJF5, IDC_OBJF6, IDC_OBJF7, IDC_OBJF8 };
+        o.flags &= ~0xFF;
+        for (i = 0; i < 8; i++) {
+            if (IsDlgButtonChecked(hwndDlg, ids[i])) o.flags |= (1 << i);
+        }
+    }
+    GetWindowText(GetDlgItem(hwndDlg, IDC_OBJCOL), tb, 80);
+    OE_SetBorderCol(&o, strtol(tb, NULL, 16));
+    if (objlayeruser >= 1 && objlayeruser <= 7) {
+        int * u = &o.user1;
+        u[objlayeruser - 1] = OE_GetDlgInt(hwndDlg, IDC_OBJLAYER);
+    }
+    OE_ApplyStrCombo(hwndDlg, &o);
+    F14_SetObject(edidx, &o);
+    mapaltered = 1;
+    return 1;
+}
+
+INT_PTR CALLBACK DIAObjectPropsProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     static int edidx = 0;
-    int i, mode;
+    int mode;
 
     switch (msg) {
     case WM_INITDIALOG:
         edidx = (int) lParam;
-        oe_filling = 1;
-        LuaRunObjectProp(edidx);
-        {
-            const F14Obj * o = F14_GetObject(edidx);
-            int kind;
-            if (o == NULL) { EndDialog(hwndDlg, -1L); break; }
-            OE_SetDlgInt(hwndDlg, IDC_OBJX, o->xpos);
-            OE_SetDlgInt(hwndDlg, IDC_OBJY, o->ypos);
-            oe_edgfx = o->gfxid;
-            if (oe_edgfx < 1 && numblockgfx > 1) oe_edgfx = 1;
-            if (o->gfxid > 0) kind = IDC_OBJKIND_TILE;
-            else if (o->tileid < 0) kind = IDC_OBJKIND_AREA;
-            else kind = IDC_OBJKIND_FILE;
-            CheckRadioButton(hwndDlg, IDC_OBJKIND_AREA, IDC_OBJKIND_FILE, kind);
-            OE_FillFileCombo(hwndDlg, o->tileid);
-            OE_SetDlgInt(hwndDlg, IDC_OBJGXOFF, o->gxoff);
-            OE_SetDlgInt(hwndDlg, IDC_OBJGYOFF, o->gyoff);
-            OE_SetDlgInt(hwndDlg, IDC_OBJGW, o->gwidth);
-            OE_SetDlgInt(hwndDlg, IDC_OBJGH, o->gheight);
-            OE_SetDlgInt(hwndDlg, IDC_OBJHX, o->ghandlexoff);
-            OE_SetDlgInt(hwndDlg, IDC_OBJHY, o->ghandleyoff);
-            CheckDlgButton(hwndDlg, IDC_OBJSHOW, o->show ? 1 : 0);
-            {
-                const int * u = &o->user1;
-                int ids[7] = { IDC_OBJUSER1, IDC_OBJUSER2, IDC_OBJUSER3,
-                    IDC_OBJUSER4, IDC_OBJUSER5, IDC_OBJUSER6, IDC_OBJUSER7 };
-                for (i = 0; i < 7; i++) OE_SetDlgInt(hwndDlg, ids[i], u[i]);
-            }
-            {
-                int ids[8] = { IDC_OBJF1, IDC_OBJF2, IDC_OBJF3, IDC_OBJF4,
-                    IDC_OBJF5, IDC_OBJF6, IDC_OBJF7, IDC_OBJF8 };
-                for (i = 0; i < 8; i++) {
-                    CheckDlgButton(hwndDlg, ids[i], (o->flags >> i) & 1);
-                    SetDlgItemText(hwndDlg, ids[i], objlabels[8 + i]);
-                }
-            }
-            SetDlgItemText(hwndDlg, IDC_OBJLBLMAIN, objlabels[0]);
-            sprintf(txt, "%06X", OE_BorderCol(edidx));
-            SetWindowText(GetDlgItem(hwndDlg, IDC_OBJCOL), txt);
-            if (objlayeruser >= 1 && objlayeruser <= 7) {
-                const int * u = &o->user1;
-                OE_SetDlgInt(hwndDlg, IDC_OBJLAYER, u[objlayeruser - 1]);
-            } else SetDlgItemText(hwndDlg, IDC_OBJLAYER, "0");
-            sprintf(txt, "Object %d", edidx);
-            SetWindowText(hwndDlg, txt);
-            OE_FillStrCombo(hwndDlg, o);
-            OE_InitPropSpins(hwndDlg);
-            OE_PropsShowMode(hwndDlg, OE_PropsGetMode(hwndDlg));
-        }
-        oe_filling = 0;
+        if (!OE_PropsFill(hwndDlg, edidx))
+            EndDialog(hwndDlg, -1L);
         break;
     case WM_DRAWITEM:
         if (wParam == IDC_OBJGFXPREV)
@@ -1203,72 +1281,105 @@ INT_PTR CALLBACK DIAObjectPropsProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
                 OE_PropsShowMode(hwndDlg, OE_PropsGetMode(hwndDlg));
                 break;
             }
-        case IDC_OBJPREV:
-        case IDC_OBJNEXT:
-        case IDOK: {
-                F14Obj o;
-                char tb[300];
-                int gsel;
-                if (F14_GetObject(edidx) == NULL) {
+        case IDC_OBJGRAB:
+            if (!OE_PropsApply(hwndDlg, edidx)) {
+                SendMessage(hwndDlg, WM_CLOSE, 0, -1L);
+                break;
+            }
+            OE_SyncSel(edidx);
+            SendMessage(hwndDlg, WM_CLOSE, 0, 3L);
+            break;
+        case IDC_OBJPROPNEW: {
+                int ni;
+                if (!OE_PropsApply(hwndDlg, edidx)) {
                     SendMessage(hwndDlg, WM_CLOSE, 0, -1L);
                     break;
                 }
-                o = *F14_GetObject(edidx);
-                o.xpos = OE_GetDlgInt(hwndDlg, IDC_OBJX);
-                o.ypos = OE_GetDlgInt(hwndDlg, IDC_OBJY);
-                o.gxoff = OE_GetDlgInt(hwndDlg, IDC_OBJGXOFF);
-                o.gyoff = OE_GetDlgInt(hwndDlg, IDC_OBJGYOFF);
-                o.gwidth = OE_GetDlgInt(hwndDlg, IDC_OBJGW);
-                o.gheight = OE_GetDlgInt(hwndDlg, IDC_OBJGH);
-                o.ghandlexoff = OE_GetDlgInt(hwndDlg, IDC_OBJHX);
-                o.ghandleyoff = OE_GetDlgInt(hwndDlg, IDC_OBJHY);
-                o.show = IsDlgButtonChecked(hwndDlg, IDC_OBJSHOW) ? 1 : 0;
-                mode = OE_PropsGetMode(hwndDlg);
-                if (mode == OE_MODE_AREA) {
-                    o.gfxid = 0;
-                    o.tileid = -1;
-                } else if (mode == OE_MODE_TILE) {
-                    o.gfxid = oe_edgfx;
-                    if (o.gfxid < 1) o.gfxid = (numblockgfx > 1) ? 1 : 0;
-                    o.tileid = -1;
-                    o.gwidth = blockwidth;
-                    o.gheight = blockheight;
-                } else {
-                    o.gfxid = 0;
-                    gsel = (int) SendDlgItemMessage(hwndDlg, IDC_OBJFILE, CB_GETCURSEL, 0, 0);
-                    o.tileid = (F14_NumImages() > 0 && gsel >= 0) ? gsel : 0;
+                ni = OE_NewDefault();
+                if (ni < 0) {
+                    MessageBox(hwndDlg, "Can't create object (max reached).",
+                        "Object", MB_OK | MB_ICONINFORMATION);
+                    break;
                 }
-                {
-                    int * u = &o.user1;
-                    int ids[7] = { IDC_OBJUSER1, IDC_OBJUSER2, IDC_OBJUSER3,
-                        IDC_OBJUSER4, IDC_OBJUSER5, IDC_OBJUSER6, IDC_OBJUSER7 };
-                    for (i = 0; i < 7; i++) u[i] = OE_GetDlgInt(hwndDlg, ids[i]);
-                }
-                {
-                    int ids[8] = { IDC_OBJF1, IDC_OBJF2, IDC_OBJF3, IDC_OBJF4,
-                        IDC_OBJF5, IDC_OBJF6, IDC_OBJF7, IDC_OBJF8 };
-                    o.flags &= ~0xFF;
-                    for (i = 0; i < 8; i++) {
-                        if (IsDlgButtonChecked(hwndDlg, ids[i])) o.flags |= (1 << i);
-                    }
-                }
-                GetWindowText(GetDlgItem(hwndDlg, IDC_OBJCOL), tb, 80);
-                OE_SetBorderCol(&o, strtol(tb, NULL, 16));
-                if (objlayeruser >= 1 && objlayeruser <= 7) {
-                    int * u = &o.user1;
-                    u[objlayeruser - 1] = OE_GetDlgInt(hwndDlg, IDC_OBJLAYER);
-                }
-                OE_ApplyStrCombo(hwndDlg, &o);
-                F14_SetObject(edidx, &o);
-                mapaltered = 1;
-                if (LOWORD(wParam) == IDC_OBJPREV)
-                    SendMessage(hwndDlg, WM_CLOSE, 0, 1L);
-                else if (LOWORD(wParam) == IDC_OBJNEXT)
-                    SendMessage(hwndDlg, WM_CLOSE, 0, 2L);
-                else
-                    SendMessage(hwndDlg, WM_CLOSE, 0, 0L);
+                edidx = ni;
+                OE_SyncSel(edidx);
+                OE_PropsFill(hwndDlg, edidx);
                 break;
             }
+        case IDC_OBJPROPDUP: {
+                const F14Obj * src;
+                F14Obj o;
+                int ni, bw, bh;
+                if (!OE_PropsApply(hwndDlg, edidx)) {
+                    SendMessage(hwndDlg, WM_CLOSE, 0, -1L);
+                    break;
+                }
+                src = F14_GetObject(edidx);
+                if (src == NULL) break;
+                ni = F14_NewObject();
+                if (ni < 0) {
+                    MessageBox(hwndDlg, "Can't duplicate object (max reached).",
+                        "Object", MB_OK | MB_ICONINFORMATION);
+                    break;
+                }
+                o = *src;
+                bw = blockwidth > 0 ? blockwidth : 16;
+                bh = blockheight > 0 ? blockheight : 16;
+                o.xpos += bw;
+                o.ypos += bh;
+                F14_SetObject(ni, &o);
+                F14_SetCurObject(ni);
+                mapaltered = 1;
+                edidx = ni;
+                OE_SyncSel(edidx);
+                OE_PropsFill(hwndDlg, edidx);
+                break;
+            }
+        case IDC_OBJPROPDEL:
+            if (MessageBox(hwndDlg, "Delete this object?", "Object",
+                MB_OKCANCEL | MB_ICONQUESTION) != IDOK)
+                break;
+            F14_DeleteObject(edidx);
+            mapaltered = 1;
+            if (F14_NumObjects() <= 0) {
+                curobjsel = -1;
+                SendMessage(hwndDlg, WM_CLOSE, 0, 0L);
+                break;
+            }
+            if (edidx >= F14_NumObjects())
+                edidx = F14_NumObjects() - 1;
+            OE_SyncSel(edidx);
+            OE_PropsFill(hwndDlg, edidx);
+            break;
+        case IDC_OBJPREV:
+        case IDC_OBJNEXT: {
+                int n, ni;
+                if (!OE_PropsApply(hwndDlg, edidx)) {
+                    SendMessage(hwndDlg, WM_CLOSE, 0, -1L);
+                    break;
+                }
+                n = F14_NumObjects();
+                if (n <= 0) {
+                    SendMessage(hwndDlg, WM_CLOSE, 0, 0L);
+                    break;
+                }
+                if (LOWORD(wParam) == IDC_OBJPREV)
+                    ni = (edidx > 0) ? edidx - 1 : n - 1;
+                else
+                    ni = (edidx < n - 1) ? edidx + 1 : 0;
+                edidx = ni;
+                OE_SyncSel(edidx);
+                OE_PropsFill(hwndDlg, edidx);
+                break;
+            }
+        case IDOK:
+            if (!OE_PropsApply(hwndDlg, edidx)) {
+                SendMessage(hwndDlg, WM_CLOSE, 0, -1L);
+                break;
+            }
+            OE_SyncSel(edidx);
+            SendMessage(hwndDlg, WM_CLOSE, 0, 0L);
+            break;
         case IDCANCEL:
             SendMessage(hwndDlg, WM_CLOSE, 0, -1L);
             break;
@@ -1284,17 +1395,19 @@ INT_PTR CALLBACK DIAObjectPropsProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 }
 
 void DIAObjectProps(HWND hwnd, int idx) {
-    int i;
+    int r;
 
-    i = 1;
-    while (i) {
-        if (F14_GetObject(idx) == NULL) break;
-        i = DialogBoxParam(hInstance, (LPCSTR) "D_OBJECT", hwnd, AsDlgProc(DIAObjectPropsProc), (LPARAM) idx);
-        if (i == 1) { if (idx > 0) idx--; else i = 0; }
-        else if (i == 2) { if (idx < F14_NumObjects() - 1) idx++; else i = 0; }
-        else i = 0; /* OK / Cancel / close — do not reopen */
+    if (F14_GetObject(idx) == NULL) return;
+    OE_SyncSel(idx);
+    r = (int) DialogBoxParam(hInstance, (LPCSTR) "D_OBJECT", hwnd,
+        AsDlgProc(DIAObjectPropsProc), (LPARAM) idx);
+    if (r == 3) {
+        megetaobjpos = 1;
+        MessageBox(hwnd,
+            "Click the map to set this object's position. Hold Shift to snap to tiles.",
+            "Grab object position", MB_OK | MB_ICONINFORMATION);
     }
-    return;
+    InvalidateAll();
 }
 
 /* ---------------- object manager ("Objects (%d/%d)") ---------------- */
